@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/sajdakabir/truepassword"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
