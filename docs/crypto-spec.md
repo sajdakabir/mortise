@@ -236,11 +236,29 @@ concatenated with other text. The Tier-2 pattern pass is the backstop.
 
 ## 10. Unresolved
 
-- Passkey (WebAuthn) private keys: reserve the item-schema slot in M1; mechanism
-  deferred. Do not defer the schema — retrofitting the item model later is
-  expensive.
-- Argon2 parameters need measuring on the oldest Mac we intend to support before
-  they are frozen.
+- Passkey (WebAuthn) private keys: mechanism deferred. Note that there is no
+  item schema *in this crate* to reserve a slot in — payloads are opaque bytes
+  here by design (§5.1), so the schema question lands in M2 with the vault
+  layer, not M1. It still must not slip past M2: retrofitting the item model
+  later is expensive.
+- **Argon2 parameters: measured, not yet frozen.** Unlock cost (password stretch
+  + MUK derivation), best of 3, release build, Apple M4:
+
+  | Parameters | Unlock |
+  |---|---|
+  | OWASP floor — 19 MiB, t=2, p=1 | 13.5 ms |
+  | Current default — 64 MiB, t=3, p=4 | 69.5 ms |
+  | 128 MiB, t=4, p=4 | 197 ms |
+
+  69.5 ms is imperceptible, which means the current default is leaving offline
+  resistance (A4) on the table. A password manager should be spending closer to
+  half a second on its *slowest* supported machine.
+
+  The gap in this data is that an M4 is the fastest Apple Silicon there is. An
+  older Intel Mac is plausibly 3–5x slower, which would put 128 MiB / t=4 in the
+  0.6–1 s range there — an estimate, not a measurement. Re-run
+  `cargo run --release --example bench_kdf` on the oldest target before
+  deciding. Raising the default is a one-constant change plus its pinned test.
 - Whether `AK` in the keychain weakens A4 more than biometric unlock is worth.
   Measure the real-world threat before deciding; default to storing it, since a
   user who disables biometrics gets the stronger posture anyway.
