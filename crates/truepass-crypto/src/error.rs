@@ -32,6 +32,14 @@ pub enum Error {
         got: usize,
     },
 
+    /// A signature did not verify, or was malformed.
+    #[error("signature verification failed")]
+    Signature,
+
+    /// A public or private key was malformed or not on the curve.
+    #[error("invalid key")]
+    InvalidKey,
+
     /// The OS random number generator failed. Not recoverable; do not retry
     /// with a fallback PRNG.
     #[error("OS random number generator unavailable")]

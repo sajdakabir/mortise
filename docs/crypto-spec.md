@@ -19,8 +19,13 @@ document.** If something is needed that is not here, amend this file first.
 | Guard index | HMAC-SHA-256 | |
 | Randomness | OS CSPRNG (`getrandom`) | Never a userspace PRNG for key material |
 
-Rust crates: `argon2`, `hkdf`, `chacha20poly1305`, `ed25519-dalek`, `x25519-dalek`,
-`hpke`, `blake3`, `hmac`, `sha2`, `zeroize`, `secrecy`, `getrandom`.
+Rust crates: `argon2`, `hkdf`, `chacha20poly1305`, `ed25519-dalek`, `hpke`,
+`blake3`, `hmac`, `sha2`, `zeroize`, `subtle`, `getrandom`.
+
+`hpke` supplies the X25519 keypair, so `x25519-dalek` is not a separate
+dependency. `secrecy` is not used either: `SecretBytes<N>` in `secret.rs` covers
+the fixed-size key material this crate handles, with constant-time comparison
+that `secrecy` does not provide.
 
 All `info` strings are prefixed `truepass/v1/` so a future v2 cannot collide.
 
@@ -140,6 +145,11 @@ relay (A1) unable to forge or reorder history.
 
 Merge: last-write-wins per field, ordered by HLC, ties broken by `device_id`.
 
+Deliberately **not** Automerge. A vault needs no collaborative text merging, and
+the dependency works against the "light" goal. The hash-linked signed log gives
+versioning and point-in-time recovery for free — which is exactly the
+Infisical-style feature the dev-secrets layer needs later.
+
 ### 5.1 Canonical encoding
 
 `canonical(...)` is **not** CBOR. This spec originally said "canonical CBOR";
@@ -163,11 +173,6 @@ ever produced over that type.
 
 Payload bytes are opaque to this crate: serialization of item contents belongs
 to the layer above, which keeps the crypto core free of a serde format.
-
-Deliberately **not** Automerge. A vault needs no collaborative text merging, and
-the dependency works against the "light" goal. The hash-linked signed log gives
-versioning and point-in-time recovery for free — which is exactly the
-Infisical-style feature the dev-secrets layer needs later.
 
 ## 6. ACL and revocation
 
