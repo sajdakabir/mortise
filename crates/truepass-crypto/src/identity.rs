@@ -38,7 +38,11 @@ const DEVICE_AAD: &[u8] = b"truepass/v1/device";
 pub struct DeviceId([u8; DEVICE_ID_LEN]);
 
 impl DeviceId {
-    fn from_signing_public(sign_pub: &[u8; 32]) -> Self {
+    /// Derive the device id from an Ed25519 public key.
+    ///
+    /// Public so verifiers can confirm a change's stated author actually
+    /// corresponds to the key that signed it.
+    pub fn from_signing_public(sign_pub: &[u8; 32]) -> Self {
         let digest = blake3::hash(sign_pub);
         let mut id = [0u8; DEVICE_ID_LEN];
         id.copy_from_slice(&digest.as_bytes()[..DEVICE_ID_LEN]);

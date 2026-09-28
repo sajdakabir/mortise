@@ -21,6 +21,7 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod aead;
+pub mod change;
 pub mod encode;
 pub mod error;
 pub mod identity;
