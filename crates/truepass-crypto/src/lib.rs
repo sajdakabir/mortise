@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod acl;
 pub mod aead;
 pub mod change;
 pub mod encode;

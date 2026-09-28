@@ -55,7 +55,7 @@ impl DeviceId {
     }
 
     /// Wrap raw bytes. Only for decoding values produced by this crate.
-    pub fn from_bytes(bytes: [u8; DEVICE_ID_LEN]) -> Self {
+    pub const fn from_bytes(bytes: [u8; DEVICE_ID_LEN]) -> Self {
         Self(bytes)
     }
 }

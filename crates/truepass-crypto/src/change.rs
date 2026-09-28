@@ -86,7 +86,7 @@ impl ChangeId {
     }
 
     /// Wrap raw bytes.
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 }

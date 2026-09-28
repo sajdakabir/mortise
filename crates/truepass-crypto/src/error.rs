@@ -50,6 +50,11 @@ pub enum Error {
         got: u32,
     },
 
+    /// An ACL entry was rejected. The reason is safe to surface: it reflects
+    /// policy, not key material.
+    #[error("acl entry rejected: {0}")]
+    AclRejected(&'static str),
+
     /// The OS random number generator failed. Not recoverable; do not retry
     /// with a fallback PRNG.
     #[error("OS random number generator unavailable")]

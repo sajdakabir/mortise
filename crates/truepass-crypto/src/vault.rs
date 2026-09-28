@@ -35,7 +35,7 @@ impl VaultId {
     }
 
     /// Wrap raw bytes.
-    pub fn from_bytes(bytes: [u8; VAULT_ID_LEN]) -> Self {
+    pub const fn from_bytes(bytes: [u8; VAULT_ID_LEN]) -> Self {
         Self(bytes)
     }
 
