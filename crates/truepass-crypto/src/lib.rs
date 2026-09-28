@@ -25,10 +25,12 @@ pub mod aead;
 pub mod change;
 pub mod encode;
 pub mod error;
+pub mod guard;
 pub mod identity;
 pub mod item;
 pub mod kdf;
 pub mod rand;
+pub mod recovery;
 pub mod secret;
 pub mod vault;
 

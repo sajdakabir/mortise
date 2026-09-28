@@ -55,6 +55,10 @@ pub enum Error {
     #[error("acl entry rejected: {0}")]
     AclRejected(&'static str),
 
+    /// A recovery kit string was malformed or failed its checksum.
+    #[error("recovery kit is not valid")]
+    RecoveryKit,
+
     /// The OS random number generator failed. Not recoverable; do not retry
     /// with a fallback PRNG.
     #[error("OS random number generator unavailable")]
