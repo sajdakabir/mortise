@@ -40,6 +40,16 @@ pub enum Error {
     #[error("invalid key")]
     InvalidKey,
 
+    /// An item was sealed under a different key epoch than the vault key
+    /// supplied. Not an attack: the caller needs the key for that epoch.
+    #[error("epoch mismatch: item is at epoch {expected}, vault key is at {got}")]
+    EpochMismatch {
+        /// Epoch the item was sealed under.
+        expected: u32,
+        /// Epoch of the vault key supplied.
+        got: u32,
+    },
+
     /// The OS random number generator failed. Not recoverable; do not retry
     /// with a fallback PRNG.
     #[error("OS random number generator unavailable")]
