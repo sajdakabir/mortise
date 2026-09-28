@@ -24,9 +24,11 @@ pub mod aead;
 pub mod encode;
 pub mod error;
 pub mod identity;
+pub mod item;
 pub mod kdf;
 pub mod rand;
 pub mod secret;
+pub mod vault;
 
 pub use error::{Error, Result};
 pub use secret::{Key32, Salt16, SecretBytes};
