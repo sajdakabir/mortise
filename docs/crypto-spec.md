@@ -93,7 +93,7 @@ per member device d:
 IK     = 256-bit random, per item version
 sealed_IK  = XChaCha20P1305(key = VK@n, nonce = random_24B, pt = IK)
 ciphertext = XChaCha20P1305(key = IK, nonce = random_24B,
-                            pt  = canonical_cbor(payload),
+                            pt  = payload_bytes,
                             aad = vault_id ‖ item_id ‖ version ‖ epoch)
 ```
 
@@ -124,7 +124,7 @@ Every mutation is an immutable, signed, hash-chained change.
 
 ```
 change = {
-  id:          BLAKE3(canonical_cbor(change_without_sig)),
+  id:          BLAKE3(canonical(change_without_sig)),
   vault_id, epoch,
   parents:     [change_id, ...],        # DAG, not a line
   hlc:         hybrid logical clock,
@@ -139,6 +139,30 @@ ACL at that epoch, or whose parents are unknown. This is what makes a hostile
 relay (A1) unable to forge or reorder history.
 
 Merge: last-write-wins per field, ordered by HLC, ties broken by `device_id`.
+
+### 5.1 Canonical encoding
+
+`canonical(...)` is **not** CBOR. This spec originally said "canonical CBOR";
+that was a mistake. `ciborium` gives no canonical-output guarantee — map key
+ordering in particular is unpinned — and for a hash-linked log that is not
+cosmetic: two devices could encode the same logical change to different bytes,
+compute different ids, and fork the DAG permanently.
+
+Instead the encoding removes the failure mode by construction:
+
+- no maps, so there is no key ordering to get wrong
+- no self-description, so there is no tag or length representation to choose
+- fixed field order, written explicitly per type
+- explicit `u32` length prefixes, so concatenation is unambiguous
+- fixed-width big-endian integers
+- a leading one-byte type tag, so a signature over one struct can never be
+  replayed as a signature over another
+
+Type tags are permanent. Renumbering one silently invalidates every signature
+ever produced over that type.
+
+Payload bytes are opaque to this crate: serialization of item contents belongs
+to the layer above, which keeps the crypto core free of a serde format.
 
 Deliberately **not** Automerge. A vault needs no collaborative text merging, and
 the dependency works against the "light" goal. The hash-linked signed log gives
