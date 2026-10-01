@@ -4320,14 +4320,18 @@ dependencies = [
 name = "truepass-app"
 version = "0.1.0"
 dependencies = [
+ "hmac",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "subtle",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
  "thiserror 2.0.21",
  "truepass-crypto",
  "truepass-macos",
+ "truepass-proxy",
  "truepass-vault",
  "zeroize",
 ]
@@ -4363,6 +4367,13 @@ dependencies = [
  "security-framework-sys",
  "thiserror 2.0.21",
  "zeroize",
+]
+
+[[package]]
+name = "truepass-proxy"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
