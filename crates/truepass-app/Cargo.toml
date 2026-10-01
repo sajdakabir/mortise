@@ -1,0 +1,26 @@
+[package]
+name = "truepass-app"
+version = "0.1.0"
+description = "TruePassword desktop app"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# Tauri convention: the app lives in a lib so mobile targets can reuse it.
+name = "truepass_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+truepass-crypto = { path = "../truepass-crypto" }
+truepass-vault = { path = "../truepass-vault" }
+tauri = { version = "2.12.1", features = [] }
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zeroize = "1"
