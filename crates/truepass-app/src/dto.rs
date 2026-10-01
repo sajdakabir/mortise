@@ -88,6 +88,10 @@ pub struct VaultStatus {
     pub searchable: bool,
     /// Live item count, available while locked.
     pub item_count: u32,
+    /// Whether the account key is in the keychain, so only a password is needed.
+    pub account_key_remembered: bool,
+    /// Whether Touch ID unlock is set up.
+    pub biometric_enabled: bool,
 }
 
 /// Returned once, on vault creation.

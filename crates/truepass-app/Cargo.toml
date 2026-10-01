@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 truepass-crypto = { path = "../truepass-crypto" }
 truepass-vault = { path = "../truepass-vault" }
+truepass-macos = { path = "../truepass-macos" }
 tauri = { version = "2.12.1", features = [] }
 tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }

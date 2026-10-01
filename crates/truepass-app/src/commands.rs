@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use tauri::State;
+use tauri::{Manager, State};
 use truepass_crypto::generate::{PasswordSpec, password};
 use truepass_crypto::kdf::Argon2Params;
 use truepass_crypto::recovery;
@@ -24,6 +24,7 @@ use zeroize::Zeroizing;
 
 use crate::dto::{ItemRow, MetaInput, NewVault, VaultStatus, id_from_hex};
 use crate::error::{CmdError, CmdResult};
+use crate::keys;
 use crate::state::AppState;
 
 /// How long a copied secret stays on the clipboard.
@@ -33,6 +34,9 @@ const CLIPBOARD_CLEAR_AFTER: Duration = Duration::from_secs(30);
 #[tauri::command]
 pub fn status(state: State<'_, AppState>) -> VaultStatus {
     let exists = state.vault_exists();
+    let account_key_remembered = keys::account_key_remembered();
+    let biometric_enabled = keys::biometric_enabled();
+
     state.with_vault(|vault| match vault {
         Some(v) => VaultStatus {
             exists: true,
@@ -41,12 +45,16 @@ pub fn status(state: State<'_, AppState>) -> VaultStatus {
             // but not a cold start. The UI needs to tell those apart.
             searchable: v.search("").is_ok(),
             item_count: v.item_count().unwrap_or(0),
+            account_key_remembered,
+            biometric_enabled,
         },
         None => VaultStatus {
             exists,
             unlocked: false,
             searchable: false,
             item_count: 0,
+            account_key_remembered,
+            biometric_enabled,
         },
     })
 }
@@ -79,27 +87,50 @@ pub fn create_vault(state: State<'_, AppState>, master_password: String) -> CmdR
         Argon2Params::default(),
     )?;
     let kit = recovery::encode(&account_key);
+
+    // Remember the account key immediately, so the very first unlock already
+    // asks for the password alone. A failure here is not fatal — the user
+    // still has the recovery key on screen — so it is logged, not surfaced.
+    if let Err(e) = keys::remember_account_key(&account_key) {
+        eprintln!("truepass: could not remember the account key: {e}");
+    }
+
     state.install(vault);
     state.touch();
 
     Ok(NewVault { recovery_kit: kit })
 }
 
-/// Unlock with the master password and recovery kit.
+/// Unlock with the master password.
 ///
-/// Requiring the kit on every unlock is a deliberate M3 limitation, not the
-/// intended flow. Spec §2.1 puts the account key in the macOS keychain behind
-/// an access-control ACL so only the password — or Touch ID — is needed. That
-/// is M4 work, and until then the honest option is to ask for it rather than
-/// stash it somewhere insecure.
+/// `recovery_kit` is only needed when the account key is not in this Mac's
+/// keychain — a fresh install, or after the user chose to forget it. When one
+/// is supplied it is remembered, so this is the last time they have to type it.
 #[tauri::command]
 pub fn unlock(
     state: State<'_, AppState>,
     master_password: String,
-    recovery_kit: String,
+    recovery_kit: Option<String>,
 ) -> CmdResult<VaultStatus> {
-    let account_key = recovery::decode(&recovery_kit)
-        .map_err(|_| CmdError::bad_request("That recovery key is not valid."))?;
+    let account_key = match recovery_kit
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+    {
+        Some(kit) => {
+            let key = recovery::decode(kit)
+                .map_err(|_| CmdError::bad_request("That recovery key is not valid."))?;
+            if let Err(e) = keys::remember_account_key(&key) {
+                eprintln!("truepass: could not remember the account key: {e}");
+            }
+            key
+        }
+        None => keys::recall_account_key()
+            .map_err(CmdError::from)?
+            .ok_or_else(|| {
+                CmdError::bad_request("Enter your recovery key — it is not saved on this Mac.")
+            })?,
+    };
 
     state.with_vault(|vault| {
         let v = vault.ok_or_else(CmdError::no_vault)?;
@@ -121,7 +152,11 @@ pub fn lock(state: State<'_, AppState>) -> VaultStatus {
     status(state)
 }
 
-/// Sign out: lock and close search too.
+/// Sign out: lock, close search, and forget everything in the keychain.
+///
+/// Deliberately heavier than [`lock`]. Someone signing out on a shared or
+/// handed-on Mac expects nothing of theirs to remain, and leaving the account
+/// key behind would quietly defeat that.
 #[tauri::command]
 pub fn sign_out(state: State<'_, AppState>) -> VaultStatus {
     state.with_vault(|vault| {
@@ -129,7 +164,56 @@ pub fn sign_out(state: State<'_, AppState>) -> VaultStatus {
             v.lock_fully();
         }
     });
+    keys::forget_everything();
     status(state)
+}
+
+/// Unlock using Touch ID or the device passcode.
+///
+/// Async, and the keychain read runs on a blocking thread: the prompt is modal
+/// and would deadlock the UI thread if it ran there.
+#[tauri::command]
+pub async fn unlock_biometric(app: tauri::AppHandle) -> CmdResult<VaultStatus> {
+    let token = tauri::async_runtime::spawn_blocking(keys::biometric_token)
+        .await
+        .map_err(|_| CmdError::bad_request("Authentication was interrupted."))?
+        .map_err(CmdError::from)?
+        .ok_or_else(|| CmdError::bad_request("Touch ID unlock is not set up on this Mac."))?;
+
+    let state = app.state::<AppState>();
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(CmdError::no_vault)?;
+        v.unlock_with_token(&token)?;
+        Ok::<(), CmdError>(())
+    })?;
+    state.touch();
+    Ok(status(state))
+}
+
+/// Turn biometric unlock on or off.
+///
+/// Enabling requires the vault to be unlocked: the token is minted from live
+/// key material, so there is no way to set this up without having entered the
+/// master password first.
+#[tauri::command]
+pub fn set_biometric(state: State<'_, AppState>, enabled: bool) -> CmdResult<VaultStatus> {
+    if enabled {
+        let token = state.with_vault(|vault| {
+            let v = vault.ok_or_else(CmdError::no_vault)?;
+            Ok::<_, CmdError>(v.unlock_token()?)
+        })?;
+        keys::enable_biometric(&token).map_err(CmdError::from)?;
+    } else {
+        keys::disable_biometric().map_err(CmdError::from)?;
+    }
+    Ok(status(state))
+}
+
+/// Forget the saved account key, so the recovery key is needed again.
+#[tauri::command]
+pub fn forget_account_key(state: State<'_, AppState>) -> CmdResult<VaultStatus> {
+    keys::forget_account_key().map_err(CmdError::from)?;
+    Ok(status(state))
 }
 
 /// Search items. Works while locked.

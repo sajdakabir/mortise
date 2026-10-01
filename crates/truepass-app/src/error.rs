@@ -68,5 +68,29 @@ impl From<truepass_crypto::Error> for CmdError {
     }
 }
 
+impl From<truepass_macos::Error> for CmdError {
+    fn from(e: truepass_macos::Error) -> Self {
+        use truepass_macos::Error as E;
+        match e {
+            // Not a failure as far as the user is concerned — they dismissed a
+            // prompt. The UI should quietly return to the lock screen.
+            E::Cancelled => Self::new("cancelled", "Authentication was cancelled."),
+            E::AuthFailed => Self::new("auth_failed", "Authentication failed."),
+            E::RequiresSignedApp => Self::new(
+                "requires_signed_app",
+                "Touch ID needs a signed build of TruePassword. It is unavailable in this development build.",
+            ),
+            E::NotAvailable => Self::new(
+                "biometrics_unavailable",
+                "This Mac cannot use Touch ID or a device passcode for this.",
+            ),
+            other => {
+                eprintln!("truepass: keychain error: {other}");
+                Self::new("internal", "Could not reach the keychain.")
+            }
+        }
+    }
+}
+
 /// Command result alias.
 pub type CmdResult<T> = Result<T, CmdError>;

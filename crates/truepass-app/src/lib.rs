@@ -10,6 +10,7 @@
 pub mod commands;
 pub mod dto;
 pub mod error;
+pub mod keys;
 pub mod state;
 
 use tauri::Manager;
@@ -52,6 +53,9 @@ pub fn run() {
             commands::unlock,
             commands::lock,
             commands::sign_out,
+            commands::unlock_biometric,
+            commands::set_biometric,
+            commands::forget_account_key,
             commands::search,
             commands::reveal,
             commands::save_item,
