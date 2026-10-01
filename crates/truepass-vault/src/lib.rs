@@ -20,4 +20,4 @@ pub mod vault;
 pub use error::{Error, Result};
 pub use items::ItemSummary;
 pub use model::{ItemKind, ItemMeta, ItemPayload};
-pub use vault::{Vault, VaultMeta};
+pub use vault::{UnlockToken, Vault, VaultMeta};

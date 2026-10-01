@@ -433,3 +433,69 @@ fn vault_metadata_survives_a_reopen() {
     assert_eq!(reopened.meta(), &before);
     assert_eq!(reopened.meta().params, FAST);
 }
+
+// --- unlock tokens ---
+
+#[test]
+fn an_unlock_token_opens_the_vault_without_the_password() {
+    let mut f = Fixture::new();
+    let (meta, payload) = login("GitHub");
+    let id = f.vault.create_item(&meta, &payload).unwrap();
+
+    let token = f.vault.unlock_token().unwrap();
+    f.vault.lock_fully();
+    assert!(matches!(f.vault.reveal(id), Err(Error::Locked)));
+
+    f.vault.unlock_with_token(&token).unwrap();
+    assert!(f.vault.is_unlocked());
+    assert_eq!(f.vault.reveal(id).unwrap(), payload);
+    assert_eq!(f.vault.search("github").unwrap().len(), 1);
+}
+
+/// A token can only be minted from an unlocked vault, so there is no path to
+/// one that skips the master password entirely.
+#[test]
+fn a_token_cannot_be_minted_while_locked() {
+    let mut f = Fixture::new();
+    f.relock();
+    assert!(matches!(f.vault.unlock_token(), Err(Error::Locked)));
+}
+
+#[test]
+fn a_token_survives_a_reopen_from_disk() {
+    let mut f = Fixture::new();
+    let (meta, payload) = login("GitHub");
+    let id = f.vault.create_item(&meta, &payload).unwrap();
+    let token = f.vault.unlock_token().unwrap();
+
+    let mut reopened = Vault::open(&f.path).unwrap();
+    assert!(!reopened.is_unlocked());
+    reopened.unlock_with_token(&token).unwrap();
+    assert_eq!(reopened.reveal(id).unwrap(), payload);
+}
+
+/// A token from a different vault must not open this one. Tokens carry no
+/// identifier, so the check is cryptographic: the wrong MUK fails to unwrap
+/// the identity.
+#[test]
+fn a_token_from_another_vault_is_rejected() {
+    let f = Fixture::new();
+    let mut other = Fixture::new();
+
+    let foreign = f.vault.unlock_token().unwrap();
+    other.vault.lock_fully();
+
+    assert!(matches!(
+        other.vault.unlock_with_token(&foreign),
+        Err(Error::WrongCredentials)
+    ));
+    assert!(!other.vault.is_unlocked());
+}
+
+#[test]
+fn a_malformed_token_is_rejected() {
+    use truepass_vault::UnlockToken;
+    assert!(UnlockToken::from_slice(b"too short").is_err());
+    assert!(UnlockToken::from_slice(&[0u8; 33]).is_err());
+    assert!(UnlockToken::from_slice(&[0u8; 32]).is_ok());
+}

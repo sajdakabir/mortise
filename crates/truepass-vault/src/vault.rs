@@ -23,6 +23,36 @@ use truepass_crypto::vault::{Epoch, VaultId, VaultKey, WrappedVaultKey};
 use crate::error::{Error, Result};
 use crate::schema;
 
+/// Material that unlocks a vault without the master password.
+///
+/// # This is as powerful as the master password
+///
+/// It wraps the master unlock key. Anything holding one can open the vault
+/// outright — it is not a weaker, scoped credential, and there is no honest way
+/// to make it one: whatever unlocks the vault *is* the vault.
+///
+/// It exists for exactly one purpose: handing to the macOS keychain under an
+/// access control that requires Touch ID or the device passcode, so the user
+/// can skip typing their password. Storing it anywhere else — a file, a config,
+/// a log, an unprotected keychain item — would reduce the vault's security to
+/// whatever protects that location.
+///
+/// Zeroized on drop, and deliberately not `Clone`, `Debug` or serializable, so
+/// it cannot be copied around or printed by accident.
+pub struct UnlockToken(Key32);
+
+impl UnlockToken {
+    /// The raw bytes, for writing to the keychain.
+    pub fn expose(&self) -> &[u8; 32] {
+        self.0.expose()
+    }
+
+    /// Rebuild from keychain bytes.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self> {
+        Ok(Self(Key32::from_slice(bytes)?))
+    }
+}
+
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> u64 {
     SystemTime::now()
@@ -196,6 +226,11 @@ impl Vault {
 
         let muk = kdf::unlock(password, account_key, &self.meta.salt, self.meta.params)?;
 
+        self.load_keys(muk)
+    }
+
+    /// Load identity, device and vault keys using an already-derived MUK.
+    fn load_keys(&mut self, muk: Key32) -> Result<()> {
         let (_identity_public, identity_wrapped): (Vec<u8>, Vec<u8>) = self
             .conn
             .query_row(
@@ -263,6 +298,28 @@ impl Vault {
     pub fn lock_fully(&mut self) {
         self.unlocked = None;
         self.meta_key = None;
+    }
+
+    /// Produce an unlock token for biometric unlock.
+    ///
+    /// Requires the vault to be unlocked already: the token is derived from
+    /// live key material, so there is no way to mint one without the password
+    /// having been entered at least once. Read [`UnlockToken`] before using
+    /// this — it is as powerful as the master password.
+    pub fn unlock_token(&self) -> Result<UnlockToken> {
+        Ok(UnlockToken(self.unlocked()?.muk.clone()))
+    }
+
+    /// Unlock using a token instead of the master password.
+    ///
+    /// Skips Argon2 entirely, which is the point — the stretching already
+    /// happened when the token was minted. It also means a stolen token is not
+    /// slowed down by cost parameters, which is why it may only ever live
+    /// behind a keychain access control.
+    pub fn unlock_with_token(&mut self, token: &UnlockToken) -> Result<()> {
+        self.lock_fully();
+        let muk = Key32::from_slice(token.expose())?;
+        self.load_keys(muk)
     }
 
     /// This machine's device id. Available while locked.
