@@ -65,6 +65,7 @@ MUK         = HKDF-SHA256(ikm = stretch ‖ AK, salt = S_user,
                           info = "truepass/v1/muk") -> 32 B
 DB_KEY      = HKDF-SHA256(ikm = MUK, info = "truepass/v1/dbkey")   -> 32 B
 scan_key    = HKDF-SHA256(ikm = MUK, info = "truepass/v1/guard-index") -> 32 B
+META_KEY    = HKDF-SHA256(ikm = MUK, info = "truepass/v1/metakey") -> 32 B
 ```
 
 `MUK` is never written to disk. `AK` is written to the macOS keychain with an
@@ -111,17 +112,53 @@ and so rotation is cheap.
 
 ## 4. Local storage
 
-SQLite, encrypted whole-file with SQLCipher under `DB_KEY`. Inside it, each item
-row **still** stores the sealed blob from §3 rather than plaintext.
+Plain SQLite. **Not SQLCipher** — this reverses the original decision; see §4.2.
 
-Two layers, two reasons:
-- SQLCipher protects metadata at rest against A4.
-- Per-item sealing is what lets sync ship rows verbatim and lets sharing work at
-  item granularity. It is not defence-in-depth theatre; it is load-bearing.
+Nothing sensitive is in a plaintext column. Each item carries three encrypted
+blobs, under three different keys, because they have three different jobs:
 
-Item metadata (title, URL, folder, timestamps) is stored **decrypted** inside the
-SQLCipher file, so search works while the vault is locked. Consequence: "locked"
-protects secrets, not metadata, against a live process. Stated in the threat model.
+| Blob | Key | Why that key |
+|---|---|---|
+| `ciphertext` + `sealed_item_key` | item key, wrapped under the vault key | the secret; decrypted one item at a time, on demand |
+| `sealed_meta` | vault key | canonical metadata; syncs, and shared-vault members must be able to read it |
+| `search_cache.sealed` | `META_KEY` (account-scoped) | local cache; must stay readable while locked, must never leave this machine |
+
+Plaintext columns are limited to ids, version and epoch counters, item kind, and
+timestamps.
+
+### 4.1 Why metadata needs two keys
+
+The vault key is dropped on lock and is shared with other vault members. Neither
+property suits a search cache, which has to survive locking (so the menu-bar
+search works without a password prompt) and must never be readable by anyone
+else. So canonical metadata is sealed under the vault key and a local cache is
+sealed under `META_KEY`, derived from the MUK.
+
+The cache is derived data: safe to drop, rebuildable from the canonical blobs on
+the next unlock. That is also the repair path when sync pulls items this device
+has never seen.
+
+Consequence, unchanged from before: **"locked" protects secrets, not metadata**,
+against a process that is still running. Full sign-out drops `META_KEY` too.
+
+### 4.2 Why not SQLCipher
+
+On macOS, SQLCipher means either vendoring OpenSSL into the binary or requiring
+brew's OpenSSL on every build machine. Both work against the explicit "keep it
+light" product goal, and both add a second crypto stack to audit beside the one
+in `truepass-crypto`.
+
+What SQLCipher actually buys is metadata-at-rest encryption, and the table above
+already provides that through the audited XChaCha20-Poly1305 path.
+
+What is given up, stated plainly: the file is not opaque. An attacker holding it
+at rest learns the row count, the table shape, and blob sizes. They do not learn
+titles, URLs, usernames, or any secret. Recorded against A4 in the threat model.
+
+This forecloses nothing. The two layers compose: adding SQLCipher later is one
+`PRAGMA key` and changes no schema. It becomes optional defence-in-depth rather
+than the thing holding the roof up. `DB_KEY` (§2.1) is still derived and
+currently unused, reserved for exactly that.
 
 ## 5. Change log and sync
 

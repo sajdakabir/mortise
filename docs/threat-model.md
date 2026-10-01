@@ -16,9 +16,14 @@ is reviewed and agreed. Every later design decision gets checked against it.
 | Sync metadata (who syncs with whom, when, sizes) | Medium | **Visible to the relay.** Minimized, not eliminated |
 | Agent Guard index | High | In-memory only, HMACs not plaintext |
 
-Note the two deliberate weak points: local metadata is readable when the vault is
-locked (so search works while locked), and the relay learns a social graph. Both
-are conscious trades, not oversights. They must be stated in user-facing docs.
+Note the deliberate weak points, all conscious trades rather than oversights,
+and all of which must be stated in user-facing docs:
+
+1. Metadata is held decrypted in memory while the vault is locked, so search
+   works without a password prompt.
+2. The local database file leaks item counts, blob sizes and timestamps, because
+   it is plain SQLite rather than SQLCipher (spec §4.2).
+3. The relay learns a social graph.
 
 ## 2. Trust boundaries
 
@@ -77,9 +82,14 @@ exposed to us. Accept and document.
 offline guessing.
 **Defence:** Argon2id with high memory cost, **plus** the 256-bit account key. The
 account key is what makes this attack useless — password-only would leave a
-human-chosen secret as the only barrier.
-**Residual:** an attacker with both the vault file *and* the account key is back
-to brute-forcing the master password alone. Keep Argon2 parameters aggressive.
+human-chosen secret as the only barrier. All sensitive fields are individually
+encrypted, so the file yields nothing readable without the keys.
+**Residual, two parts:**
+1. An attacker with both the vault file *and* the account key is back to
+   brute-forcing the master password alone. Keep Argon2 parameters aggressive.
+2. Because the store is plain SQLite rather than SQLCipher (spec §4.2), the file
+   reveals how many items exist, the table shape, and individual blob sizes.
+   Minor, but real, and not something to claim otherwise.
 
 ### A5 — Malicious web page
 **Capability:** full control of page content, scripts, and DOM; may impersonate a
