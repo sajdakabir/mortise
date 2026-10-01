@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use truepass_crypto::kdf::Argon2Params;
 use truepass_crypto::secret::Key32;
-use truepass_vault::{Error, ItemKind, ItemMeta, ItemPayload, Vault};
+use truepass_vault::{Error, ItemMeta, ItemPayload, Vault};
 
 /// Cheap Argon2 so the suite is not dominated by key stretching.
 const FAST: Argon2Params = Argon2Params {
