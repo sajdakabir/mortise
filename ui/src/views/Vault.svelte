@@ -1,16 +1,17 @@
 <script lang="ts">
   import ItemDetail from "../lib/ItemDetail.svelte";
+  import Settings from "./Settings.svelte";
   import ItemEditor from "../lib/ItemEditor.svelte";
   import { ipc } from "../lib/ipc";
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
 
-  let { status, onStatus }:
+  let { status = $bindable(), onStatus }:
     { status: VaultStatus; onStatus: (s: VaultStatus) => void } = $props();
 
   let query = $state("");
   let rows = $state<ItemRow[]>([]);
   let selectedId = $state<string | null>(null);
-  let editing = $state<"none" | "new" | "existing">("none");
+  let editing = $state<"none" | "new" | "existing" | "settings">("none");
   let error = $state("");
 
   const selected = $derived(rows.find((r) => r.id === selectedId) ?? null);
@@ -84,16 +85,21 @@
     </div>
 
     <div class="foot">
-      {#if status.unlocked}
-        <button class="ghost tiny" onclick={lock}>Lock</button>
-      {:else}
-        <span class="locked">Locked — search only</span>
-      {/if}
+      <div class="spread">
+        {#if status.unlocked}
+          <button class="ghost tiny" onclick={lock}>Lock</button>
+        {:else}
+          <span class="locked">Locked — search only</span>
+        {/if}
+        <button class="ghost tiny" onclick={() => (editing = "settings")}>Settings</button>
+      </div>
     </div>
   </aside>
 
   <main>
-    {#if editing !== "none"}
+    {#if editing === "settings"}
+      <Settings {status} onStatus={(s) => (status = s)} onClose={() => (editing = "none")} />
+    {:else if editing !== "none"}
       {#key editing === "existing" ? selected?.id : "new"}
         <ItemEditor
           existing={editing === "existing" ? selected : null}

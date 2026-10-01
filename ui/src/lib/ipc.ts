@@ -24,8 +24,11 @@ export const ipc = {
   status: () => call<VaultStatus>("status"),
   createVault: (masterPassword: string) =>
     call<{ recovery_kit: string }>("create_vault", { masterPassword }),
-  unlock: (masterPassword: string, recoveryKit: string) =>
+  unlock: (masterPassword: string, recoveryKit: string | null) =>
     call<VaultStatus>("unlock", { masterPassword, recoveryKit }),
+  unlockBiometric: () => call<VaultStatus>("unlock_biometric"),
+  setBiometric: (enabled: boolean) => call<VaultStatus>("set_biometric", { enabled }),
+  forgetAccountKey: () => call<VaultStatus>("forget_account_key"),
   lock: () => call<VaultStatus>("lock"),
   signOut: () => call<VaultStatus>("sign_out"),
   search: (query: string) => call<ItemRow[]>("search", { query }),
@@ -61,7 +64,11 @@ const MOCK_ROWS: ItemRow[] = [
   { id: "e".repeat(32), kind: "card", title: "Monzo debit", username: null, urls: [], folder: "Personal", tags: [], updated_at_ms: Date.now() - 1_209_600_000 },
 ];
 
-const mockState = { exists: true, unlocked: true, searchable: true, rows: [...MOCK_ROWS] };
+const mockState = {
+  exists: true, unlocked: true, searchable: true,
+  accountKeyRemembered: true, biometricEnabled: false,
+  rows: [...MOCK_ROWS],
+};
 
 async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const as = <R,>(v: R) => v as unknown as T;
@@ -70,6 +77,8 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
     unlocked: mockState.unlocked,
     searchable: mockState.searchable,
     item_count: mockState.rows.length,
+    account_key_remembered: mockState.accountKeyRemembered,
+    biometric_enabled: mockState.biometricEnabled,
   });
 
   switch (cmd) {
@@ -86,6 +95,16 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       return as(status());
     case "sign_out":
       mockState.unlocked = mockState.searchable = false;
+      mockState.accountKeyRemembered = mockState.biometricEnabled = false;
+      return as(status());
+    case "unlock_biometric":
+      mockState.unlocked = mockState.searchable = true;
+      return as(status());
+    case "set_biometric":
+      mockState.biometricEnabled = Boolean(args.enabled);
+      return as(status());
+    case "forget_account_key":
+      mockState.accountKeyRemembered = false;
       return as(status());
     case "search": {
       const q = String(args.query ?? "").trim().toLowerCase();

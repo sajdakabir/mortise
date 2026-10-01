@@ -41,7 +41,7 @@
   {:else if !status.exists}
     <Setup onDone={refreshStatus} />
   {:else if !status.searchable}
-    <Unlock onUnlocked={refreshStatus} />
+    <Unlock {status} onUnlocked={refreshStatus} />
   {:else}
     <Vault {status} onStatus={(s) => (status = s)} />
   {/if}

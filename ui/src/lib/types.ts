@@ -17,6 +17,10 @@ export interface VaultStatus {
   /** Search works after one unlock, and survives locking. Not the same as `unlocked`. */
   searchable: boolean;
   item_count: number;
+  /** Account key is in the keychain, so unlocking needs only a password. */
+  account_key_remembered: boolean;
+  /** Touch ID unlock is set up. */
+  biometric_enabled: boolean;
 }
 
 export interface MetaInput {
@@ -44,6 +48,10 @@ export interface CmdError {
     | "not_found"
     | "bad_request"
     | "schema_too_new"
+    | "cancelled"
+    | "auth_failed"
+    | "requires_signed_app"
+    | "biometrics_unavailable"
     | "internal";
   message: string;
 }
