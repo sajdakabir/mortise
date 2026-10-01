@@ -108,9 +108,14 @@ fn subkeys_are_domain_separated() {
     let db = kdf::derive_db_key(&muk).unwrap();
     let guard = kdf::derive_guard_key(&muk).unwrap();
 
+    let meta = kdf::derive_meta_key(&muk).unwrap();
+
     assert_ne!(db, guard, "db key and guard key must differ");
+    assert_ne!(db, meta, "db key and meta key must differ");
+    assert_ne!(guard, meta, "guard key and meta key must differ");
     assert_ne!(db, muk, "subkey must not equal the MUK");
     assert_ne!(guard, muk, "subkey must not equal the MUK");
+    assert_ne!(meta, muk, "subkey must not equal the MUK");
 }
 
 #[test]
@@ -123,7 +128,12 @@ fn distinct_info_strings_give_distinct_subkeys() {
 
 #[test]
 fn all_spec_info_strings_carry_the_version_prefix() {
-    for info in [kdf::info::MUK, kdf::info::DB_KEY, kdf::info::GUARD_INDEX] {
+    for info in [
+        kdf::info::MUK,
+        kdf::info::DB_KEY,
+        kdf::info::GUARD_INDEX,
+        kdf::info::META_KEY,
+    ] {
         assert!(
             info.starts_with(b"truepass/v1/"),
             "info string {:?} is missing the truepass/v1/ prefix",

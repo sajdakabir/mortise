@@ -26,6 +26,9 @@ pub mod info {
     pub const DB_KEY: &[u8] = b"truepass/v1/dbkey";
     /// Agent Guard known-secret index key.
     pub const GUARD_INDEX: &[u8] = b"truepass/v1/guard-index";
+    /// Local search-cache key. Account-scoped, unlike the vault key, so the
+    /// cache stays readable while the vault is locked.
+    pub const META_KEY: &[u8] = b"truepass/v1/metakey";
 }
 
 /// Argon2id cost parameters, stored per-vault so they can be raised later
@@ -117,6 +120,16 @@ pub fn derive_db_key(muk: &Key32) -> Result<Key32> {
 /// The HMAC key for the Agent Guard known-secret index.
 pub fn derive_guard_key(muk: &Key32) -> Result<Key32> {
     subkey(muk, info::GUARD_INDEX)
+}
+
+/// The key for the local search cache.
+///
+/// Derived from the MUK rather than the vault key on purpose. Vault keys are
+/// dropped on lock, and shared vaults use a key the other members also hold —
+/// neither works for a cache that must stay readable while locked and must
+/// never leave this machine.
+pub fn derive_meta_key(muk: &Key32) -> Result<Key32> {
+    subkey(muk, info::META_KEY)
 }
 
 /// Generate a fresh 128-bit per-user salt.
