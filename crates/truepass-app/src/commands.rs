@@ -165,6 +165,7 @@ pub fn sign_out(state: State<'_, AppState>) -> VaultStatus {
         }
     });
     keys::forget_everything();
+    crate::browser::associations::clear();
     status(state)
 }
 
@@ -384,6 +385,41 @@ fn field_of(payload: &ItemPayload, field: &str) -> Option<Zeroizing<String>> {
         _ => return None,
     };
     Some(Zeroizing::new(value))
+}
+
+/// Approve the browser currently asking to pair.
+///
+/// Only ever called from a click in the app's own window. The extension cannot
+/// trigger it, which is the whole point: pairing needs a human in a window a
+/// hostile local process cannot draw.
+#[tauri::command]
+pub fn approve_browser(state: State<'_, AppState>) -> CmdResult<String> {
+    let name = state
+        .pending_association()
+        .ok_or_else(|| CmdError::bad_request("No browser is waiting to be paired."))?;
+
+    let association = crate::browser::associations::create(&name).map_err(CmdError::from)?;
+    let id = association.id.clone();
+    state.set_approved_association(association);
+    Ok(id)
+}
+
+/// Decline the pending pairing request.
+#[tauri::command]
+pub fn reject_browser(state: State<'_, AppState>) {
+    state.clear_pending_association();
+}
+
+/// Browsers currently paired.
+#[tauri::command]
+pub fn list_browsers() -> Vec<crate::browser::associations::Association> {
+    crate::browser::associations::list()
+}
+
+/// Unpair one browser.
+#[tauri::command]
+pub fn unpair_browser(id: String) -> CmdResult<()> {
+    crate::browser::associations::remove(&id).map_err(CmdError::from)
 }
 
 /// Defer auto-lock. Called by the UI on user activity.

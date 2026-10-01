@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use truepass_vault::Vault;
 
+use crate::browser::associations::Association;
+
 /// How long without user activity before the vault locks itself.
 ///
 /// Five minutes is the usual default for this class of app. It is deliberately
@@ -28,6 +30,13 @@ struct Inner {
 pub struct AppState {
     vault_path: PathBuf,
     inner: Mutex<Inner>,
+    /// Name of a browser waiting to be approved, if any.
+    pending_association: Mutex<Option<String>>,
+    /// An approved association the extension has not collected yet.
+    ///
+    /// Held in memory only. If the app restarts before the extension picks it
+    /// up, the user approves again — which is the safe direction to fail.
+    approved_association: Mutex<Option<Association>>,
 }
 
 impl AppState {
@@ -40,7 +49,41 @@ impl AppState {
                 last_activity: Instant::now(),
                 idle_timeout: DEFAULT_IDLE_TIMEOUT,
             }),
+            pending_association: Mutex::new(None),
+            approved_association: Mutex::new(None),
         }
+    }
+
+    /// Record that a browser is asking to pair.
+    pub fn set_pending_association(&self, name: String) {
+        if let Ok(mut pending) = self.pending_association.lock() {
+            *pending = Some(name);
+        }
+    }
+
+    /// The browser currently asking to pair, if any.
+    pub fn pending_association(&self) -> Option<String> {
+        self.pending_association.lock().ok()?.clone()
+    }
+
+    /// Clear a pending request without approving it.
+    pub fn clear_pending_association(&self) {
+        if let Ok(mut pending) = self.pending_association.lock() {
+            *pending = None;
+        }
+    }
+
+    /// Hand an approved association to the next `associate` call.
+    pub fn set_approved_association(&self, association: Association) {
+        if let Ok(mut approved) = self.approved_association.lock() {
+            *approved = Some(association);
+        }
+        self.clear_pending_association();
+    }
+
+    /// Collect an approved association. Returns it at most once.
+    pub fn take_approved_association(&self) -> Option<Association> {
+        self.approved_association.lock().ok()?.take()
     }
 
     /// Where the vault file lives.

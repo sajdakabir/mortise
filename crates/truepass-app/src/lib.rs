@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod browser;
 pub mod commands;
 pub mod dto;
 pub mod error;
@@ -45,6 +46,14 @@ pub fn run() {
                     }
                 }
             });
+            // The browser socket. A failure here is not fatal: the app is
+            // perfectly usable without autofill, and refusing to start over it
+            // would be a poor trade.
+            match browser::server::start(app.handle()) {
+                Ok(path) => eprintln!("truepass: browser socket at {}", path.display()),
+                Err(e) => eprintln!("truepass: browser autofill unavailable: {e}"),
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -63,6 +72,10 @@ pub fn run() {
             commands::generate_password,
             commands::password_entropy,
             commands::copy_secret,
+            commands::approve_browser,
+            commands::reject_browser,
+            commands::list_browsers,
+            commands::unpair_browser,
             commands::touch,
         ])
         .run(tauri::generate_context!())
