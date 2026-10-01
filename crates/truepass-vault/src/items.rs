@@ -20,6 +20,7 @@ use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use crate::model::{ItemKind, ItemMeta, ItemPayload};
+use crate::origin::Origin;
 use crate::vault::{Vault, now_ms};
 
 /// An item as it appears in a list or search result. No secrets.
@@ -260,6 +261,30 @@ impl Vault {
                         .is_some_and(|f| f.to_lowercase().contains(&needle))
                     || m.urls.iter().any(|u| u.to_lowercase().contains(&needle))
                     || m.tags.iter().any(|t| t.to_lowercase().contains(&needle))
+            })
+            .collect())
+    }
+
+    /// Items whose stored URLs permit filling on `page`.
+    ///
+    /// The autofill lookup. Works while locked, from the search cache, because
+    /// the extension needs to know *whether* there is a credential before the
+    /// user commits to unlocking — otherwise every page visit would prompt.
+    ///
+    /// Matching is delegated to [`Origin::may_fill`], which is exact. An item
+    /// with a URL this crate cannot parse simply never matches, rather than
+    /// falling back to something looser: a parse failure must not become a
+    /// permissive match.
+    pub fn find_for_origin(&self, page: &Origin) -> Result<Vec<ItemSummary>> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .filter(|item| {
+                item.meta
+                    .urls
+                    .iter()
+                    .filter_map(|u| Origin::parse(u))
+                    .any(|stored| stored.may_fill(page))
             })
             .collect())
     }

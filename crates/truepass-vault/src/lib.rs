@@ -14,10 +14,12 @@
 pub mod error;
 pub mod items;
 pub mod model;
+pub mod origin;
 pub mod schema;
 pub mod vault;
 
 pub use error::{Error, Result};
 pub use items::ItemSummary;
 pub use model::{ItemKind, ItemMeta, ItemPayload};
+pub use origin::Origin;
 pub use vault::{UnlockToken, Vault, VaultMeta};

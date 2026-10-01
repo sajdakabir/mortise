@@ -499,3 +499,105 @@ fn a_malformed_token_is_rejected() {
     assert!(UnlockToken::from_slice(&[0u8; 33]).is_err());
     assert!(UnlockToken::from_slice(&[0u8; 32]).is_ok());
 }
+
+// --- autofill lookup ---
+
+#[test]
+fn find_for_origin_returns_only_matching_items() {
+    use truepass_vault::Origin;
+
+    let mut f = Fixture::new();
+    let (gh_meta, gh_payload) = login("GitHub");
+    let gh = f.vault.create_item(&gh_meta, &gh_payload).unwrap();
+
+    let other = ItemMeta {
+        title: "Example".into(),
+        urls: vec!["https://example.com".into()],
+        ..Default::default()
+    };
+    f.vault
+        .create_item(&other, &ItemPayload::SecureNote { body: "x".into() })
+        .unwrap();
+
+    let hits = f
+        .vault
+        .find_for_origin(&Origin::parse("https://github.com").unwrap())
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, gh);
+
+    assert!(
+        f.vault
+            .find_for_origin(&Origin::parse("https://gitlab.com").unwrap())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Threat model A5: a hostile page must not be offered a credential for a host
+/// that merely resembles its own.
+#[test]
+fn find_for_origin_refuses_lookalike_hosts() {
+    use truepass_vault::Origin;
+
+    let mut f = Fixture::new();
+    let (meta, payload) = login("GitHub");
+    f.vault.create_item(&meta, &payload).unwrap();
+
+    for hostile in [
+        "https://github.com.evil.example",
+        "http://github.com",
+        "https://gist.github.com",
+        "https://evil-github.com",
+    ] {
+        let hits = f
+            .vault
+            .find_for_origin(&Origin::parse(hostile).unwrap())
+            .unwrap();
+        assert!(hits.is_empty(), "credential offered on {hostile}");
+    }
+}
+
+/// The lookup runs from the search cache, so the extension can tell whether a
+/// credential exists before asking the user to unlock.
+#[test]
+fn find_for_origin_works_while_locked() {
+    use truepass_vault::Origin;
+
+    let mut f = Fixture::new();
+    let (meta, payload) = login("GitHub");
+    let id = f.vault.create_item(&meta, &payload).unwrap();
+    f.relock();
+
+    let hits = f
+        .vault
+        .find_for_origin(&Origin::parse("https://github.com").unwrap())
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, id);
+}
+
+/// An unparseable stored URL must not become a wildcard.
+#[test]
+fn items_with_unparseable_urls_never_match() {
+    use truepass_vault::Origin;
+
+    let mut f = Fixture::new();
+    let meta = ItemMeta {
+        title: "Broken".into(),
+        urls: vec!["not a url".into(), "javascript:alert(1)".into(), "".into()],
+        ..Default::default()
+    };
+    f.vault
+        .create_item(&meta, &ItemPayload::SecureNote { body: "x".into() })
+        .unwrap();
+
+    for page in ["https://github.com", "https://example.com"] {
+        assert!(
+            f.vault
+                .find_for_origin(&Origin::parse(page).unwrap())
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
