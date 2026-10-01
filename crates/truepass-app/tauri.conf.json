@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../ui/dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "npm --prefix ../../ui run dev",
-    "beforeBuildCommand": "npm --prefix ../../ui run build"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "withGlobalTauri": false,
@@ -29,11 +29,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "Utility",
     "shortDescription": "Local-first password manager",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "entitlements": "entitlements.plist",
+      "exceptionDomain": ""
     }
   }
 }
