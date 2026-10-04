@@ -427,3 +427,153 @@ pub fn unpair_browser(id: String) -> CmdResult<()> {
 pub fn touch(state: State<'_, AppState>) {
     state.touch();
 }
+
+// --- sync ---
+
+/// What the sync section of settings shows.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SyncStatus {
+    /// The relay this vault syncs with, if configured.
+    pub relay_url: Option<String>,
+    /// Changes waiting to be uploaded.
+    pub pending: u32,
+    /// How far this device has pulled.
+    pub cursor: u64,
+}
+
+/// Current sync configuration and backlog.
+#[tauri::command]
+pub fn sync_status(state: State<'_, AppState>) -> CmdResult<SyncStatus> {
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(CmdError::no_vault)?;
+        Ok(SyncStatus {
+            relay_url: v.relay_url()?,
+            // Counting needs no key, so this works while locked.
+            pending: v
+                .unpushed_changes(u32::MAX)
+                .map(|c| c.len() as u32)
+                .unwrap_or(0),
+            cursor: v.sync_cursor()?,
+        })
+    })
+}
+
+/// Point this vault at a relay, or clear it to turn sync off.
+///
+/// Clearing leaves the change log intact — sync stops, nothing is lost, and
+/// pointing at a relay again resumes from the stored cursor.
+#[tauri::command]
+pub fn set_relay(state: State<'_, AppState>, url: Option<String>) -> CmdResult<SyncStatus> {
+    let trimmed = url.as_deref().map(str::trim).filter(|u| !u.is_empty());
+
+    if let Some(u) = trimmed {
+        if !u.starts_with("https://") && !u.starts_with("http://") {
+            return Err(CmdError::bad_request(
+                "Enter a relay URL starting with https://.",
+            ));
+        }
+        // http is allowed for a relay on this machine during development, but
+        // anywhere else it would put device keys and sync timing in the clear.
+        if u.starts_with("http://")
+            && !(u.contains("127.0.0.1") || u.contains("localhost") || u.contains("[::1]"))
+        {
+            return Err(CmdError::bad_request(
+                "Use https:// for a relay that is not on this machine.",
+            ));
+        }
+    }
+
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(CmdError::no_vault)?;
+        v.set_relay_url(trimmed)?;
+        Ok::<(), CmdError>(())
+    })?;
+    sync_status(state)
+}
+
+/// Push and pull once.
+///
+/// Async with the work on a blocking thread: the HTTP client is blocking, and
+/// running it on the UI thread would freeze the window for the round trip.
+#[tauri::command]
+pub async fn sync_now(app: tauri::AppHandle) -> CmdResult<SyncReport> {
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let url = state
+            .with_vault(|vault| {
+                let v = vault.ok_or_else(CmdError::no_vault)?;
+                v.relay_url().map_err(CmdError::from)
+            })?
+            .ok_or_else(|| CmdError::bad_request("No relay is configured."))?;
+
+        let syncer = truepass_sync::Syncer::new(truepass_sync::HttpTransport::new(url));
+
+        state.with_vault(|vault| {
+            let v = vault.ok_or_else(CmdError::no_vault)?;
+            syncer.sync(v).map_err(sync_error)
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("Sync was interrupted."))??;
+
+    Ok(SyncReport {
+        pushed: outcome.pushed,
+        pulled: outcome.pulled,
+        applied: outcome.applied,
+        rejected: outcome.rejected,
+    })
+}
+
+/// Register this vault with its relay, so this device may sync.
+#[tauri::command]
+pub async fn claim_vault_on_relay(app: tauri::AppHandle) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let url = state
+            .with_vault(|vault| {
+                let v = vault.ok_or_else(CmdError::no_vault)?;
+                v.relay_url().map_err(CmdError::from)
+            })?
+            .ok_or_else(|| CmdError::bad_request("No relay is configured."))?;
+
+        let syncer = truepass_sync::Syncer::new(truepass_sync::HttpTransport::new(url));
+        state.with_vault(|vault| {
+            let v = vault.ok_or_else(CmdError::no_vault)?;
+            syncer.claim(v).map_err(sync_error)
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("Registration was interrupted."))?
+}
+
+/// What one sync round did.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SyncReport {
+    /// Changes uploaded.
+    pub pushed: u32,
+    /// Changes downloaded.
+    pub pulled: u32,
+    /// Changes folded into the item list.
+    pub applied: u32,
+    /// Changes refused. Non-zero is worth showing — it means the relay served
+    /// something this device could not verify.
+    pub rejected: u32,
+}
+
+fn sync_error(e: truepass_sync::Error) -> CmdError {
+    use truepass_sync::Error as E;
+    match e {
+        E::Unreachable(_) => CmdError::bad_request("Could not reach the relay."),
+        E::AlreadyClaimed => {
+            CmdError::bad_request("That vault is already registered on this relay.")
+        }
+        E::Refused { ref code, .. } if code == "unauthorized" => CmdError::bad_request(
+            "This device is not authorized on the relay. Register the vault first.",
+        ),
+        E::Vault(v) => CmdError::from(v),
+        other => {
+            eprintln!("truepass: sync error: {other}");
+            CmdError::bad_request("Sync failed.")
+        }
+    }
+}

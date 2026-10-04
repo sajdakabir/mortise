@@ -4595,6 +4595,7 @@ dependencies = [
  "truepass-crypto",
  "truepass-macos",
  "truepass-proxy",
+ "truepass-sync",
  "truepass-vault",
  "zeroize",
 ]

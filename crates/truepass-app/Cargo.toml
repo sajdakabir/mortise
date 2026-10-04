@@ -29,3 +29,4 @@ zeroize = "1"
 hmac = "0.13.0"
 sha2 = "0.11.0"
 subtle = "2.6.1"
+truepass-sync = { version = "0.1.0", path = "../truepass-sync" }

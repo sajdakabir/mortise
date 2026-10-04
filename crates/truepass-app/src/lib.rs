@@ -76,6 +76,10 @@ pub fn run() {
             commands::reject_browser,
             commands::list_browsers,
             commands::unpair_browser,
+            commands::sync_status,
+            commands::set_relay,
+            commands::sync_now,
+            commands::claim_vault_on_relay,
             commands::touch,
         ])
         .run(tauri::generate_context!())
