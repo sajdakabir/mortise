@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -157,10 +157,22 @@ CREATE TABLE known_device (
 ) STRICT;
 "#;
 
+/// Added in v3: where sync left off.
+const SCHEMA_V3: &str = r#"
+-- The relay's sequence number we have pulled up to. Stored with the vault
+-- rather than in app settings: it is only meaningful alongside this change
+-- log, and a cursor that outlived its database would skip changes silently.
+ALTER TABLE sync_state ADD COLUMN cursor INTEGER NOT NULL DEFAULT 0;
+
+-- Which relay this vault syncs with. Empty means sync is off.
+ALTER TABLE sync_state ADD COLUMN relay_url TEXT NOT NULL DEFAULT '';
+"#;
+
 /// Apply the schema to a fresh database.
 pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V1)?;
     conn.execute_batch(SCHEMA_V2)?;
+    conn.execute_batch(SCHEMA_V3)?;
     Ok(())
 }
 
@@ -184,6 +196,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     if found < 2 {
         tx.execute_batch(SCHEMA_V2)?;
+    }
+    if found < 3 {
+        tx.execute_batch(SCHEMA_V3)?;
     }
     tx.execute(
         "UPDATE vault_meta SET schema_version = ?1 WHERE id = 1",

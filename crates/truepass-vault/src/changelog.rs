@@ -229,6 +229,47 @@ impl Vault {
         Ok(())
     }
 
+    /// The relay sequence number this vault has pulled up to.
+    pub fn sync_cursor(&self) -> Result<u64> {
+        let cursor: i64 =
+            self.conn()
+                .query_row("SELECT cursor FROM sync_state WHERE id = 1", [], |r| {
+                    r.get(0)
+                })?;
+        Ok(cursor.max(0) as u64)
+    }
+
+    /// Record how far sync has pulled.
+    ///
+    /// Never moves backwards. A relay that replayed an old cursor could
+    /// otherwise make this device re-pull and re-ingest indefinitely.
+    pub fn set_sync_cursor(&self, cursor: u64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE sync_state SET cursor = MAX(cursor, ?1) WHERE id = 1",
+            params![cursor as i64],
+        )?;
+        Ok(())
+    }
+
+    /// The relay this vault syncs with, if any.
+    pub fn relay_url(&self) -> Result<Option<String>> {
+        let url: String =
+            self.conn()
+                .query_row("SELECT relay_url FROM sync_state WHERE id = 1", [], |r| {
+                    r.get(0)
+                })?;
+        Ok(if url.is_empty() { None } else { Some(url) })
+    }
+
+    /// Set or clear the relay. Clearing turns sync off without deleting the log.
+    pub fn set_relay_url(&self, url: Option<&str>) -> Result<()> {
+        self.conn().execute(
+            "UPDATE sync_state SET relay_url = ?1 WHERE id = 1",
+            params![url.unwrap_or("")],
+        )?;
+        Ok(())
+    }
+
     /// Register a device whose changes this vault will accept.
     pub fn trust_device(&self, device: DeviceId, signing_key: &[u8; 32]) -> Result<()> {
         self.conn().execute(
@@ -417,14 +458,23 @@ impl Vault {
     /// a lower HLC than one already applied, and without the per-item check it
     /// would overwrite newer data simply by arriving second.
     pub fn apply_pending(&mut self) -> Result<u32> {
+        // Checked up front so "locked" cannot be mistaken for "nothing to do".
+        // Without this the per-change key lookup below swallows the lock error
+        // as a missing epoch, and the caller gets a silent Ok(0) having applied
+        // nothing — the worst possible answer, because it looks like success.
+        if !self.is_unlocked() {
+            return Err(Error::Locked);
+        }
+
         let vault_id = self.meta().vault_id;
         let pending = self.unapplied_changes()?;
         let mut applied = 0;
 
         for (id, epoch, hlc, author, payload) in pending {
             let Ok(key) = self.vault_key_at(Epoch(epoch)) else {
-                // Sealed under an epoch whose key we do not hold. Left
-                // unapplied so a later key rotation can bring it in.
+                // Sealed under an epoch whose key this device does not hold.
+                // Left unapplied so a later enrolment or rotation can bring it
+                // in. Distinct from being locked, which was rejected above.
                 continue;
             };
             let plaintext = match aead::open(key.key(), &payload, &seal_aad(vault_id, Epoch(epoch)))
