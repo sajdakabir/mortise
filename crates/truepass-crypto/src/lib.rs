@@ -35,5 +35,14 @@ pub mod recovery;
 pub mod secret;
 pub mod vault;
 
+/// The ed25519 implementation this project uses.
+///
+/// Re-exported so dependants cannot accidentally pull a second, incompatible
+/// copy into the graph — two versions would typecheck and then fail to verify
+/// each other's signatures.
+pub mod ed25519 {
+    pub use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+}
+
 pub use error::{Error, Result};
 pub use secret::{Key32, Salt16, SecretBytes};
