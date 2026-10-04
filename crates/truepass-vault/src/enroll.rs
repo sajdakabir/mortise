@@ -17,11 +17,13 @@ use std::path::Path;
 
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use truepass_crypto::acl::{AclOp, Role};
 use truepass_crypto::identity::{Device, DevicePublic, Identity};
 use truepass_crypto::kdf::{self, Argon2Params};
 use truepass_crypto::secret::Key32;
 use truepass_crypto::vault::{Epoch, VaultId, VaultKey, WrappedVaultKey};
 
+use crate::access::AclEntryRecord;
 use crate::error::{Error, Result};
 use crate::schema;
 use crate::vault::Vault;
@@ -52,6 +54,11 @@ pub struct Enrollment {
     pub vault_keys: Vec<(u32, Vec<u8>)>,
     /// Devices the new one should accept changes from, with their signing keys.
     pub known_devices: Vec<([u8; 16], [u8; 32])>,
+    /// The access control log, so the new device can replay it.
+    ///
+    /// Without this the new device would be in `known_device` but absent from
+    /// the ACL, so its own changes would be refused by its own role check.
+    pub acl: Vec<AclEntryRecord>,
 }
 
 impl Vault {
@@ -82,6 +89,14 @@ impl Vault {
 
         self.trust_device(new_device.id(), new_device.signing_public())?;
 
+        // Record the device in the ACL as well, at Member. Trusting its
+        // signature is not the same as granting it the right to write, and the
+        // ingest check reads the ACL rather than the trust table.
+        self.issue_acl_op(AclOp::AddMember {
+            device: new_device.clone(),
+            role: Role::Member,
+        })?;
+
         Ok(Enrollment {
             vault_id: *meta.vault_id.as_bytes(),
             salt: meta.salt,
@@ -91,6 +106,7 @@ impl Vault {
             identity_wrapped,
             vault_keys,
             known_devices,
+            acl: self.acl_records()?,
         })
     }
 
@@ -223,5 +239,17 @@ pub fn join(
 
     let mut vault = Vault::open(path)?;
     vault.unlock(password, account_key)?;
+
+    // Replay the ACL so this device knows the membership it is joining — and
+    // so its own entry is present, without which its changes would fail their
+    // own role check on arrival.
+    let vault_id = vault.meta().vault_id;
+    for record in &enrollment.acl {
+        let entry = record
+            .to_entry(vault_id)
+            .ok_or(Error::Corrupt("enrolment contains an unreadable acl entry"))?;
+        vault.apply_acl_entry(&entry, false)?;
+    }
+
     Ok(vault)
 }

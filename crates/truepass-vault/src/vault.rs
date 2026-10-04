@@ -331,6 +331,37 @@ impl Vault {
         self.load_keys(muk)
     }
 
+    /// Record a new current epoch after a key rotation.
+    ///
+    /// Only moves forward. An epoch that went backwards would make items
+    /// sealed under the newer key unreadable while looking like a valid state.
+    pub(crate) fn set_epoch(&mut self, epoch: Epoch) -> Result<()> {
+        if epoch <= self.meta.epoch {
+            return Err(Error::Corrupt("epoch must advance"));
+        }
+        self.conn.execute(
+            "UPDATE vault_meta SET epoch = ?1 WHERE id = 1",
+            params![epoch.value()],
+        )?;
+        self.meta.epoch = epoch;
+        Ok(())
+    }
+
+    /// Install a rotated vault key, sealed to this device.
+    pub(crate) fn store_vault_key(&mut self, key: VaultKey) -> Result<()> {
+        let device = self.device()?;
+        let wrapped = key.wrap_for(device.public(), self.meta.vault_id)?;
+        self.conn.execute(
+            "INSERT INTO vault_key (epoch, wrapped) VALUES (?1, ?2)
+             ON CONFLICT (epoch) DO UPDATE SET wrapped = ?2",
+            params![key.epoch().value(), wrapped.to_bytes()],
+        )?;
+        if let Some(unlocked) = self.unlocked.as_mut() {
+            unlocked.vault_keys.insert(key.epoch(), key);
+        }
+        Ok(())
+    }
+
     /// This machine's device id. Available while locked.
     pub fn device_id(&self) -> Result<DeviceId> {
         let bytes: Vec<u8> = self

@@ -328,6 +328,19 @@ impl Vault {
                 report.rejected += 1;
                 continue;
             }
+            // The role check. The relay cannot do this — roles live in an
+            // encrypted log it cannot read — so a viewer could push changes the
+            // relay happily stores. Refusing them here is the only thing that
+            // makes a read-only role mean anything.
+            //
+            // Checks the author's *current* role, not their role when the
+            // change was made. Demoting someone therefore stops their future
+            // changes while leaving already-applied ones in place, which is the
+            // practical reading of a demotion.
+            if !self.may_write(change.author())? {
+                report.rejected += 1;
+                continue;
+            }
             if self.has_change(change.id())? {
                 report.duplicates += 1;
                 continue;

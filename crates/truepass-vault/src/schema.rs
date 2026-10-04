@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -168,11 +168,33 @@ ALTER TABLE sync_state ADD COLUMN cursor INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sync_state ADD COLUMN relay_url TEXT NOT NULL DEFAULT '';
 "#;
 
+/// Added in v4: the access control log.
+const SCHEMA_V4: &str = r#"
+-- ACL entries, in order. Unlike the change log this is a strict sequence, not
+-- a DAG: concurrent membership edits cannot be merged safely, so the second of
+-- two is rejected and must be reissued (see truepass_crypto::acl).
+CREATE TABLE acl_log (
+    seq          INTEGER PRIMARY KEY,
+    id           BLOB    NOT NULL UNIQUE,
+    prev         BLOB    NOT NULL,
+    op_kind      INTEGER NOT NULL,
+    op_body      BLOB    NOT NULL,
+    author       BLOB    NOT NULL,
+    issued_at_ms INTEGER NOT NULL,
+    signature    BLOB    NOT NULL,
+    -- 0 until the relay has it, same as the change log.
+    pushed       INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+CREATE INDEX acl_unpushed ON acl_log (pushed, seq);
+"#;
+
 /// Apply the schema to a fresh database.
 pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V1)?;
     conn.execute_batch(SCHEMA_V2)?;
     conn.execute_batch(SCHEMA_V3)?;
+    conn.execute_batch(SCHEMA_V4)?;
     Ok(())
 }
 
@@ -199,6 +221,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 3 {
         tx.execute_batch(SCHEMA_V3)?;
+    }
+    if found < 4 {
+        tx.execute_batch(SCHEMA_V4)?;
     }
     tx.execute(
         "UPDATE vault_meta SET schema_version = ?1 WHERE id = 1",

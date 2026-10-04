@@ -208,6 +208,21 @@ impl AclEntry {
         self.unsigned.author
     }
 
+    /// Hash of the entry this one chains from.
+    pub fn prev(&self) -> [u8; 32] {
+        self.unsigned.prev
+    }
+
+    /// Issue time, milliseconds since the Unix epoch.
+    pub fn issued_at_ms(&self) -> u64 {
+        self.unsigned.issued_at_ms
+    }
+
+    /// The raw signature, for storage.
+    pub fn signature(&self) -> &[u8; 64] {
+        &self.signature
+    }
+
     /// Verify the entry against the author's signing key, recomputing the id.
     fn verify(&self, author_signing_key: &[u8; 32]) -> Result<()> {
         if self.unsigned.id() != self.id {
