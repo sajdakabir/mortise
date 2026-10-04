@@ -10,7 +10,10 @@
  * without launching the app. The mock holds fake data only; it never pretends
  * to encrypt anything.
  */
-import type { ItemPayload, ItemRow, MetaInput, PairedBrowser, VaultStatus } from "./types";
+import type {
+  ItemPayload, ItemRow, MetaInput, PairedBrowser,
+  SyncReport, SyncStatus, VaultStatus,
+} from "./types";
 
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -46,6 +49,10 @@ export const ipc = {
   rejectBrowser: () => call<void>("reject_browser"),
   listBrowsers: () => call<PairedBrowser[]>("list_browsers"),
   unpairBrowser: (id: string) => call<void>("unpair_browser", { id }),
+  syncStatus: () => call<SyncStatus>("sync_status"),
+  setRelay: (url: string | null) => call<SyncStatus>("set_relay", { url }),
+  syncNow: () => call<SyncReport>("sync_now"),
+  claimVaultOnRelay: () => call<void>("claim_vault_on_relay"),
 };
 
 /** Fires when a browser asks to pair. The payload is the browser's name. */
@@ -82,6 +89,7 @@ const mockState = {
   accountKeyRemembered: true, biometricEnabled: false,
   rows: [...MOCK_ROWS],
   browsers: [] as PairedBrowser[],
+  relayUrl: null as string | null,
 };
 
 async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
@@ -129,6 +137,15 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       mockState.browsers = mockState.browsers.filter((b) => b.id !== args.id);
       return as(undefined);
     case "reject_browser":
+      return as(undefined);
+    case "sync_status":
+      return as({ relay_url: mockState.relayUrl, pending: 0, cursor: 0 });
+    case "set_relay":
+      mockState.relayUrl = (args.url as string | null) || null;
+      return as({ relay_url: mockState.relayUrl, pending: 0, cursor: 0 });
+    case "sync_now":
+      return as({ pushed: 2, pulled: 1, applied: 1, rejected: 0 });
+    case "claim_vault_on_relay":
       return as(undefined);
     case "search": {
       const q = String(args.query ?? "").trim().toLowerCase();

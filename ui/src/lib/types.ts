@@ -97,3 +97,18 @@ export interface PairedBrowser {
   /** Proof key. Present in the backend type; never rendered. */
   key: string;
 }
+
+/** Sync configuration and backlog. */
+export interface SyncStatus {
+  relay_url: string | null;
+  pending: number;
+  cursor: number;
+}
+
+/** What one sync round did. */
+export interface SyncReport {
+  pushed: number;
+  pulled: number;
+  applied: number;
+  rejected: number;
+}

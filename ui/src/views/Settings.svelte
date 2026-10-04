@@ -2,7 +2,7 @@
   import { ipc, onBrowserPairingRequest } from "../lib/ipc";
   import {
     errorMessage, isCmdError,
-    type PairedBrowser, type VaultStatus,
+    type PairedBrowser, type SyncStatus, type VaultStatus,
   } from "../lib/types";
 
   let { status, onStatus, onClose }:
@@ -12,6 +12,9 @@
   let busy = $state(false);
 
   let browsers = $state<PairedBrowser[]>([]);
+  let sync = $state<SyncStatus | null>(null);
+  let relayInput = $state("");
+  let syncMessage = $state("");
   /** Name of a browser waiting for approval, if any. */
   let pairingRequest = $state<string | null>(null);
 
@@ -19,8 +22,59 @@
     browsers = await ipc.listBrowsers();
   }
 
+  async function refreshSync() {
+    sync = await ipc.syncStatus();
+    relayInput = sync.relay_url ?? "";
+  }
+
+  async function saveRelay() {
+    busy = true;
+    error = "";
+    syncMessage = "";
+    try {
+      sync = await ipc.setRelay(relayInput.trim() || null);
+      relayInput = sync.relay_url ?? "";
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function registerVault() {
+    busy = true;
+    error = "";
+    try {
+      await ipc.claimVaultOnRelay();
+      syncMessage = "Registered with the relay.";
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function syncNow() {
+    busy = true;
+    error = "";
+    syncMessage = "";
+    try {
+      const r = await ipc.syncNow();
+      syncMessage = `Sent ${r.pushed}, received ${r.pulled}, applied ${r.applied}.`;
+      if (r.rejected > 0) {
+        syncMessage += ` ${r.rejected} refused — the relay served changes this device could not verify.`;
+      }
+      await refreshSync();
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   $effect(() => {
     refreshBrowsers();
+    refreshSync();
     const stop = onBrowserPairingRequest((name) => { pairingRequest = name; });
     return () => { stop.then((f) => f()); };
   });
@@ -99,6 +153,33 @@
 
   <div class="body">
     {#if error}<div class="error">{error}</div>{/if}
+
+    <section>
+      <h3>Sync</h3>
+      <p class="faint">
+        A relay stores your encrypted changes so your devices can reach each
+        other. It cannot read any of them — but it does learn which devices sync
+        together, and when. Leave this empty to keep everything on this Mac.
+      </p>
+      <div class="relay">
+        <input
+          class="mono"
+          bind:value={relayInput}
+          placeholder="https://relay.example"
+          spellcheck="false" />
+        <button disabled={busy} onclick={saveRelay}>Save</button>
+      </div>
+      {#if sync?.relay_url}
+        <div class="row synced">
+          <button disabled={busy} onclick={syncNow}>Sync now</button>
+          <button disabled={busy} onclick={registerVault}>Register vault</button>
+          <span class="faint">
+            {sync.pending} waiting to send
+          </span>
+        </div>
+        {#if syncMessage}<p class="faint result">{syncMessage}</p>{/if}
+      {/if}
+    </section>
 
     {#if pairingRequest}
       <section class="pairing">
@@ -207,4 +288,9 @@
   .pairing h3 { margin-bottom: 6px; }
   .pairing p { margin: 0 0 12px; max-width: 48ch; }
   .row { display: flex; gap: 8px; }
+  .relay { display: flex; gap: 8px; margin-top: 10px; }
+  .relay input { flex: 1; }
+  .synced { margin-top: 10px; align-items: center; }
+  .result { margin: 9px 0 0; font-size: 12px; }
+  section h3 + .faint { max-width: 52ch; }
 </style>
