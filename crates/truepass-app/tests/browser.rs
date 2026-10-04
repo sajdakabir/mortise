@@ -193,3 +193,76 @@ fn responses_serialize_with_a_type_tag() {
     let listing = serde_json::to_string(&Response::Logins { items: Vec::new() }).unwrap();
     assert!(listing.contains(r#""type":"logins""#));
 }
+
+// --- cross-implementation vectors ---
+
+/// Proofs computed by the extension's `proof.js`, pinned here.
+///
+/// The JS and Rust sides each build the signed payload independently. If they
+/// ever drift — a reordered field, a changed length-prefix width, big-endian
+/// becoming native-endian — every request fails closed. Annoying, but silent
+/// until someone tries to use the extension, which is why these are checked in
+/// CI instead.
+///
+/// Regenerate with `node extension/tools/gen-proof-vectors.mjs` and only update
+/// them when the protocol genuinely changes.
+#[test]
+fn rust_and_javascript_agree_on_proofs() {
+    const KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+    let cases: [(Request, &str); 3] = [
+        (
+            Request::Logins {
+                id: "abcdef0123456789".into(),
+                origin: "https://github.com".into(),
+                proof: String::new(),
+            },
+            "2b4ab681f56b3eadd202f96907a59f7c7c7871d99407a7feee865cd2bccd647e",
+        ),
+        (
+            Request::Credential {
+                id: "abcdef0123456789".into(),
+                origin: "https://github.com".into(),
+                item_id: "0102030405060708090a0b0c0d0e0f10".into(),
+                proof: String::new(),
+            },
+            "b44305cfe57e86381902a2527b2efe9bbba46a1a427933409b6ea910369aff56",
+        ),
+        (
+            Request::Logins {
+                id: "ff".into(),
+                origin: "http://localhost:3000".into(),
+                proof: String::new(),
+            },
+            "a2a5541a4e548f756d30185f873238d0b43728b08e75e2e655e43eb59eea5960",
+        ),
+    ];
+
+    for (request, from_javascript) in cases {
+        assert_eq!(
+            compute_proof(KEY, &request).as_deref(),
+            Some(from_javascript),
+            "Rust and the extension disagree about this request's proof"
+        );
+        assert!(verify_proof(KEY, &request, from_javascript));
+    }
+}
+
+/// The payload layout itself, so a failure says *what* diverged rather than
+/// just that two hashes differ.
+#[test]
+fn the_signed_payload_layout_matches_javascript() {
+    let payload = proof_payload(&Request::Logins {
+        id: "abcdef0123456789".into(),
+        origin: "https://github.com".into(),
+        proof: String::new(),
+    })
+    .unwrap();
+
+    let hex: String = payload.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        hex,
+        "000000066c6f67696e7300000010616263646566303132333435363738390000001268747470733a\
+         2f2f6769746875622e636f6d"
+    );
+}
