@@ -89,3 +89,11 @@ export function emptyPayload(kind: ItemKind): ItemPayload {
       return { kind: "Passkey", rp_id: "", credential_id: [], private_key: [], user_handle: [] };
   }
 }
+
+/** A paired browser. */
+export interface PairedBrowser {
+  id: string;
+  name: string;
+  /** Proof key. Present in the backend type; never rendered. */
+  key: string;
+}

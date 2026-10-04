@@ -10,7 +10,7 @@
  * without launching the app. The mock holds fake data only; it never pretends
  * to encrypt anything.
  */
-import type { ItemPayload, ItemRow, MetaInput, VaultStatus } from "./types";
+import type { ItemPayload, ItemRow, MetaInput, PairedBrowser, VaultStatus } from "./types";
 
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -42,7 +42,20 @@ export const ipc = {
   passwordEntropy: (length: number, lower: boolean, upper: boolean, digits: boolean, symbols: boolean) =>
     call<number>("password_entropy", { length, lower, upper, digits, symbols }),
   touch: () => call<void>("touch"),
+  approveBrowser: () => call<string>("approve_browser"),
+  rejectBrowser: () => call<void>("reject_browser"),
+  listBrowsers: () => call<PairedBrowser[]>("list_browsers"),
+  unpairBrowser: (id: string) => call<void>("unpair_browser", { id }),
 };
+
+/** Fires when a browser asks to pair. The payload is the browser's name. */
+export async function onBrowserPairingRequest(
+  handler: (name: string) => void,
+): Promise<() => void> {
+  if (!IN_TAURI) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<string>("browser-association-requested", (e) => handler(e.payload));
+}
 
 /** Fires when the backend auto-locks, so the UI can drop anything revealed. */
 export async function onVaultLocked(handler: () => void): Promise<() => void> {
@@ -68,6 +81,7 @@ const mockState = {
   exists: true, unlocked: true, searchable: true,
   accountKeyRemembered: true, biometricEnabled: false,
   rows: [...MOCK_ROWS],
+  browsers: [] as PairedBrowser[],
 };
 
 async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
@@ -106,6 +120,16 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
     case "forget_account_key":
       mockState.accountKeyRemembered = false;
       return as(status());
+    case "list_browsers":
+      return as(mockState.browsers);
+    case "approve_browser":
+      mockState.browsers = [...mockState.browsers, { id: "mock1", name: "Google Chrome", key: "" }];
+      return as("mock1");
+    case "unpair_browser":
+      mockState.browsers = mockState.browsers.filter((b) => b.id !== args.id);
+      return as(undefined);
+    case "reject_browser":
+      return as(undefined);
     case "search": {
       const q = String(args.query ?? "").trim().toLowerCase();
       const hits = q
