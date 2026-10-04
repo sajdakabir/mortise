@@ -11,6 +11,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod changelog;
+pub mod enroll;
 pub mod error;
 pub mod items;
 pub mod model;

@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -91,9 +91,105 @@ CREATE TABLE search_cache (
 ) STRICT;
 "#;
 
+/// Added in v2: the signed change log, and the DAG state sync needs.
+const SCHEMA_V2: &str = r#"
+-- Every mutation, signed by the device that made it. This is the source of
+-- truth; the item table is a materialized view of it.
+--
+-- payload is sealed under the vault key, so the relay cannot even see which
+-- item a change touches. That costs the ability to materialize while locked —
+-- changes pulled during a locked session sit here until the next unlock.
+CREATE TABLE change_log (
+    id           BLOB    PRIMARY KEY,
+    vault_id     BLOB    NOT NULL,
+    epoch        INTEGER NOT NULL,
+    hlc_wall     INTEGER NOT NULL,
+    hlc_counter  INTEGER NOT NULL,
+    author       BLOB    NOT NULL,
+    payload      BLOB    NOT NULL,
+    signature    BLOB    NOT NULL,
+    received_at  INTEGER NOT NULL,
+    -- 0 until the relay has acknowledged it.
+    pushed       INTEGER NOT NULL DEFAULT 0,
+    -- 0 until it has been folded into the item table.
+    applied      INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+CREATE INDEX change_unpushed ON change_log (pushed, hlc_wall);
+CREATE INDEX change_unapplied ON change_log (applied, hlc_wall, hlc_counter);
+
+-- Parent edges. A change may have several, which is what makes the log a DAG
+-- rather than a line and lets two offline devices merge without a server.
+CREATE TABLE change_parent (
+    change_id BLOB NOT NULL,
+    parent_id BLOB NOT NULL,
+    PRIMARY KEY (change_id, parent_id)
+) STRICT;
+
+-- Current DAG tips. The next local change takes all of these as its parents.
+CREATE TABLE dag_head (
+    change_id BLOB PRIMARY KEY
+) STRICT;
+
+-- The device's hybrid logical clock, persisted so it survives a restart.
+-- Losing it would let a change be issued with a timestamp below one already
+-- written, which is exactly what the HLC exists to prevent.
+CREATE TABLE sync_state (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    hlc_wall    INTEGER NOT NULL,
+    hlc_counter INTEGER NOT NULL
+) STRICT;
+
+INSERT INTO sync_state (id, hlc_wall, hlc_counter) VALUES (1, 0, 0);
+
+-- Which change currently owns each item, for last-write-wins. Without this a
+-- change that arrives late could overwrite a newer one simply by being applied
+-- second.
+ALTER TABLE item ADD COLUMN lww_wall    INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE item ADD COLUMN lww_counter INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE item ADD COLUMN lww_author  BLOB    NOT NULL DEFAULT x'';
+
+-- Signing keys of devices whose changes we accept. Seeded with this device;
+-- sharing adds the others from the ACL.
+CREATE TABLE known_device (
+    device_id   BLOB PRIMARY KEY,
+    signing_key BLOB NOT NULL
+) STRICT;
+"#;
+
 /// Apply the schema to a fresh database.
 pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V1)?;
+    conn.execute_batch(SCHEMA_V2)?;
+    Ok(())
+}
+
+/// Bring an older vault up to the current schema.
+///
+/// Runs inside a transaction: a migration that fails halfway and leaves the
+/// file in neither version is how a vault becomes unopenable.
+pub fn migrate(conn: &Connection) -> Result<()> {
+    let found: u32 = conn
+        .query_row(
+            "SELECT schema_version FROM vault_meta WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| Error::Corrupt("vault_meta row is missing"))?;
+
+    if found >= SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    if found < 2 {
+        tx.execute_batch(SCHEMA_V2)?;
+    }
+    tx.execute(
+        "UPDATE vault_meta SET schema_version = ?1 WHERE id = 1",
+        [SCHEMA_VERSION],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 

@@ -169,6 +169,14 @@ impl Vault {
             ],
         )?;
 
+        conn.execute(
+            "INSERT INTO known_device (device_id, signing_key) VALUES (?1, ?2)",
+            params![
+                device.id().as_bytes().as_slice(),
+                device.public().signing_public().as_slice()
+            ],
+        )?;
+
         let meta_key = kdf::derive_meta_key(&muk)?;
         let mut vault_keys = BTreeMap::new();
         vault_keys.insert(vault_key.epoch(), vault_key);
@@ -197,6 +205,7 @@ impl Vault {
             return Err(Error::Corrupt("no vault at this path"));
         }
         schema::check_version(&conn)?;
+        schema::migrate(&conn)?;
 
         let meta = read_meta(&conn)?;
         Ok(Self {

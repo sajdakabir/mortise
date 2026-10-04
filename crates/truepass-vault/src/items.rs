@@ -18,6 +18,7 @@ use truepass_crypto::item::{ItemId, SealedItem};
 use truepass_crypto::vault::{Epoch, VaultId};
 use zeroize::Zeroizing;
 
+use crate::changelog::{ItemRecord, Mutation};
 use crate::error::{Error, Result};
 use crate::model::{ItemKind, ItemMeta, ItemPayload};
 use crate::origin::Origin;
@@ -109,38 +110,45 @@ impl Vault {
             &meta_aad(vault_id, id, version, epoch),
         )?;
 
-        let cached = aead::seal(self.meta_key()?, &meta_json, &cache_aad(id))?;
+        let now = now_ms();
+        let record = ItemRecord {
+            item_id: *id.as_bytes(),
+            version,
+            epoch: epoch.value(),
+            kind: payload.kind() as u8,
+            sealed_meta,
+            sealed_item_key: sealed.sealed_item_key().to_vec(),
+            ciphertext: sealed.ciphertext().to_vec(),
+            created_at_ms: created_at_ms.unwrap_or(now),
+            updated_at_ms: now,
+        };
 
-        let now = now_ms() as i64;
-        let created = created_at_ms.map(|c| c as i64).unwrap_or(now);
+        // Log first, then materialize. The item table is a view of the log
+        // (see `changelog`), so writing it directly would leave local edits
+        // invisible to sync.
+        self.record_mutation(&Mutation::Upsert(record))?;
+        self.apply_pending()?;
+        Ok(())
+    }
 
-        let tx = self.conn().unchecked_transaction()?;
-        tx.execute(
-            "INSERT INTO item
-               (item_id, version, epoch, kind, sealed_meta, sealed_item_key,
-                ciphertext, created_at_ms, updated_at_ms, deleted)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)
-             ON CONFLICT (item_id) DO UPDATE SET
-               version = ?2, epoch = ?3, kind = ?4, sealed_meta = ?5,
-               sealed_item_key = ?6, ciphertext = ?7, updated_at_ms = ?9, deleted = 0",
-            params![
-                id.as_bytes().as_slice(),
-                version,
-                epoch.value(),
-                payload.kind() as u8,
-                sealed_meta,
-                sealed.sealed_item_key(),
-                sealed.ciphertext(),
-                created,
-                now,
-            ],
-        )?;
-        tx.execute(
+    /// Re-seal one item's cached metadata under the local metadata key.
+    ///
+    /// Called after materializing a change, so search reflects items that
+    /// arrived from another device.
+    pub(crate) fn refresh_cache_for(&self, id: ItemId) -> Result<()> {
+        let meta = match self.item_meta(id) {
+            Ok(meta) => meta,
+            // Sealed under an epoch we lack, or not yet decryptable. The cache
+            // is derived data, so skipping is safe: a later rebuild fixes it.
+            Err(_) => return Ok(()),
+        };
+        let json = serde_json::to_vec(&meta)?;
+        let cached = aead::seal(self.meta_key()?, &json, &cache_aad(id))?;
+        self.conn().execute(
             "INSERT INTO search_cache (item_id, sealed) VALUES (?1, ?2)
              ON CONFLICT (item_id) DO UPDATE SET sealed = ?2",
             params![id.as_bytes().as_slice(), cached],
         )?;
-        tx.commit()?;
         Ok(())
     }
 
@@ -295,22 +303,20 @@ impl Vault {
     /// the ciphertext and metadata immediately: a deleted secret should not
     /// survive on disk waiting for a sync that may never happen.
     pub fn delete_item(&mut self, id: ItemId) -> Result<()> {
-        let tx = self.conn().unchecked_transaction()?;
-        let n = tx.execute(
-            "UPDATE item
-             SET deleted = 1, sealed_meta = x'', sealed_item_key = x'',
-                 ciphertext = x'', updated_at_ms = ?2
-             WHERE item_id = ?1 AND deleted = 0",
-            params![id.as_bytes().as_slice(), now_ms() as i64],
+        let exists: u32 = self.conn().query_row(
+            "SELECT count(*) FROM item WHERE item_id = ?1 AND deleted = 0",
+            params![id.as_bytes().as_slice()],
+            |r| r.get(0),
         )?;
-        if n == 0 {
+        if exists == 0 {
             return Err(Error::ItemNotFound);
         }
-        tx.execute(
-            "DELETE FROM search_cache WHERE item_id = ?1",
-            params![id.as_bytes().as_slice()],
-        )?;
-        tx.commit()?;
+
+        self.record_mutation(&Mutation::Delete {
+            item_id: *id.as_bytes(),
+            at_ms: now_ms(),
+        })?;
+        self.apply_pending()?;
         Ok(())
     }
 
@@ -355,14 +361,7 @@ impl Vault {
 
         let mut rebuilt = 0;
         for id in ids {
-            let meta = self.item_meta(id)?;
-            let json = serde_json::to_vec(&meta)?;
-            let cached = aead::seal(self.meta_key()?, &json, &cache_aad(id))?;
-            self.conn().execute(
-                "INSERT INTO search_cache (item_id, sealed) VALUES (?1, ?2)
-                 ON CONFLICT (item_id) DO UPDATE SET sealed = ?2",
-                params![id.as_bytes().as_slice(), cached],
-            )?;
+            self.refresh_cache_for(id)?;
             rebuilt += 1;
         }
         Ok(rebuilt)
