@@ -11,7 +11,7 @@
  * to encrypt anything.
  */
 import type {
-  ItemPayload, ItemRow, MetaInput, PairedBrowser,
+  ItemPayload, ItemRow, MetaInput, NativeHostStatus, PairedBrowser,
   SyncReport, SyncStatus, VaultStatus,
 } from "./types";
 
@@ -49,6 +49,10 @@ export const ipc = {
   rejectBrowser: () => call<void>("reject_browser"),
   listBrowsers: () => call<PairedBrowser[]>("list_browsers"),
   unpairBrowser: (id: string) => call<void>("unpair_browser", { id }),
+  nativeHostStatus: () => call<NativeHostStatus>("native_host_status"),
+  installNativeHost: (extensionId: string) =>
+    call<string[]>("install_native_host", { extensionId }),
+  uninstallNativeHost: () => call<void>("uninstall_native_host"),
   syncStatus: () => call<SyncStatus>("sync_status"),
   setRelay: (url: string | null) => call<SyncStatus>("set_relay", { url }),
   syncNow: () => call<SyncReport>("sync_now"),
@@ -89,6 +93,7 @@ const mockState = {
   accountKeyRemembered: true, biometricEnabled: false,
   rows: [...MOCK_ROWS],
   browsers: [] as PairedBrowser[],
+  nativeHost: null as string | null,
   relayUrl: null as string | null,
 };
 
@@ -130,6 +135,19 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       return as(status());
     case "list_browsers":
       return as(mockState.browsers);
+    case "native_host_status":
+      return as({
+        browsers: ["Google Chrome"],
+        registered: mockState.nativeHost ? ["Google Chrome"] : [],
+        extension_id: mockState.nativeHost,
+        proxy_present: true,
+      });
+    case "install_native_host":
+      mockState.nativeHost = String(args.extensionId ?? "");
+      return as(["Google Chrome"]);
+    case "uninstall_native_host":
+      mockState.nativeHost = null;
+      return as(undefined);
     case "approve_browser":
       mockState.browsers = [...mockState.browsers, { id: "mock1", name: "Google Chrome", key: "" }];
       return as("mock1");

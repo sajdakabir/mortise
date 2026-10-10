@@ -138,14 +138,7 @@ pub fn install(extension_id: &str) -> Result<Vec<String>, Error> {
     }
 
     let proxy = proxy_path()?;
-    let manifest = HostManifest {
-        name: HOST_NAME,
-        description: "TruePassword native messaging bridge",
-        path: proxy.to_string_lossy().into_owned(),
-        kind: "stdio",
-        allowed_origins: vec![format!("chrome-extension://{id}/")],
-    };
-    let json = serde_json::to_vec_pretty(&manifest).map_err(std::io::Error::other)?;
+    let json = manifest_json(&proxy, id)?;
 
     let mut written = Vec::new();
     for (name, relative) in BROWSERS {
@@ -163,6 +156,22 @@ pub fn install(extension_id: &str) -> Result<Vec<String>, Error> {
         return Err(Error::NoBrowsers);
     }
     Ok(written)
+}
+
+/// The exact bytes the browser reads.
+///
+/// Split out so the shape can be tested without writing into the real browser
+/// directories: these field names are Chrome's, not ours, and a typo in one
+/// produces a host the browser silently never launches.
+fn manifest_json(proxy: &std::path::Path, extension_id: &str) -> Result<Vec<u8>, std::io::Error> {
+    let manifest = HostManifest {
+        name: HOST_NAME,
+        description: "TruePassword native messaging bridge",
+        path: proxy.to_string_lossy().into_owned(),
+        kind: "stdio",
+        allowed_origins: vec![format!("chrome-extension://{extension_id}/")],
+    };
+    serde_json::to_vec_pretty(&manifest).map_err(std::io::Error::other)
 }
 
 /// Remove the host manifest everywhere. Autofill stops working.
@@ -243,6 +252,40 @@ mod tests {
     fn rejects_uppercase_and_digits() {
         assert!(!valid_extension_id("ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP"));
         assert!(!valid_extension_id("abcdefghijklmno1abcdefghijklmnop"));
+    }
+
+    /// Chrome's own field names. `type` rather than `kind`, `allowed_origins`
+    /// with the trailing slash on the origin — get any of these wrong and the
+    /// browser simply never launches the host, with nothing logged.
+    #[test]
+    fn the_manifest_is_shaped_the_way_chrome_expects() {
+        let json = manifest_json(
+            std::path::Path::new("/Applications/TruePassword.app/Contents/MacOS/truepass-proxy"),
+            "abcdefghijklmnopabcdefghijklmnop",
+        )
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&json).unwrap();
+
+        assert_eq!(v["name"], HOST_NAME);
+        assert_eq!(v["type"], "stdio");
+        assert_eq!(
+            v["path"],
+            "/Applications/TruePassword.app/Contents/MacOS/truepass-proxy"
+        );
+        assert_eq!(
+            v["allowed_origins"],
+            serde_json::json!(["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]),
+            "the origin needs the scheme and the trailing slash"
+        );
+    }
+
+    /// Exactly one extension may spawn the proxy. A manifest that authorised
+    /// more than one would let another installed extension reach the vault.
+    #[test]
+    fn only_one_origin_is_authorised() {
+        let json = manifest_json(std::path::Path::new("/tmp/p"), "a".repeat(32).as_str()).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(v["allowed_origins"].as_array().unwrap().len(), 1);
     }
 
     /// The host name is what the extension passes to `connectNative`. If these

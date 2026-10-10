@@ -11,7 +11,7 @@
   /// it is a status display rather than a checklist you mark off yourself, and
   /// it stops rendering once there is nothing left to do.
   import { ipc } from "./ipc";
-  import type { PairedBrowser, VaultStatus } from "./types";
+  import { errorMessage, type NativeHostStatus, type PairedBrowser, type VaultStatus } from "./types";
 
   let { status, revision = 0, onAddItem }: {
     status: VaultStatus;
@@ -23,8 +23,11 @@
   } = $props();
 
   let browsers = $state<PairedBrowser[]>([]);
+  let host = $state<NativeHostStatus | null>(null);
   let expanded = $state(false);
-  let copied = $state("");
+  let extensionId = $state("");
+  let connecting = $state(false);
+  let connectError = $state("");
 
   async function refresh() {
     try {
@@ -34,6 +37,12 @@
       // nothing useful to say to the user here and an error banner on the
       // welcome screen would be a terrible first impression.
       browsers = [];
+    }
+    try {
+      host = await ipc.nativeHostStatus();
+      if (host.extension_id && !extensionId) extensionId = host.extension_id;
+    } catch {
+      host = null;
     }
   }
 
@@ -52,15 +61,20 @@
 
   const hasItem = $derived(status.item_count > 0);
   const hasBrowser = $derived(browsers.length > 0);
+  const registered = $derived(host?.registered ?? []);
   const done = $derived(hasItem && hasBrowser);
 
-  async function copy(text: string, label: string) {
+  async function connect() {
+    if (!extensionId.trim() || connecting) return;
+    connecting = true;
+    connectError = "";
     try {
-      await navigator.clipboard.writeText(text);
-      copied = label;
-      setTimeout(() => { if (copied === label) copied = ""; }, 1600);
-    } catch {
-      copied = "";
+      await ipc.installNativeHost(extensionId.trim());
+      await refresh();
+    } catch (e) {
+      connectError = errorMessage(e);
+    } finally {
+      connecting = false;
     }
   }
 </script>
@@ -124,22 +138,21 @@
             </button>
 
             {#if expanded}
-              <!-- These are the real steps today: the extension is not in the
-                   Chrome Web Store yet, so it loads unpacked and the native
-                   messaging host is registered by hand. Saying "install the
-                   extension" and leaving the other four steps implied would
-                   just move the confusion somewhere less recoverable. -->
+              {#if host && !host.proxy_present}
+                <!-- The one thing the app genuinely cannot do for itself in a
+                     dev checkout: the helper has to be compiled first. -->
+                <p class="warn">
+                  The helper binary is missing. Build it with
+                  <code>cargo build -p truepass-proxy</code>, then reopen this.
+                </p>
+              {/if}
+
+              <!-- Until the extension is in the Chrome Web Store this is a
+                   load-unpacked flow, so it is written as one. The ID step
+                   exists because an unpacked extension's ID is derived from
+                   its folder path and so differs on every machine; a published
+                   one has a fixed ID and this field can disappear. -->
               <ol class="steps">
-                <li>
-                  <span>Build the bridge the browser talks to:</span>
-                  <div class="cmd">
-                    <code>cargo build -p truepass-proxy</code>
-                    <button class="ghost tiny"
-                      onclick={() => copy("cargo build -p truepass-proxy", "build")}>
-                      {copied === "build" ? "Copied" : "Copy"}
-                    </button>
-                  </div>
-                </li>
                 <li>
                   Open <code>chrome://extensions</code>, turn on
                   <strong>Developer mode</strong>, click
@@ -147,21 +160,29 @@
                   <code>extension</code> folder of this repo.
                 </li>
                 <li>
-                  Copy the extension ID Chrome shows under its name, then
-                  register it:
-                  <div class="cmd">
-                    <code>extension/tools/install-host.sh &lt;id&gt;</code>
-                    <button class="ghost tiny"
-                      onclick={() => copy("extension/tools/install-host.sh ", "host")}>
-                      {copied === "host" ? "Copied" : "Copy"}
+                  Paste the extension ID that Chrome shows under its name:
+                  <div class="connect">
+                    <input
+                      class="mono"
+                      placeholder="32 letters, a–p"
+                      spellcheck="false"
+                      bind:value={extensionId}
+                      onkeydown={(e) => { if (e.key === "Enter") connect(); }} />
+                    <button class="primary tiny" disabled={!extensionId.trim() || connecting}
+                      onclick={connect}>
+                      {connecting ? "…" : "Connect"}
                     </button>
                   </div>
+                  {#if connectError}
+                    <p class="warn">{connectError}</p>
+                  {:else if registered.length > 0}
+                    <p class="good">Registered with {registered.join(", ")}.</p>
+                  {/if}
                 </li>
-                <li>Restart the browser.</li>
                 <li>
-                  Click the TruePassword icon in the toolbar and press
-                  <strong>Pair</strong>. Approve it here and this step ticks
-                  itself.
+                  Restart the browser, click the TruePassword icon in the
+                  toolbar and press <strong>Pair</strong>. Approve it here and
+                  this step ticks itself.
                 </li>
               </ol>
             {/if}
@@ -211,7 +232,7 @@
   .small { font-size: 12px; padding: 5px 11px; margin-top: 10px; }
 
   .steps { margin: 12px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.65; }
-  .steps li { margin-bottom: 9px; color: var(--text-dim); }
+  .steps li { margin-bottom: 10px; color: var(--text-dim); }
   .steps strong { color: var(--text); font-weight: 600; }
   code {
     font-family: var(--mono);
@@ -220,14 +241,13 @@
     padding: 1px 5px;
     border-radius: 4px;
   }
-  .cmd {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 5px;
-  }
-  .cmd code { flex: 1; padding: 5px 8px; overflow-x: auto; white-space: nowrap; }
-  .tiny { font-size: 11px; padding: 2px 7px; flex-shrink: 0; }
+
+  .connect { display: flex; gap: 8px; margin-top: 6px; }
+  .connect input { font-size: 11.5px; padding: 5px 8px; }
+  .tiny { font-size: 11px; padding: 2px 9px; flex-shrink: 0; }
+
+  .warn { color: var(--warn); margin-top: 6px !important; }
+  .good { color: var(--ok); margin-top: 6px !important; }
 
   kbd {
     font-family: var(--font);
