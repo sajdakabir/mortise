@@ -97,7 +97,30 @@
         {:else}
           <button class="ghost tiny unlock" onclick={onUnlock}>Unlock</button>
         {/if}
-        <button class="ghost tiny" onclick={() => (editing = "settings")}>Settings</button>
+        <button
+          class="ghost icon"
+          title="Settings"
+          aria-label="Settings"
+          onclick={() => (editing = "settings")}>
+          <!-- Gear drawn as a toothed ring rather than a circle with spokes:
+               detached spokes read as a sun at this size, not a gear. Teeth
+               are generated geometry, so the shape stays even. -->
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true">
+            <path
+              fill="currentColor"
+              fill-rule="evenodd"
+              d="M8.10 3.37 L8.21 1.59 L11.79 1.59 L11.90 3.37
+                 A6.9 6.9 0 0 1 13.35 3.97 L14.68 2.79 L17.21 5.32 L16.03 6.65
+                 A6.9 6.9 0 0 1 16.63 8.10 L18.41 8.21 L18.41 11.79 L16.63 11.90
+                 A6.9 6.9 0 0 1 16.03 13.35 L17.21 14.68 L14.68 17.21 L13.35 16.03
+                 A6.9 6.9 0 0 1 11.90 16.63 L11.79 18.41 L8.21 18.41 L8.10 16.63
+                 A6.9 6.9 0 0 1 6.65 16.03 L5.32 17.21 L2.79 14.68 L3.97 13.35
+                 A6.9 6.9 0 0 1 3.37 11.90 L1.59 11.79 L1.59 8.21 L3.37 8.10
+                 A6.9 6.9 0 0 1 3.97 6.65 L2.79 5.32 L5.32 2.79 L6.65 3.97
+                 A6.9 6.9 0 0 1 8.10 3.37 Z
+                 M10 6.6 A3.4 3.4 0 1 0 10 13.4 A3.4 3.4 0 1 0 10 6.6 Z" />
+          </svg>
+        </button>
       </div>
     </div>
   </aside>
@@ -201,6 +224,16 @@
   .unlock { color: var(--warn); }
   .unlock:hover:not(:disabled) { color: var(--warn); border-color: var(--warn); }
   .unlockbtn { margin-top: 12px; padding: 6px 20px; }
+  /* Square so the gear sits centred rather than in a text-shaped box. */
+  .icon {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 24px;
+    padding: 0;
+    color: var(--text-dim);
+  }
+  .icon:hover { color: var(--text); }
   main { min-width: 0; overflow: hidden; }
   .placeholder { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; }
   .placeholder p { margin: 0; }
