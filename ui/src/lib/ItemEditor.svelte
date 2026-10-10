@@ -35,15 +35,77 @@
   let busy = $state(false);
   let error = $state("");
   let showGenerator = $state(false);
+  let confirmDiscard = $state(false);
+  /// Most items are a name, a username and a password. Everything else is
+  /// real but rare, and showing all nine fields at once made adding one login
+  /// look like filling in a form at a bank.
+  ///
+  /// Starts open when editing an item that already uses any of them, so a
+  /// saved value is never hidden behind a toggle the user has to discover.
+  let showMore = $state(Boolean(seed.urls || seed.folder || seed.tags));
 
   // Editing an existing item needs its secrets, so reveal once on open.
   $effect(() => {
     if (!existing) return;
     ipc.reveal(existing.id)
-      .then((p) => { payload = p; })
+      .then((p) => {
+        payload = p;
+        if (
+          (p.kind === "Login" && (p.totp_seed || p.notes)) ||
+          (p.kind === "ApiKey" && p.notes)
+        ) {
+          showMore = true;
+        }
+      })
       .catch((e) => { error = errorMessage(e); })
       .finally(() => { loading = false; });
   });
+
+  /// Whether anything has been typed. Drives whether a stray click outside
+  /// can throw the form away.
+  const dirty = $derived(
+    title !== seed.title ||
+      username !== seed.username ||
+      urls !== seed.urls ||
+      folder !== seed.folder ||
+      tags !== seed.tags ||
+      hasContent(payload),
+  );
+
+  function hasContent(p: ItemPayload): boolean {
+    switch (p.kind) {
+      case "Login":
+        return Boolean(p.password || p.totp_seed || p.notes);
+      case "SecureNote":
+        return Boolean(p.body);
+      case "ApiKey":
+        return Boolean(p.key || p.notes);
+      case "EnvSecret":
+        return Boolean(p.value);
+      case "Card":
+        return Boolean(p.number || p.expiry || p.cvv || p.holder);
+      default:
+        return false;
+    }
+  }
+
+  /// Escape and backdrop clicks come through here rather than going straight
+  /// to onCancel. Losing a generated password to a stray click outside the
+  /// panel is a bad way to lose work, so a form with anything in it asks.
+  function attemptClose() {
+    if (dirty && !confirmDiscard) {
+      confirmDiscard = true;
+      return;
+    }
+    onCancel();
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      attemptClose();
+    }
+  }
 
   function changeKind(next: ItemKind) {
     kind = next;
@@ -71,11 +133,23 @@
   }
 </script>
 
-<div class="editor">
-  <div class="head spread">
+<svelte:window onkeydown={onKeydown} />
+
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="backdrop" onclick={attemptClose}>
+  <!-- Stops a click inside the panel bubbling out and dismissing it. -->
+  <div
+    class="panel"
+    role="dialog"
+    aria-modal="true"
+    aria-label={seed.isEdit ? "Edit item" : "New item"}
+    tabindex="-1"
+    onclick={(e) => e.stopPropagation()}>
+    <div class="head spread">
     <h2>{existing ? "Edit item" : "New item"}</h2>
     <div class="row">
-      <button class="ghost" onclick={onCancel}>Cancel</button>
+      <button class="ghost" onclick={attemptClose}>Cancel</button>
       <button class="primary" disabled={!title.trim() || busy || loading} onclick={save}>
         {busy ? "Saving…" : "Save"}
       </button>
@@ -125,16 +199,18 @@
             }} />
           </div>
         {/if}
-        <div class="field">
-          <label for="totp">TOTP seed (optional)</label>
-          <input id="totp" class="mono" value={payload.totp_seed ?? ""} spellcheck="false"
-            oninput={(e) => { if (payload.kind === "Login") payload.totp_seed = e.currentTarget.value || null; }} />
-        </div>
-        <div class="field">
-          <label for="notes">Notes</label>
-          <textarea id="notes" value={payload.notes ?? ""}
-            oninput={(e) => { if (payload.kind === "Login") payload.notes = e.currentTarget.value || null; }}></textarea>
-        </div>
+        {#if showMore}
+          <div class="field">
+            <label for="totp">TOTP seed</label>
+            <input id="totp" class="mono" value={payload.totp_seed ?? ""} spellcheck="false"
+              oninput={(e) => { if (payload.kind === "Login") payload.totp_seed = e.currentTarget.value || null; }} />
+          </div>
+          <div class="field">
+            <label for="notes">Notes</label>
+            <textarea id="notes" rows="3" value={payload.notes ?? ""}
+              oninput={(e) => { if (payload.kind === "Login") payload.notes = e.currentTarget.value || null; }}></textarea>
+          </div>
+        {/if}
       {:else if payload.kind === "SecureNote"}
         <div class="field">
           <label for="body">Note</label>
@@ -177,18 +253,39 @@
         </div>
       {/if}
 
-      <div class="field">
-        <label for="urls">Websites, one per line</label>
-        <textarea id="urls" bind:value={urls} spellcheck="false" rows="2"></textarea>
-      </div>
-      <div class="two">
+      {#if showMore}
         <div class="field">
-          <label for="folder">Folder</label>
-          <input id="folder" bind:value={folder} />
+          <label for="urls">Websites, one per line</label>
+          <textarea id="urls" bind:value={urls} spellcheck="false" rows="2"></textarea>
+          <p class="faint hint">
+            Autofill matches the exact site, so a login saved for one host does
+            not cover its subdomains — add each one you use.
+          </p>
         </div>
-        <div class="field">
-          <label for="tags">Tags, comma separated</label>
-          <input id="tags" bind:value={tags} />
+        <div class="two">
+          <div class="field">
+            <label for="folder">Folder</label>
+            <input id="folder" bind:value={folder} />
+          </div>
+          <div class="field">
+            <label for="tags">Tags, comma separated</label>
+            <input id="tags" bind:value={tags} />
+          </div>
+        </div>
+      {/if}
+
+      <button class="ghost more" onclick={() => (showMore = !showMore)}>
+        {showMore ? "Fewer details" : "More details"}
+      </button>
+    {/if}
+    </div>
+
+    {#if confirmDiscard}
+      <div class="discard">
+        <span>Discard this item?</span>
+        <div class="row">
+          <button class="ghost" onclick={() => (confirmDiscard = false)}>Keep editing</button>
+          <button class="danger" onclick={onCancel}>Discard</button>
         </div>
       </div>
     {/if}
@@ -196,10 +293,53 @@
 </div>
 
 <style>
-  .editor { height: 100%; display: flex; flex-direction: column; }
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: grid;
+    place-items: center;
+    padding: 32px 20px;
+    z-index: 20;
+  }
+  .panel {
+    width: 100%;
+    max-width: 520px;
+    /* Capped to the viewport so a long form scrolls inside the panel rather
+       than pushing it off a short window. */
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+  }
+  .discard {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 11px 20px;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    font-size: 12px;
+  }
+  .discard .row { display: flex; gap: 8px; }
   .head { padding: 18px 22px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   h2 { font-size: 15px; font-weight: 600; margin: 0; }
-  .body { padding: 18px 22px 40px; overflow-y: auto; flex: 1; }
+  /* Capped and left-aligned. Full-pane-width inputs for a username look
+     absurd on a wide window and make the form read as longer than it is. */
+  .body { padding: 18px 20px 22px; overflow-y: auto; flex: 1; }
+  .more {
+    font-size: 12px;
+    padding: 4px 0;
+    color: var(--text-dim);
+    border: none;
+    background: none;
+  }
+  .more:hover { color: var(--text); }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .lbl { margin-bottom: 5px; }
   .lbl label { margin: 0; }

@@ -7,8 +7,15 @@
 
   let status = $state<VaultStatus | null>(null);
 
+  /// Set when the user asks to unlock from inside the vault view.
+  ///
+  /// Locking keeps search working, so `searchable` stays true and routing on
+  /// it alone would leave no way back to the unlock screen.
+  let unlocking = $state(false);
+
   async function refreshStatus() {
     status = await ipc.status();
+    if (status.unlocked) unlocking = false;
   }
 
   $effect(() => {
@@ -40,10 +47,16 @@
     <div class="boot"></div>
   {:else if !status.exists}
     <Setup onDone={refreshStatus} />
-  {:else if !status.searchable}
-    <Unlock {status} onUnlocked={refreshStatus} />
+  {:else if !status.searchable || unlocking}
+    <Unlock
+      {status}
+      onUnlocked={refreshStatus}
+      onCancel={() => (unlocking = false)} />
   {:else}
-    <Vault {status} onStatus={(s) => (status = s)} />
+    <Vault
+      {status}
+      onStatus={(s) => (status = s)}
+      onUnlock={() => (unlocking = true)} />
   {/if}
 </div>
 

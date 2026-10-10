@@ -4,7 +4,7 @@
 //!
 //! | Entry | Protection | Effect |
 //! |---|---|---|
-//! | account key | device unlocked, no prompt | you type only your password, not the recovery key |
+//! | account key | device unlocked, no prompt* | you type only your password, not the recovery key |
 //! | unlock token | Touch ID or passcode | you type nothing at all |
 //!
 //! ## Why the account key is not behind Touch ID
@@ -27,6 +27,9 @@
 //! default, and the UI says so plainly.
 //!
 //! Both entries are `ThisDeviceOnly`, so neither ever syncs to iCloud Keychain.
+//!
+//! \* Release builds only. See [`recall_account_key`] for why an unsigned dev
+//! build prompts for the login keychain password on every unlock.
 
 use truepass_crypto::secret::Key32;
 use truepass_macos::{Error as KeychainError, Protection};
@@ -48,7 +51,13 @@ pub fn remember_account_key(key: &Key32) -> Result<(), KeychainError> {
     )
 }
 
-/// Read the remembered account key. No prompt.
+/// Read the remembered account key.
+///
+/// Prompt-free in a release build: the item carries no `SecAccessControl`, so
+/// Touch ID is never involved. An *unsigned* build is a different story —
+/// macOS identifies the reader by code signature, `cargo` ad-hoc-signs every
+/// rebuild to a fresh cdhash, and the keychain therefore sees a stranger and
+/// asks for the login keychain password. That is the dev loop, not the design.
 pub fn recall_account_key() -> Result<Option<Key32>, KeychainError> {
     match truepass_macos::load(SERVICE, ACCOUNT_KEY, "")? {
         Some(bytes) => Ok(Key32::from_slice(&bytes).ok()),
