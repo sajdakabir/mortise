@@ -5,7 +5,8 @@
   --text: #e6e8ee;
   --dim: #9aa1b1;
   --faint: #6b7280;
-  --accent: #7aa2f7;
+  --accent: #e8eaf0;
+  --accent-ink: #15171d;
   --warn: #e0af68;
   --danger: #f07178;
   color-scheme: dark;
@@ -15,7 +16,8 @@
   :root {
     --bg: #ffffff; --raised: #f6f7f9; --border: #e1e4ea;
     --text: #1a1d24; --dim: #5c6472; --faint: #8b93a3;
-    --accent: #3b6fd4; --warn: #9a6b1e; --danger: #c0392b;
+    --accent: #1a1d24;
+    --accent-ink: #ffffff; --warn: #9a6b1e; --danger: #c0392b;
     color-scheme: light;
   }
 }
@@ -60,7 +62,7 @@ button.wide {
   width: 100%; padding: 8px;
   font: inherit; cursor: pointer;
   border: 1px solid var(--accent); border-radius: 7px;
-  background: var(--accent); color: #0d1117; font-weight: 560;
+  background: var(--accent); color: var(--accent-ink); font-weight: 560;
 }
 button.wide.plain { background: transparent; color: var(--text); border-color: var(--border); }
 button.wide:disabled { opacity: 0.5; cursor: default; }

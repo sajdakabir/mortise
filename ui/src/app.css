@@ -9,8 +9,12 @@
   --text: #e6e8ee;
   --text-dim: #9aa1b1;
   --text-faint: #6b7280;
-  --accent: #7aa2f7;
-  --accent-dim: #3d5a99;
+  /* Monochrome accent. Off-white rather than pure white: #fff against a
+     near-black ground is harsh at button size. --accent-ink is whatever text
+     sits on top, so the pair flips cleanly between themes. */
+  --accent: #e8eaf0;
+  --accent-ink: #15171d;
+  --accent-dim: #2b303b;
   --danger: #f07178;
   --ok: #9ece6a;
   --warn: #e0af68;
@@ -33,8 +37,9 @@
     --text: #1a1d24;
     --text-dim: #5c6472;
     --text-faint: #8b93a3;
-    --accent: #3b6fd4;
-    --accent-dim: #b9ccf2;
+    --accent: #1a1d24;
+    --accent-ink: #ffffff;
+    --accent-dim: #e3e7ef;
     --danger: #c0392b;
     --ok: #3f8f3f;
     --warn: #9a6b1e;
@@ -72,10 +77,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0d1117;
+  color: var(--accent-ink);
   font-weight: 560;
 }
-button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+/* Brightening a near-white button does nothing, so dim it instead. */
+button.primary:hover:not(:disabled) { opacity: 0.88; }
 button.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
 button.ghost:hover:not(:disabled) { background: var(--bg-input); border-color: var(--border); color: var(--text); }
 button.danger { color: var(--danger); border-color: transparent; background: transparent; }
