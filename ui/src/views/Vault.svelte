@@ -120,13 +120,6 @@
   <main>
     {#if editing === "settings"}
       <Settings {status} onStatus={(s) => (status = s)} onClose={() => (editing = "none")} />
-    {:else if editing !== "none"}
-      {#key editing === "existing" ? selected?.id : "new"}
-        <ItemEditor
-          existing={editing === "existing" ? selected : null}
-          onSaved={onSaved}
-          onCancel={() => (editing = "none")} />
-      {/key}
     {:else if !status.unlocked}
       <div class="placeholder">
         <p>Vault is locked</p>
@@ -145,6 +138,17 @@
     {/if}
   </main>
 </div>
+
+<!-- Outside the shell so the dialog overlays the whole window rather than
+     only the right-hand pane, and the list stays visible behind it. -->
+{#if editing === "new" || editing === "existing"}
+  {#key editing === "existing" ? selected?.id : "new"}
+    <ItemEditor
+      existing={editing === "existing" ? selected : null}
+      onSaved={onSaved}
+      onCancel={() => (editing = "none")} />
+  {/key}
+{/if}
 
 <style>
   .shell { height: 100%; display: grid; grid-template-columns: 268px 1fr; }

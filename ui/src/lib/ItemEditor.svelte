@@ -35,6 +35,7 @@
   let busy = $state(false);
   let error = $state("");
   let showGenerator = $state(false);
+  let confirmDiscard = $state(false);
   /// Most items are a name, a username and a password. Everything else is
   /// real but rare, and showing all nine fields at once made adding one login
   /// look like filling in a form at a bank.
@@ -59,6 +60,52 @@
       .catch((e) => { error = errorMessage(e); })
       .finally(() => { loading = false; });
   });
+
+  /// Whether anything has been typed. Drives whether a stray click outside
+  /// can throw the form away.
+  const dirty = $derived(
+    title !== seed.title ||
+      username !== seed.username ||
+      urls !== seed.urls ||
+      folder !== seed.folder ||
+      tags !== seed.tags ||
+      hasContent(payload),
+  );
+
+  function hasContent(p: ItemPayload): boolean {
+    switch (p.kind) {
+      case "Login":
+        return Boolean(p.password || p.totp_seed || p.notes);
+      case "SecureNote":
+        return Boolean(p.body);
+      case "ApiKey":
+        return Boolean(p.key || p.notes);
+      case "EnvSecret":
+        return Boolean(p.value);
+      case "Card":
+        return Boolean(p.number || p.expiry || p.cvv || p.holder);
+      default:
+        return false;
+    }
+  }
+
+  /// Escape and backdrop clicks come through here rather than going straight
+  /// to onCancel. Losing a generated password to a stray click outside the
+  /// panel is a bad way to lose work, so a form with anything in it asks.
+  function attemptClose() {
+    if (dirty && !confirmDiscard) {
+      confirmDiscard = true;
+      return;
+    }
+    onCancel();
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      attemptClose();
+    }
+  }
 
   function changeKind(next: ItemKind) {
     kind = next;
@@ -86,11 +133,23 @@
   }
 </script>
 
-<div class="editor">
-  <div class="head spread">
+<svelte:window onkeydown={onKeydown} />
+
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="backdrop" onclick={attemptClose}>
+  <!-- Stops a click inside the panel bubbling out and dismissing it. -->
+  <div
+    class="panel"
+    role="dialog"
+    aria-modal="true"
+    aria-label={seed.isEdit ? "Edit item" : "New item"}
+    tabindex="-1"
+    onclick={(e) => e.stopPropagation()}>
+    <div class="head spread">
     <h2>{existing ? "Edit item" : "New item"}</h2>
     <div class="row">
-      <button class="ghost" onclick={onCancel}>Cancel</button>
+      <button class="ghost" onclick={attemptClose}>Cancel</button>
       <button class="primary" disabled={!title.trim() || busy || loading} onclick={save}>
         {busy ? "Saving…" : "Save"}
       </button>
@@ -219,17 +278,60 @@
         {showMore ? "Fewer details" : "More details"}
       </button>
     {/if}
+    </div>
+
+    {#if confirmDiscard}
+      <div class="discard">
+        <span>Discard this item?</span>
+        <div class="row">
+          <button class="ghost" onclick={() => (confirmDiscard = false)}>Keep editing</button>
+          <button class="danger" onclick={onCancel}>Discard</button>
+        </div>
+      </div>
+    {/if}
   </div>
 </div>
 
 <style>
-  .editor { height: 100%; display: flex; flex-direction: column; }
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: grid;
+    place-items: center;
+    padding: 32px 20px;
+    z-index: 20;
+  }
+  .panel {
+    width: 100%;
+    max-width: 520px;
+    /* Capped to the viewport so a long form scrolls inside the panel rather
+       than pushing it off a short window. */
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+  }
+  .discard {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 11px 20px;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    font-size: 12px;
+  }
+  .discard .row { display: flex; gap: 8px; }
   .head { padding: 18px 22px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   h2 { font-size: 15px; font-weight: 600; margin: 0; }
   /* Capped and left-aligned. Full-pane-width inputs for a username look
      absurd on a wide window and make the form read as longer than it is. */
-  .body { padding: 18px 22px 40px; overflow-y: auto; flex: 1; }
-  .body > :global(*) { max-width: 460px; }
+  .body { padding: 18px 20px 22px; overflow-y: auto; flex: 1; }
   .more {
     font-size: 12px;
     padding: 4px 0;
