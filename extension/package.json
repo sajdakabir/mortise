@@ -1,0 +1,7 @@
+{
+  "name": "truepassword-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser extension. No build step: loaded unpacked, no dependencies, no bundler."
+}

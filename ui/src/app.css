@@ -1,0 +1,137 @@
+/* Dark-first, because the app is a utility people keep open in a corner.
+   Light theme follows the system. */
+:root {
+  --bg: #15171d;
+  --bg-raised: #1b1e26;
+  --bg-input: #22262f;
+  --border: #2b2f3a;
+  --border-strong: #3a3f4d;
+  --text: #e6e8ee;
+  --text-dim: #9aa1b1;
+  --text-faint: #6b7280;
+  /* Monochrome accent. Off-white rather than pure white: #fff against a
+     near-black ground is harsh at button size. --accent-ink is whatever text
+     sits on top, so the pair flips cleanly between themes. */
+  --accent: #e8eaf0;
+  --accent-ink: #15171d;
+  --accent-dim: #2b303b;
+  --danger: #f07178;
+  --ok: #9ece6a;
+  --warn: #e0af68;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f9;
+    --bg-raised: #ffffff;
+    --bg-input: #ffffff;
+    --border: #e1e4ea;
+    --border-strong: #c9cedb;
+    --text: #1a1d24;
+    --text-dim: #5c6472;
+    --text-faint: #8b93a3;
+    --accent: #1a1d24;
+    --accent-ink: #ffffff;
+    --accent-dim: #e3e7ef;
+    --danger: #c0392b;
+    --ok: #3f8f3f;
+    --warn: #9a6b1e;
+    color-scheme: light;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  transition: background 0.12s, border-color 0.12s;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 560;
+}
+/* Brightening a near-white button does nothing, so dim it instead. */
+button.primary:hover:not(:disabled) { opacity: 0.88; }
+button.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+button.ghost:hover:not(:disabled) { background: var(--bg-input); border-color: var(--border); color: var(--text); }
+button.danger { color: var(--danger); border-color: transparent; background: transparent; }
+button.danger:hover:not(:disabled) { border-color: var(--danger); }
+
+input, textarea, select {
+  font: inherit;
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+textarea { resize: vertical; min-height: 72px; font-family: inherit; }
+
+label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 5px; letter-spacing: 0.02em; }
+.field { margin-bottom: 14px; }
+.mono { font-family: var(--mono); }
+.dim { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+.row { display: flex; gap: 8px; align-items: center; }
+.spread { display: flex; justify-content: space-between; align-items: center; }
+.error {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  padding: 8px 11px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+.note {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  color: var(--warn);
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+/* The window has a transparent title bar, so the top strip must be draggable
+   or the window cannot be moved. */
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
