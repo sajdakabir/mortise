@@ -86,12 +86,14 @@ A privacy policy URL is mandatory even when nothing is collected.
 Publishing assigns a permanent extension ID. Two things depend on it, and both
 are currently parameterised by hand:
 
-1. **`allowed_origins` in the native messaging host manifest.** Written today by
-   `extension/tools/install-host.sh <id>`. Once the ID is fixed it should be a
-   constant, and the app should write the host manifest itself on first run
-   instead of asking anyone to run a shell script.
+1. **`allowed_origins` in the native messaging host manifest.** The app writes
+   this itself now (`browser::native_host`), taking the ID from the onboarding
+   panel. Once the ID is fixed it becomes a constant and the field disappears —
+   the app can register the host on first run with nothing to type.
+   `extension/tools/install-host.sh` stays for scripted setups.
 2. **The onboarding panel in the app**, which currently walks through loading
-   unpacked. Steps 1–4 collapse into "install from the Chrome Web Store".
+   unpacked. Step 1 becomes "install from the Chrome Web Store" and step 2
+   goes away.
 
 Grab the extension's public key from the dashboard and put it in a *local*
 `manifest.json` `key` field so unpacked development builds get the same ID as
