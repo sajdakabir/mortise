@@ -5,8 +5,14 @@
   import { ipc } from "../lib/ipc";
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
 
-  let { status = $bindable(), onStatus }:
-    { status: VaultStatus; onStatus: (s: VaultStatus) => void } = $props();
+  let { status = $bindable(), onStatus, onUnlock }: {
+    status: VaultStatus;
+    onStatus: (s: VaultStatus) => void;
+    /// Ask the shell to show the unlock screen. Locking drops the keys that
+    /// decrypt secrets but keeps search working, so this view stays up — which
+    /// means it has to offer the way back itself.
+    onUnlock: () => void;
+  } = $props();
 
   let query = $state("");
   let rows = $state<ItemRow[]>([]);
@@ -89,7 +95,7 @@
         {#if status.unlocked}
           <button class="ghost tiny" onclick={lock}>Lock</button>
         {:else}
-          <span class="locked">Locked — search only</span>
+          <button class="ghost tiny unlock" onclick={onUnlock}>Unlock</button>
         {/if}
         <button class="ghost tiny" onclick={() => (editing = "settings")}>Settings</button>
       </div>
@@ -108,10 +114,12 @@
       {/key}
     {:else if !status.unlocked}
       <div class="placeholder">
-        <p>Vault is locked.</p>
+        <p>Vault is locked</p>
         <p class="faint small">
-          Search and titles still work. Unlock to see or change anything secret.
+          You can still search and see names. Unlock to reveal, copy or change
+          anything.
         </p>
+        <button class="primary unlockbtn" onclick={onUnlock}>Unlock</button>
       </div>
     {:else if selected}
       <ItemDetail item={selected} onEdit={() => (editing = "existing")} onDeleted={onDeleted} />
@@ -190,7 +198,9 @@
   .s { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
   .empty { padding: 20px 12px; font-size: 12px; }
   .foot { padding: 9px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
-  .locked { font-size: 11px; color: var(--warn); }
+  .unlock { color: var(--warn); }
+  .unlock:hover:not(:disabled) { color: var(--warn); border-color: var(--warn); }
+  .unlockbtn { margin-top: 12px; padding: 6px 20px; }
   main { min-width: 0; overflow: hidden; }
   .placeholder { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; }
   .placeholder p { margin: 0; }

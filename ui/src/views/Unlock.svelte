@@ -2,8 +2,14 @@
   import { ipc } from "../lib/ipc";
   import { errorMessage, isCmdError, type VaultStatus } from "../lib/types";
 
-  let { status, onUnlocked }:
-    { status: VaultStatus; onUnlocked: () => void } = $props();
+  let { status, onUnlocked, onCancel }: {
+    status: VaultStatus;
+    onUnlocked: () => void;
+    /// Go back to the locked vault. Only offered when there is something to go
+    /// back to — on a cold start search is not available either, so leaving
+    /// would strand the user on an empty screen.
+    onCancel?: () => void;
+  } = $props();
 
   let password = $state("");
   let kit = $state("");
@@ -80,6 +86,12 @@
     <button class="primary wide" disabled={!canSubmit} onclick={submit}>
       {busy ? "Unlocking…" : "Unlock"}
     </button>
+
+    {#if onCancel && status.searchable}
+      <button class="ghost wide back" onclick={onCancel}>
+        Back to search
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -88,6 +100,7 @@
   .card { width: 100%; max-width: 380px; }
   h1 { font-size: 19px; font-weight: 600; margin: 0 0 22px; }
   .wide { width: 100%; padding: 9px; }
+  .back { margin-top: 8px; font-size: 12px; }
   .touchid { margin-bottom: 4px; }
   .or {
     display: flex; align-items: center; gap: 10px;
