@@ -102,14 +102,15 @@
           title="Settings"
           aria-label="Settings"
           onclick={() => (editing = "settings")}>
-          <!-- Gear drawn as a toothed ring rather than a circle with spokes:
-               detached spokes read as a sun at this size, not a gear. Teeth
-               are generated geometry, so the shape stays even. -->
-          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true">
+          <!-- Teeth are shallow and chunky on a solid body. Deep teeth turn
+               spiky at 16px and read as a sun or a star; the body has to stay
+               dominant for the silhouette to say gear. Generated geometry, so
+               the spacing is even. -->
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
             <path
               fill="currentColor"
               fill-rule="evenodd"
-              d="M8.03 4.12 L7.89 0.84 L12.11 0.84 L11.97 4.12 A6.2 6.2 0 0 1 12.77 4.45 L12.77 4.45 L14.98 2.03 L17.97 5.02 L15.55 7.23 A6.2 6.2 0 0 1 15.88 8.03 L15.88 8.03 L19.16 7.89 L19.16 12.11 L15.88 11.97 A6.2 6.2 0 0 1 15.55 12.77 L15.55 12.77 L17.97 14.98 L14.98 17.97 L12.77 15.55 A6.2 6.2 0 0 1 11.97 15.88 L11.97 15.88 L12.11 19.16 L7.89 19.16 L8.03 15.88 A6.2 6.2 0 0 1 7.23 15.55 L7.23 15.55 L5.02 17.97 L2.03 14.98 L4.45 12.77 A6.2 6.2 0 0 1 4.12 11.97 L4.12 11.97 L0.84 12.11 L0.84 7.89 L4.12 8.03 A6.2 6.2 0 0 1 4.45 7.23 L4.45 7.23 L2.03 5.02 L5.02 2.03 L7.23 4.45 A6.2 6.2 0 0 1 8.03 4.12 Z M10.0 7.0 A3.0 3.0 0 1 0 10.0 13.0 A3.0 3.0 0 1 0 10.0 7.0 Z" />
+              d="M7.62 2.89 L7.46 0.85 L12.54 0.85 L12.38 2.89 A7.5 7.5 0 0 1 13.35 3.29 L13.35 3.29 L14.68 1.73 L18.27 5.32 L16.71 6.65 A7.5 7.5 0 0 1 17.11 7.62 L17.11 7.62 L19.15 7.46 L19.15 12.54 L17.11 12.38 A7.5 7.5 0 0 1 16.71 13.35 L16.71 13.35 L18.27 14.68 L14.68 18.27 L13.35 16.71 A7.5 7.5 0 0 1 12.38 17.11 L12.38 17.11 L12.54 19.15 L7.46 19.15 L7.62 17.11 A7.5 7.5 0 0 1 6.65 16.71 L6.65 16.71 L5.32 18.27 L1.73 14.68 L3.29 13.35 A7.5 7.5 0 0 1 2.89 12.38 L2.89 12.38 L0.85 12.54 L0.85 7.46 L2.89 7.62 A7.5 7.5 0 0 1 3.29 6.65 L3.29 6.65 L1.73 5.32 L5.32 1.73 L6.65 3.29 A7.5 7.5 0 0 1 7.62 2.89 Z M10.0 6.7 A3.3 3.3 0 1 0 10.0 13.3 A3.3 3.3 0 1 0 10.0 6.7 Z" />
           </svg>
         </button>
       </div>
