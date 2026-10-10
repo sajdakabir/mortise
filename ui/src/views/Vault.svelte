@@ -132,9 +132,47 @@
     min-width: 0;
   }
   /* Leaves room for the macOS traffic lights under a transparent title bar. */
-  .topbar { padding: 10px 12px 8px; padding-left: 78px; flex-shrink: 0; }
+  /* The window has a transparent title bar, so the traffic lights float over
+     the top-left of this sidebar. Clearing them with left padding squeezed the
+     search into the leftover width; reserving the height instead puts it on
+     its own row at full width, which is what every other macOS sidebar does.
+     The strip above it stays draggable, so the lights still have a grab area. */
+  .topbar { padding: 38px 10px 8px; flex-shrink: 0; }
   .searchwrap { width: 100%; }
-  .search { font-size: 12px; padding: 5px 9px; }
+  .search {
+    font-size: 12.5px;
+    padding: 6px 10px 6px 28px;
+    border-radius: 7px;
+    background: var(--bg-input);
+  }
+  .searchwrap { position: relative; }
+  /* Magnifier drawn in CSS rather than shipped as an icon file or an inline
+     SVG — it is two shapes, and the asset would cost more than it saves. */
+  .searchwrap::before {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    margin-top: -5px;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .searchwrap::after {
+    content: "";
+    position: absolute;
+    left: 17px;
+    top: 50%;
+    width: 4px;
+    height: 1.5px;
+    margin-top: 2px;
+    background: var(--text-faint);
+    transform: rotate(45deg);
+    transform-origin: left center;
+    pointer-events: none;
+  }
   .listhead { padding: 8px 12px 6px; flex-shrink: 0; }
   .count { font-size: 11px; }
   .tiny { font-size: 11px; padding: 2px 8px; }
