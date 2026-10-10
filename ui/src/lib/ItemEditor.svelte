@@ -35,12 +35,27 @@
   let busy = $state(false);
   let error = $state("");
   let showGenerator = $state(false);
+  /// Most items are a name, a username and a password. Everything else is
+  /// real but rare, and showing all nine fields at once made adding one login
+  /// look like filling in a form at a bank.
+  ///
+  /// Starts open when editing an item that already uses any of them, so a
+  /// saved value is never hidden behind a toggle the user has to discover.
+  let showMore = $state(Boolean(seed.urls || seed.folder || seed.tags));
 
   // Editing an existing item needs its secrets, so reveal once on open.
   $effect(() => {
     if (!existing) return;
     ipc.reveal(existing.id)
-      .then((p) => { payload = p; })
+      .then((p) => {
+        payload = p;
+        if (
+          (p.kind === "Login" && (p.totp_seed || p.notes)) ||
+          (p.kind === "ApiKey" && p.notes)
+        ) {
+          showMore = true;
+        }
+      })
       .catch((e) => { error = errorMessage(e); })
       .finally(() => { loading = false; });
   });
@@ -125,16 +140,18 @@
             }} />
           </div>
         {/if}
-        <div class="field">
-          <label for="totp">TOTP seed (optional)</label>
-          <input id="totp" class="mono" value={payload.totp_seed ?? ""} spellcheck="false"
-            oninput={(e) => { if (payload.kind === "Login") payload.totp_seed = e.currentTarget.value || null; }} />
-        </div>
-        <div class="field">
-          <label for="notes">Notes</label>
-          <textarea id="notes" value={payload.notes ?? ""}
-            oninput={(e) => { if (payload.kind === "Login") payload.notes = e.currentTarget.value || null; }}></textarea>
-        </div>
+        {#if showMore}
+          <div class="field">
+            <label for="totp">TOTP seed</label>
+            <input id="totp" class="mono" value={payload.totp_seed ?? ""} spellcheck="false"
+              oninput={(e) => { if (payload.kind === "Login") payload.totp_seed = e.currentTarget.value || null; }} />
+          </div>
+          <div class="field">
+            <label for="notes">Notes</label>
+            <textarea id="notes" rows="3" value={payload.notes ?? ""}
+              oninput={(e) => { if (payload.kind === "Login") payload.notes = e.currentTarget.value || null; }}></textarea>
+          </div>
+        {/if}
       {:else if payload.kind === "SecureNote"}
         <div class="field">
           <label for="body">Note</label>
@@ -177,20 +194,30 @@
         </div>
       {/if}
 
-      <div class="field">
-        <label for="urls">Websites, one per line</label>
-        <textarea id="urls" bind:value={urls} spellcheck="false" rows="2"></textarea>
-      </div>
-      <div class="two">
+      {#if showMore}
         <div class="field">
-          <label for="folder">Folder</label>
-          <input id="folder" bind:value={folder} />
+          <label for="urls">Websites, one per line</label>
+          <textarea id="urls" bind:value={urls} spellcheck="false" rows="2"></textarea>
+          <p class="faint hint">
+            Autofill matches the exact site, so a login saved for one host does
+            not cover its subdomains — add each one you use.
+          </p>
         </div>
-        <div class="field">
-          <label for="tags">Tags, comma separated</label>
-          <input id="tags" bind:value={tags} />
+        <div class="two">
+          <div class="field">
+            <label for="folder">Folder</label>
+            <input id="folder" bind:value={folder} />
+          </div>
+          <div class="field">
+            <label for="tags">Tags, comma separated</label>
+            <input id="tags" bind:value={tags} />
+          </div>
         </div>
-      </div>
+      {/if}
+
+      <button class="ghost more" onclick={() => (showMore = !showMore)}>
+        {showMore ? "Fewer details" : "More details"}
+      </button>
     {/if}
   </div>
 </div>
@@ -199,7 +226,18 @@
   .editor { height: 100%; display: flex; flex-direction: column; }
   .head { padding: 18px 22px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  /* Capped and left-aligned. Full-pane-width inputs for a username look
+     absurd on a wide window and make the form read as longer than it is. */
   .body { padding: 18px 22px 40px; overflow-y: auto; flex: 1; }
+  .body > :global(*) { max-width: 460px; }
+  .more {
+    font-size: 12px;
+    padding: 4px 0;
+    color: var(--text-dim);
+    border: none;
+    background: none;
+  }
+  .more:hover { color: var(--text); }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .lbl { margin-bottom: 5px; }
   .lbl label { margin: 0; }
