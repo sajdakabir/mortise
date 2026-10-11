@@ -91,6 +91,12 @@ export function emptyPayload(kind: ItemKind): ItemPayload {
 }
 
 /** A paired browser. */
+/** A login waiting to be saved. Deliberately carries no password. */
+export interface CaptureSummary {
+  origin: string;
+  username: string | null;
+}
+
 /** What an import did. Counts only — no credential ever reaches the webview. */
 export interface ImportReport {
   source: string;

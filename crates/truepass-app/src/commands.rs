@@ -476,6 +476,72 @@ pub fn pending_browser(state: State<'_, AppState>) -> Option<String> {
     state.pending_association()
 }
 
+/// The login waiting to be saved, if any.
+///
+/// Returns the origin and username only. The webview has no need for the
+/// password — it is saving it, not showing it — and the less of it that
+/// exists outside Rust the better.
+#[tauri::command]
+pub fn pending_capture(state: State<'_, AppState>) -> Option<crate::dto::CaptureSummary> {
+    state
+        .pending_capture_summary()
+        .map(|(origin, username)| crate::dto::CaptureSummary { origin, username })
+}
+
+/// Save the waiting login.
+///
+/// The title defaults to the origin's host, which is what the user would type
+/// anyway, and the origin goes into `urls` so autofill matches it next time.
+#[tauri::command]
+pub fn save_capture(state: State<'_, AppState>, title: Option<String>) -> CmdResult<String> {
+    state.touch();
+
+    let capture = state
+        .take_pending_capture()
+        .ok_or_else(|| CmdError::bad_request("Nothing is waiting to be saved."))?;
+
+    let title = title
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| host_of(&capture.origin));
+
+    let meta = truepass_vault::ItemMeta {
+        title,
+        urls: vec![capture.origin.clone()],
+        username: capture.username.clone(),
+        folder: None,
+        tags: Vec::new(),
+    };
+    let payload = truepass_vault::ItemPayload::Login {
+        password: capture.password.to_string(),
+        totp_seed: None,
+        notes: None,
+    };
+
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let id = v.create_item(&meta, &payload)?;
+        Ok(crate::dto::id_to_hex(id))
+    })
+}
+
+/// Throw away the waiting login.
+#[tauri::command]
+pub fn discard_capture(state: State<'_, AppState>) {
+    state.clear_pending_capture();
+}
+
+/// `https://github.com` becomes `github.com`. Falls back to the whole origin
+/// rather than inventing a name.
+fn host_of(origin: &str) -> String {
+    origin
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(origin)
+        .trim_end_matches('/')
+        .to_string()
+}
+
 /// Decline the pending pairing request.
 #[tauri::command]
 pub fn reject_browser(state: State<'_, AppState>) {

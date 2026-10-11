@@ -85,6 +85,7 @@ pub fn verify(request: &Request) -> Option<Association> {
     let (id, proof) = match request {
         Request::Logins { id, proof, .. } => (id, proof),
         Request::Credential { id, proof, .. } => (id, proof),
+        Request::Capture { id, proof, .. } => (id, proof),
         Request::Status | Request::Associate { .. } => return None,
     };
 

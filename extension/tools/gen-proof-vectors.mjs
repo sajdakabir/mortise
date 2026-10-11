@@ -21,6 +21,20 @@ const cases = [
     item_id: "0102030405060708090a0b0c0d0e0f10",
   },
   { type: "logins", id: "ff", origin: "http://localhost:3000" },
+  {
+    type: "capture",
+    id: "abcdef0123456789",
+    origin: "https://github.com",
+    username: "octocat",
+    password: "hunter2",
+  },
+  // A capture with no username, to pin that it encodes as an empty field.
+  {
+    type: "capture",
+    id: "abcdef0123456789",
+    origin: "https://github.com",
+    password: "hunter2",
+  },
 ];
 
 const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");

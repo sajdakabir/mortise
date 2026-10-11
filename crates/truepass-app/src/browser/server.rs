@@ -104,6 +104,16 @@ fn handle(app: &AppHandle, request: Request) -> Response {
             Some(_) => credential(app, item_id, origin),
             None => Response::error("not_associated", "This browser is not paired."),
         },
+
+        Request::Capture {
+            origin,
+            username,
+            password,
+            ..
+        } => match associations::verify(&request) {
+            Some(_) => capture(app, origin, username.as_deref(), password),
+            None => Response::error("not_associated", "This browser is not paired."),
+        },
     }
 }
 
@@ -156,6 +166,59 @@ fn logins(app: &AppHandle, origin: &str) -> Response {
             Err(_) => Response::Logins { items: Vec::new() },
         },
         None => Response::Logins { items: Vec::new() },
+    })
+}
+
+/// Offer a submitted login for saving.
+///
+/// Never saves on its own. The browser can propose; only a click in the app
+/// window commits, for the same reason pairing works that way — the extension
+/// is semi-trusted and writing to the vault unattended is exactly what a
+/// compromised one would do.
+fn capture(app: &AppHandle, origin: &str, username: Option<&str>, password: &str) -> Response {
+    let Some(parsed) = Origin::parse(origin) else {
+        return Response::error("bad_origin", "Unusable page origin.");
+    };
+    if password.is_empty() {
+        return Response::error("bad_request", "Nothing to save.");
+    }
+
+    let state = app.state::<AppState>();
+
+    state.with_vault(|vault| {
+        let Some(v) = vault else {
+            return Response::error("no_vault", "No vault on this machine.");
+        };
+        // Refusing while locked keeps a plaintext password from sitting in
+        // memory waiting for an unlock that may never come. The user has just
+        // typed it, so asking again later costs them nothing.
+        if !v.is_unlocked() {
+            return Response::error("locked", "Unlock TruePassword to save this login.");
+        }
+
+        // Already saved for this site and user? Then this was almost certainly
+        // a fill, or a sign-in with a credential we already hold, and
+        // prompting would train the user to dismiss the prompt.
+        let known = v
+            .find_for_origin(&parsed)
+            .map(|items| {
+                items
+                    .iter()
+                    .any(|i| i.meta.username.as_deref() == username)
+            })
+            .unwrap_or(false);
+        if known {
+            return Response::Captured { queued: false };
+        }
+
+        state.set_pending_capture(crate::state::PendingCapture {
+            origin: origin.to_string(),
+            username: username.map(str::to_string),
+            password: zeroize::Zeroizing::new(password.to_string()),
+        });
+        let _ = app.emit("login-capture-requested", origin.to_string());
+
+        Response::Captured { queued: true }
     })
 }
 

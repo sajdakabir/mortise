@@ -94,6 +94,15 @@ pub struct VaultStatus {
     pub biometric_enabled: bool,
 }
 
+/// A login waiting to be saved. Carries no password.
+#[derive(Debug, Clone, Serialize)]
+pub struct CaptureSummary {
+    /// Origin it was submitted on.
+    pub origin: String,
+    /// Username, if the page had one.
+    pub username: Option<String>,
+}
+
 /// What an import did.
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportReport {

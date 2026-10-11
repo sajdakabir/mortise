@@ -47,6 +47,25 @@ pub enum Request {
         proof: String,
     },
 
+    /// A login the user just typed on a page, offered for saving.
+    ///
+    /// Carries a secret *into* the app rather than out of it, which is the
+    /// opposite direction from everything else here. It still needs a proof:
+    /// without one, any local process could stuff arbitrary items into the
+    /// vault, and an item the user believes they saved is one they will trust.
+    Capture {
+        /// Page origin, as the browser reports it. Never the page's own claim.
+        origin: String,
+        /// Username field value, if one was found.
+        username: Option<String>,
+        /// The password that was submitted.
+        password: String,
+        /// Association id.
+        id: String,
+        /// HMAC proof.
+        proof: String,
+    },
+
     /// The actual secret for one item on one origin.
     Credential {
         /// Item id, hex.
@@ -89,6 +108,11 @@ pub enum Response {
         username: Option<String>,
         /// The password.
         password: String,
+    },
+    /// A capture was handled.
+    Captured {
+        /// False when this login is already saved, so nothing was queued.
+        queued: bool,
     },
     /// Something went wrong.
     Error {
@@ -153,6 +177,24 @@ pub fn proof_payload(request: &Request) -> Option<Vec<u8>> {
             push(&mut out, id);
             push(&mut out, origin);
             push(&mut out, item_id);
+        }
+        // The password is covered too, so a captured proof cannot be replayed
+        // with a different password substituted for the same origin.
+        //
+        // A missing username and an empty one hash identically. They mean the
+        // same thing here, so that is not worth a discriminator byte.
+        Request::Capture {
+            origin,
+            username,
+            password,
+            id,
+            ..
+        } => {
+            push(&mut out, "capture");
+            push(&mut out, id);
+            push(&mut out, origin);
+            push(&mut out, username.as_deref().unwrap_or(""));
+            push(&mut out, password);
         }
         // Status and Associate carry no proof: the first needs none, and the
         // second is the request that establishes the key in the first place.
