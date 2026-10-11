@@ -178,3 +178,119 @@ document.addEventListener(
   },
   true,
 );
+
+/**
+ * Telling the user a saved login exists, without making them guess.
+ *
+ * Fill stays user-initiated: nothing is written into a field until a click on
+ * a control attached to a password box the user can see. That is deliberate.
+ * Managers that fill on page load can be tricked into filling a hidden form
+ * in an invisible iframe, and the whole point of requiring a gesture is that
+ * an invisible field gets no gesture.
+ *
+ * What was wrong before was not the gesture, it was that nothing on screen
+ * said there was anything to click. So: a badge on the toolbar icon, and a
+ * small button on the field itself.
+ */
+
+/** Shadow DOM so the host page's CSS cannot restyle or hide the button. */
+function mountButton(field, items) {
+  if (field.dataset.truepassMounted) return;
+  field.dataset.truepassMounted = "1";
+
+  const host = document.createElement("div");
+  host.style.cssText = "position:absolute;z-index:2147483646;";
+  const root = host.attachShadow({ mode: "closed" });
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = items.length === 1 ? "Fill" : `Fill (${items.length})`;
+  button.title =
+    items.length === 1
+      ? `TruePassword: fill ${items[0].username ?? items[0].title}`
+      : "TruePassword: choose a saved login";
+  button.style.cssText = [
+    "font:600 11px -apple-system,system-ui,sans-serif",
+    "padding:3px 8px",
+    "border:0",
+    "border-radius:5px",
+    "background:#e8eaf0",
+    "color:#15171d",
+    "cursor:pointer",
+    "box-shadow:0 1px 4px rgba(0,0,0,.35)",
+  ].join(";");
+
+  // More than one match is a choice, and a choice belongs in the popup where
+  // there is room to show which account is which.
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    button.textContent = "…";
+    chrome.runtime.sendMessage(
+      items.length === 1 ? { command: "fill", itemId: items[0].item_id } : { command: "openPopup" },
+      (response) => {
+        button.textContent =
+          response?.type === "filled" ? "Filled" : items.length === 1 ? "Fill" : `Fill (${items.length})`;
+        if (response?.type === "filled") setTimeout(() => host.remove(), 1200);
+      },
+    );
+  });
+
+  root.appendChild(button);
+  document.body.appendChild(host);
+
+  // Parked just inside the right-hand edge of the field, and kept there:
+  // login forms move as validation messages appear and layouts settle.
+  const place = () => {
+    if (!field.isConnected) {
+      host.remove();
+      return;
+    }
+    const r = field.getBoundingClientRect();
+    host.style.top = `${window.scrollY + r.top + (r.height - 20) / 2}px`;
+    host.style.left = `${window.scrollX + r.right - 8 - button.offsetWidth}px`;
+  };
+  place();
+  window.addEventListener("scroll", place, { passive: true });
+  window.addEventListener("resize", place, { passive: true });
+  const tick = setInterval(() => {
+    place();
+    if (!field.isConnected) clearInterval(tick);
+  }, 500);
+}
+
+/// Origins already asked about. One answer per page is enough: the vault's
+/// contents do not change while a login form sits on screen, and each ask is
+/// a round trip through the native host.
+let announced = false;
+
+function announce() {
+  if (announced) return;
+  const field = [...document.querySelectorAll('input[type="password"]')].find(usable);
+  if (!field) return;
+
+  announced = true;
+  chrome.runtime.sendMessage({ command: "pageHasLogin" }, (response) => {
+    const items = response?.items ?? [];
+    log("page has a login form,", items.length, "saved match(es)");
+    if (items.length) mountButton(field, items);
+  });
+}
+
+// Login forms are routinely rendered after load, and a multi-step sign-in
+// only shows its password field on the second screen, so one check at load
+// would miss most of them.
+//
+// Coalesced: a busy page mutates hundreds of times a second and `announce`
+// is a native-messaging round trip, not a DOM read.
+let scheduled = 0;
+const observer = new MutationObserver(() => {
+  if (announced) {
+    observer.disconnect();
+    return;
+  }
+  clearTimeout(scheduled);
+  scheduled = setTimeout(announce, 300);
+});
+observer.observe(document.documentElement, { childList: true, subtree: true });
+announce();
