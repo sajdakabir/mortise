@@ -196,18 +196,26 @@ fn capture(app: &AppHandle, origin: &str, username: Option<&str>, password: &str
             return Response::error("locked", "Unlock TruePassword to save this login.");
         }
 
-        // Already saved for this site and user? Then this was almost certainly
-        // a fill, or a sign-in with a credential we already hold, and
-        // prompting would train the user to dismiss the prompt.
-        let known = v
-            .find_for_origin(&parsed)
-            .map(|items| {
-                items
-                    .iter()
-                    .any(|i| i.meta.username.as_deref() == username)
-            })
-            .unwrap_or(false);
-        if known {
+        let existing = v.find_for_origin(&parsed).unwrap_or_default();
+
+        // Matching on the password rather than only on the username.
+        //
+        // The username is the unreliable half: a multi-step sign-in puts it on
+        // a different screen, so one offer carries it and another does not,
+        // and keying on it alone saved x.com twice. Nobody has two logins for
+        // one site with the same password, so an origin that already holds
+        // this exact password has nothing new to learn.
+        // Bound first: ItemPayload is ZeroizeOnDrop, so its fields cannot be
+        // moved out of a temporary.
+        let already_holds_it = existing.iter().any(|i| {
+            let revealed = v.reveal(i.id);
+            matches!(
+                &revealed,
+                Ok(truepass_vault::ItemPayload::Login { password: saved, .. })
+                    if saved.as_str() == password
+            )
+        });
+        if already_holds_it {
             return Response::Captured { queued: false };
         }
 

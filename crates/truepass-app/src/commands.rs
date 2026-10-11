@@ -520,6 +520,29 @@ pub fn save_capture(state: State<'_, AppState>, title: Option<String>) -> CmdRes
 
     state.with_vault(|vault| {
         let v = vault.ok_or_else(CmdError::no_vault)?;
+
+        // Changing a password on a site should move the saved one forward,
+        // not leave the old one behind beside a new entry. The browser only
+        // reaches here when the password is one the vault does not already
+        // hold, so a matching origin and username means exactly this case.
+        //
+        // Only when there is a username to match on: without one, "the same
+        // login" is a guess, and guessing wrong overwrites a password the
+        // user still needs.
+        let parsed = truepass_vault::Origin::parse(&capture.origin);
+        if let (Some(parsed), Some(username)) = (parsed, capture.username.as_deref()) {
+            let existing = v.find_for_origin(&parsed).unwrap_or_default();
+            if let Some(found) = existing
+                .iter()
+                .find(|i| i.meta.username.as_deref() == Some(username))
+            {
+                // Keep the item's own metadata; only the secret moves.
+                let kept = v.item_meta(found.id)?;
+                v.update_item(found.id, &kept, &payload)?;
+                return Ok(crate::dto::id_to_hex(found.id));
+            }
+        }
+
         let id = v.create_item(&meta, &payload)?;
         Ok(crate::dto::id_to_hex(id))
     })

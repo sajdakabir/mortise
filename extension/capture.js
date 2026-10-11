@@ -96,11 +96,39 @@ function credentialIn(scope) {
   };
 }
 
+/**
+ * The last password offered, and when.
+ *
+ * One sign-in trips several of the listeners below — a click on the button is
+ * also a submit, and Enter is both. Worse, they see different scopes: the form
+ * for a submit, the whole document for a click, so one can find a username
+ * field the other cannot. The app deduplicates on name *and* username, so two
+ * offers that disagree about the username look like two different logins and
+ * both get saved. That is exactly what happened on x.com.
+ *
+ * Keyed on the password alone: the same password submitted twice within
+ * seconds is the same sign-in, whatever the listeners made of the surrounding
+ * markup.
+ */
+let lastOffered = { password: null, at: 0 };
+const REOFFER_AFTER_MS = 10_000;
+
 function offer(credential, why) {
   if (!credential) {
     log(why, "- no filled password field, nothing to offer");
     return;
   }
+
+  const now = Date.now();
+  if (
+    credential.password === lastOffered.password &&
+    now - lastOffered.at < REOFFER_AFTER_MS
+  ) {
+    log(why, "- same credential already offered, skipping");
+    return;
+  }
+  lastOffered = { password: credential.password, at: now };
+
   log(why, "- offering a credential", credential.username ? "with" : "without", "a username");
   try {
     chrome.runtime.sendMessage({ command: "capture", ...credential });
