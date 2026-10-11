@@ -56,14 +56,23 @@ fn load() -> Store {
         return store.clone();
     }
 
-    let store: Store = match truepass_macos::load(SERVICE, ACCOUNT, "") {
-        Ok(Some(bytes)) => serde_json::from_slice(&bytes).unwrap_or_default(),
-        _ => Store::new(),
-    };
-    if let Ok(mut cache) = CACHE.lock() {
-        *cache = Some(store.clone());
+    match truepass_macos::load(SERVICE, ACCOUNT, "") {
+        // A read that succeeded is the truth, empty or not, so cache it.
+        Ok(found) => {
+            let store: Store = found
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default();
+            if let Ok(mut cache) = CACHE.lock() {
+                *cache = Some(store.clone());
+            }
+            store
+        }
+        // A read that *failed* is not evidence that nothing is paired, and
+        // caching it would turn one dismissed authorisation prompt into every
+        // browser appearing unpaired for as long as the app runs. Fall back to
+        // empty for this call only, and try the keychain again next time.
+        Err(_) => Store::new(),
     }
-    store
 }
 
 fn save(store: &Store) -> Result<(), KeychainError> {
