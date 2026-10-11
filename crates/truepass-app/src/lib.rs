@@ -25,6 +25,7 @@ const VAULT_FILE: &str = "truepass.vault";
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let state = AppState::new(dir.join(VAULT_FILE));
@@ -46,6 +47,12 @@ pub fn run() {
                     }
                 }
             });
+            // Pull the pairing keys into memory before the extension can ask
+            // for anything. On its own thread because a keychain read can
+            // block on a user prompt, and blocking startup on that would hang
+            // the window before it draws.
+            std::thread::spawn(browser::associations::warm);
+
             // The browser socket. A failure here is not fatal: the app is
             // perfectly usable without autofill, and refusing to start over it
             // would be a poor trade.
@@ -68,12 +75,17 @@ pub fn run() {
             commands::search,
             commands::reveal,
             commands::save_item,
+            commands::import_csv,
             commands::delete_item,
             commands::generate_password,
             commands::password_entropy,
             commands::copy_secret,
             commands::approve_browser,
             commands::reject_browser,
+            commands::pending_browser,
+            commands::pending_capture,
+            commands::save_capture,
+            commands::discard_capture,
             commands::list_browsers,
             commands::unpair_browser,
             commands::native_host_status,

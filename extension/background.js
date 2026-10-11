@@ -110,6 +110,45 @@ const handlers = {
     return response?.type === "logins" ? { ...response, origin } : response;
   },
 
+  /**
+   * A login the content script saw submitted.
+   *
+   * `sender.tab.url` is the origin, not anything the script reported. The
+   * content script runs inside the page, so treating its word as authoritative
+   * would hand origin control to whatever is on that page — the exact mistake
+   * everything else here is shaped to avoid.
+   *
+   * The app decides whether to prompt and the user decides whether to save.
+   * Nothing is written to the vault by this path alone.
+   */
+  async capture({ username, password }, sender) {
+    if (!password) return { type: "ok" };
+    const origin = originOf(sender?.tab);
+    if (!origin) return { type: "ok" };
+
+    const response = await sendSigned({
+      type: "capture",
+      origin,
+      username: username ?? null,
+      password,
+    });
+
+    // Same rule as the content script: opt-in, and the outcome only. The
+    // response carries no secret, so this is safe to print.
+    const { debug } = await chrome.storage.local.get("debug");
+    if (debug) {
+      console.log("TruePassword: capture for", origin, "->", JSON.stringify(response));
+    }
+
+    // A badge, because the prompt opens in the app window and the user is
+    // looking at the browser. Cleared as soon as they deal with it.
+    if (response?.type === "captured" && response.queued) {
+      chrome.action.setBadgeText({ text: "1" });
+      chrome.action.setBadgeBackgroundColor({ color: "#9ece6a" });
+    }
+    return response;
+  },
+
   async fill({ itemId }) {
     const tab = await activeTab();
     const origin = originOf(tab);
@@ -138,14 +177,21 @@ const handlers = {
   },
 };
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = handlers[message?.command];
   if (!handler) {
     sendResponse({ type: "error", code: "bad_request", message: "Unknown command." });
     return false;
   }
-  handler(message).then(sendResponse);
+  // `sender` is the browser's account of who sent this, which is why the
+  // capture handler takes it rather than trusting the message's contents.
+  handler(message, sender).then(sendResponse);
   return true; // keep the channel open for the async reply
+});
+
+/// The popup clears the badge once the user has been to the app.
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.command === "clearBadge") chrome.action.setBadgeText({ text: "" });
 });
 
 async function activeTab() {

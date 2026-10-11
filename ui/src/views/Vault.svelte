@@ -6,8 +6,10 @@
   import { ipc } from "../lib/ipc";
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
 
-  let { status = $bindable(), onStatus, onUnlock }: {
+  let { status = $bindable(), dataRevision = 0, onStatus, onUnlock }: {
     status: VaultStatus;
+    /// Bumped by the shell when an item was written from outside this view.
+    dataRevision?: number;
     onStatus: (s: VaultStatus) => void;
     /// Ask the shell to show the unlock screen. Locking drops the keys that
     /// decrypt secrets but keeps search working, so this view stays up — which
@@ -39,6 +41,7 @@
 
   $effect(() => {
     void query;
+    void dataRevision;
     refresh();
   });
 

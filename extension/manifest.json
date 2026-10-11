@@ -7,6 +7,17 @@
 
   "permissions": ["nativeMessaging", "activeTab", "scripting", "storage"],
 
+  "host_permissions": ["<all_urls>"],
+
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["capture.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+
   "action": {
     "default_popup": "popup.html",
     "default_title": "TruePassword",

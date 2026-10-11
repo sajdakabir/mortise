@@ -22,6 +22,7 @@ OUT_DIR="$REPO_ROOT/target/extension"
 FILES=(
   manifest.json
   background.js
+  capture.js
   proof.js
   popup.html
   popup.js

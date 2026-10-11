@@ -11,8 +11,8 @@
  * to encrypt anything.
  */
 import type {
-  ItemPayload, ItemRow, MetaInput, NativeHostStatus, PairedBrowser,
-  SyncReport, SyncStatus, VaultStatus,
+  CaptureSummary, ImportReport, ItemPayload, ItemRow, MetaInput,
+  NativeHostStatus, PairedBrowser, SyncReport, SyncStatus, VaultStatus,
 } from "./types";
 
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -39,6 +39,7 @@ export const ipc = {
   saveItem: (id: string | null, meta: MetaInput, payload: ItemPayload) =>
     call<string>("save_item", { id, meta, payload }),
   deleteItem: (id: string) => call<void>("delete_item", { id }),
+  importCsv: (path: string) => call<ImportReport>("import_csv", { path }),
   copySecret: (id: string, field: string) => call<number>("copy_secret", { id, field }),
   generatePassword: (length: number, lower: boolean, upper: boolean, digits: boolean, symbols: boolean) =>
     call<string>("generate_password", { length, lower, upper, digits, symbols }),
@@ -47,6 +48,10 @@ export const ipc = {
   touch: () => call<void>("touch"),
   approveBrowser: () => call<string>("approve_browser"),
   rejectBrowser: () => call<void>("reject_browser"),
+  pendingBrowser: () => call<string | null>("pending_browser"),
+  pendingCapture: () => call<CaptureSummary | null>("pending_capture"),
+  saveCapture: (title: string | null) => call<string>("save_capture", { title }),
+  discardCapture: () => call<void>("discard_capture"),
   listBrowsers: () => call<PairedBrowser[]>("list_browsers"),
   unpairBrowser: (id: string) => call<void>("unpair_browser", { id }),
   nativeHostStatus: () => call<NativeHostStatus>("native_host_status"),
@@ -66,6 +71,15 @@ export async function onBrowserPairingRequest(
   if (!IN_TAURI) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<string>("browser-association-requested", (e) => handler(e.payload));
+}
+
+/** Fires when the browser offers a login to save. The payload is the origin. */
+export async function onLoginCaptured(
+  handler: (origin: string) => void,
+): Promise<() => void> {
+  if (!IN_TAURI) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<string>("login-capture-requested", (e) => handler(e.payload));
 }
 
 /** Fires when the backend auto-locks, so the UI can drop anything revealed. */
@@ -133,6 +147,17 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
     case "forget_account_key":
       mockState.accountKeyRemembered = false;
       return as(status());
+    case "import_csv":
+      return as({
+        source: "Chrome", imported: 12, duplicates: 2,
+        empty: 1, unsupported: 0, failed: 0,
+      });
+    case "pending_browser":
+      return as(null);
+    case "pending_capture":
+      return as(null);
+    case "discard_capture":
+      return as(undefined);
     case "list_browsers":
       return as(mockState.browsers);
     case "native_host_status":

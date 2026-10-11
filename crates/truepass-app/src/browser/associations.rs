@@ -31,16 +31,75 @@ pub struct Association {
 
 type Store = BTreeMap<String, Association>;
 
+/// In-memory copy of the store, filled on first use.
+///
+/// Every proof check used to read the keychain, which put a keychain call on
+/// the hot path of every autofill. Two things make that worse than merely
+/// wasteful:
+///
+/// 1. macOS re-authorises a keychain item when the reading binary's signature
+///    changes. In a development build `cargo` re-signs on every rebuild, so
+///    each request raised a password prompt — and the app *blocks* while it is
+///    up, so the extension timed out waiting for a reply.
+/// 2. Even signed, it is a synchronous read per request for data that cannot
+///    change without this process being the one to change it.
+///
+/// Caching costs nothing in safety: the process already holds the vault keys
+/// in memory, so an attacker who can read this process has far more than a
+/// pairing key. Writes go through [`save`], which updates both.
+static CACHE: std::sync::Mutex<Option<Store>> = std::sync::Mutex::new(None);
+
 fn load() -> Store {
+    if let Ok(cache) = CACHE.lock()
+        && let Some(store) = cache.as_ref()
+    {
+        return store.clone();
+    }
+
     match truepass_macos::load(SERVICE, ACCOUNT, "") {
-        Ok(Some(bytes)) => serde_json::from_slice(&bytes).unwrap_or_default(),
-        _ => Store::new(),
+        // A read that succeeded is the truth, empty or not, so cache it.
+        Ok(found) => {
+            let store: Store = found
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default();
+            if let Ok(mut cache) = CACHE.lock() {
+                *cache = Some(store.clone());
+            }
+            store
+        }
+        // A read that *failed* is not evidence that nothing is paired, and
+        // caching it would turn one dismissed authorisation prompt into every
+        // browser appearing unpaired for as long as the app runs. Fall back to
+        // empty for this call only, and try the keychain again next time.
+        Err(_) => Store::new(),
     }
 }
 
 fn save(store: &Store) -> Result<(), KeychainError> {
     let json = serde_json::to_vec(store).unwrap_or_else(|_| b"{}".to_vec());
-    truepass_macos::store(SERVICE, ACCOUNT, &json, Protection::DeviceUnlocked)
+    truepass_macos::store(SERVICE, ACCOUNT, &json, Protection::DeviceUnlocked)?;
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = Some(store.clone());
+    }
+    Ok(())
+}
+
+/// Drop the cached copy, so the next read goes back to the keychain.
+fn invalidate() {
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = None;
+    }
+}
+
+/// Read the store once so later lookups never touch the keychain.
+///
+/// Called at startup, off the main thread. The point is *where* the keychain
+/// read happens, not whether: if the first read lands on a browser request,
+/// any prompt macOS raises blocks the app while the extension sits waiting,
+/// and autofill looks broken rather than merely slow. Doing it at launch puts
+/// the prompt in front of someone who is already looking at the app.
+pub fn warm() {
+    let _ = load();
 }
 
 /// Every paired browser.
@@ -75,6 +134,7 @@ pub fn remove(id: &str) -> Result<(), KeychainError> {
 /// Unpair everything. Called on sign-out.
 pub fn clear() {
     let _ = truepass_macos::delete(SERVICE, ACCOUNT);
+    invalidate();
 }
 
 /// Whether a request carries a valid proof from a paired browser.
@@ -85,6 +145,7 @@ pub fn verify(request: &Request) -> Option<Association> {
     let (id, proof) = match request {
         Request::Logins { id, proof, .. } => (id, proof),
         Request::Credential { id, proof, .. } => (id, proof),
+        Request::Capture { id, proof, .. } => (id, proof),
         Request::Status | Request::Associate { .. } => return None,
     };
 

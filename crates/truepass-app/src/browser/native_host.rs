@@ -23,13 +23,24 @@ const HOST_NAME: &str = "com.truepassword.proxy";
 
 /// Every Chromium-family browser reads from its own directory, so the manifest
 /// has to be written once per browser rather than to one shared location.
-/// Paths are relative to `~/Library/Application Support`.
+/// Paths are relative to `~/Library/Application Support`, and name the
+/// browser's *user data* directory.
+///
+/// Note the two layouts. Chrome's user data directory is the product folder
+/// itself (`Google/Chrome`); the newer forks put theirs one level down, in
+/// `<Product>/User Data`. Getting this wrong does not fail loudly — the
+/// manifest lands somewhere the browser never reads, registration reports
+/// success, and autofill simply never works.
 const BROWSERS: &[(&str, &str)] = &[
     ("Google Chrome", "Google/Chrome"),
     ("Chrome Canary", "Google/Chrome Canary"),
     ("Chromium", "Chromium"),
     ("Brave", "BraveSoftware/Brave-Browser"),
     ("Microsoft Edge", "Microsoft Edge"),
+    ("Dia", "Dia/User Data"),
+    ("Arc", "Arc/User Data"),
+    ("Vivaldi", "Vivaldi"),
+    ("Opera", "com.operasoftware.Opera"),
 ];
 
 /// What went wrong registering the host.
@@ -286,6 +297,46 @@ mod tests {
         let json = manifest_json(std::path::Path::new("/tmp/p"), "a".repeat(32).as_str()).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&json).unwrap();
         assert_eq!(v["allowed_origins"].as_array().unwrap().len(), 1);
+    }
+
+    /// Dia and Arc put their user data in `<Product>/User Data`, not in the
+    /// product folder. Writing to the product folder lands the manifest where
+    /// the browser never looks: registration reports success and autofill
+    /// silently never works, which is exactly how this was found.
+    #[test]
+    fn forks_with_a_user_data_directory_keep_that_segment() {
+        for product in ["Dia", "Arc"] {
+            let (_, path) = BROWSERS
+                .iter()
+                .find(|(name, _)| *name == product)
+                .unwrap_or_else(|| panic!("{product} is missing from the browser list"));
+            assert_eq!(
+                *path,
+                format!("{product}/User Data"),
+                "{product} reads from <Product>/User Data"
+            );
+        }
+    }
+
+    /// Chrome is the other layout: its user data directory *is* the product
+    /// folder, so adding "User Data" here would break it the same way.
+    #[test]
+    fn chrome_has_no_user_data_segment() {
+        let (_, path) = BROWSERS
+            .iter()
+            .find(|(name, _)| *name == "Google Chrome")
+            .expect("Chrome is missing from the browser list");
+        assert_eq!(*path, "Google/Chrome");
+    }
+
+    /// Two browsers writing to one directory would mean the second silently
+    /// overwrote the first.
+    #[test]
+    fn no_two_browsers_share_a_directory() {
+        let mut seen = std::collections::HashSet::new();
+        for (name, path) in BROWSERS {
+            assert!(seen.insert(*path), "{name} shares a directory with another");
+        }
     }
 
     /// The host name is what the extension passes to `connectNative`. If these

@@ -92,6 +92,21 @@ impl From<truepass_macos::Error> for CmdError {
     }
 }
 
+impl From<truepass_vault::import::Error> for CmdError {
+    fn from(e: truepass_vault::import::Error) -> Self {
+        use truepass_vault::import::Error as E;
+        // These describe the user's own file, not anything secret, and the
+        // detail is what makes the problem fixable. The messages deliberately
+        // never quote a row: the rows are credentials.
+        let code = match e {
+            E::NotCsv => "not_csv",
+            E::NoRecognisedColumns => "no_columns",
+            E::NoRows => "no_rows",
+        };
+        Self::new(code, e.to_string())
+    }
+}
+
 impl From<crate::browser::native_host::Error> for CmdError {
     fn from(e: crate::browser::native_host::Error) -> Self {
         use crate::browser::native_host::Error as E;

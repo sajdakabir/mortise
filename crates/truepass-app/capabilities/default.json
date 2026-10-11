@@ -1,11 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimum the UI needs. Clipboard access is write-and-verify only, for the copy-then-clear flow in commands::copy_secret.",
-  "windows": ["main"],
+  "description": "Minimum the UI needs. Clipboard access is write-and-verify only, for the copy-then-clear flow in commands::copy_secret. The dialog permission is open-only: the import flow needs a file picker, and nothing here needs to save, ask or message.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-read-text"
+    "clipboard-manager:allow-read-text",
+    "dialog:allow-open"
   ]
 }

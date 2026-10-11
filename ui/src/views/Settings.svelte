@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { ipc, onBrowserPairingRequest } from "../lib/ipc";
+  import { ipc } from "../lib/ipc";
+  import { open } from "@tauri-apps/plugin-dialog";
   import {
     errorMessage, isCmdError,
-    type PairedBrowser, type SyncStatus, type VaultStatus,
+    type ImportReport, type PairedBrowser, type SyncStatus, type VaultStatus,
   } from "../lib/types";
 
   let { status, onStatus, onClose }:
@@ -15,8 +16,17 @@
   let sync = $state<SyncStatus | null>(null);
   let relayInput = $state("");
   let syncMessage = $state("");
-  /** Name of a browser waiting for approval, if any. */
-  let pairingRequest = $state<string | null>(null);
+  /// Set once Touch ID has been refused for want of a signed build.
+  ///
+  /// Not a failure the user can act on: an unsigned binary cannot create an
+  /// access-controlled keychain item at all, so this is a property of the
+  /// build rather than something that went wrong. Showing it in the red error
+  /// banner for the whole pane said "something broke" about a feature that
+  /// was never going to be available, every time.
+  let biometricUnavailable = $state(false);
+  let importing = $state(false);
+  let importReport = $state<ImportReport | null>(null);
+  let importError = $state("");
 
   async function refreshBrowsers() {
     browsers = await ipc.listBrowsers();
@@ -72,30 +82,36 @@
     }
   }
 
+  // The pairing prompt itself lives in the app shell, not here: a browser can
+  // ask at any moment and the approval has to be reachable from any screen.
   $effect(() => {
     refreshBrowsers();
     refreshSync();
-    const stop = onBrowserPairingRequest((name) => { pairingRequest = name; });
-    return () => { stop.then((f) => f()); };
   });
 
-  async function approvePairing() {
-    busy = true;
-    error = "";
-    try {
-      await ipc.approveBrowser();
-      pairingRequest = null;
-      await refreshBrowsers();
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      busy = false;
-    }
-  }
+  /// The picker hands back a path, never the file's bytes. Rust opens and
+  /// parses it, so the plaintext export never enters this webview.
+  async function importCsv() {
+    if (importing) return;
+    importError = "";
+    importReport = null;
 
-  async function rejectPairing() {
-    await ipc.rejectBrowser();
-    pairingRequest = null;
+    const picked = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "CSV export", extensions: ["csv", "txt"] }],
+    });
+    if (typeof picked !== "string") return;
+
+    importing = true;
+    try {
+      importReport = await ipc.importCsv(picked);
+      onStatus(await ipc.status());
+    } catch (e) {
+      importError = errorMessage(e);
+    } finally {
+      importing = false;
+    }
   }
 
   async function unpair(id: string) {
@@ -116,7 +132,11 @@
     try {
       onStatus(await ipc.setBiometric(!status.biometric_enabled));
     } catch (e) {
-      if (!(isCmdError(e) && e.code === "cancelled")) error = errorMessage(e);
+      if (isCmdError(e) && e.code === "requires_signed_app") {
+        biometricUnavailable = true;
+      } else if (!(isCmdError(e) && e.code === "cancelled")) {
+        error = errorMessage(e);
+      }
     } finally {
       busy = false;
     }
@@ -181,20 +201,6 @@
       {/if}
     </section>
 
-    {#if pairingRequest}
-      <section class="pairing">
-        <h3>Pair with {pairingRequest}?</h3>
-        <p class="faint">
-          This browser will be able to ask for logins matching the page you are on,
-          and only after you pick one. Approve it only if you just clicked Pair in
-          that browser — nothing else on this Mac can reach your vault without this.
-        </p>
-        <div class="row">
-          <button class="primary" disabled={busy} onclick={approvePairing}>Approve</button>
-          <button disabled={busy} onclick={rejectPairing}>Not now</button>
-        </div>
-      </section>
-    {/if}
 
     <section>
       <div class="spread">
@@ -227,10 +233,59 @@
             you turn it on.
           </p>
         </div>
-        <button disabled={busy || !status.unlocked} onclick={toggleBiometric}>
+        <button
+          disabled={busy || !status.unlocked || biometricUnavailable}
+          onclick={toggleBiometric}>
           {status.biometric_enabled ? "Turn off" : "Turn on"}
         </button>
       </div>
+
+      {#if biometricUnavailable}
+        <p class="note">
+          Unavailable in this development build. Touch ID needs a signed copy
+          of TruePassword — macOS will not let an unsigned app create a
+          keychain item that asks for your fingerprint.
+        </p>
+      {/if}
+    </section>
+
+    <section>
+      <div class="spread">
+        <div class="label">
+          <h3>Import from another manager</h3>
+          <p class="faint">
+            A CSV export from 1Password, Bitwarden, Chrome, LastPass or Safari.
+            Items already here are skipped, so running it twice is safe.
+          </p>
+        </div>
+        <button disabled={busy || importing || !status.unlocked} onclick={importCsv}>
+          {importing ? "Importing…" : "Choose file"}
+        </button>
+      </div>
+
+      {#if !status.unlocked}
+        <p class="faint note">Unlock the vault first.</p>
+      {/if}
+
+      {#if importError}
+        <p class="note bad">{importError}</p>
+      {/if}
+
+      {#if importReport}
+        <p class="note good">
+          {importReport.source}: imported {importReport.imported}
+          {importReport.imported === 1 ? "item" : "items"}{#if importReport.duplicates}, skipped
+            {importReport.duplicates} already here{/if}{#if importReport.unsupported}, skipped
+            {importReport.unsupported} of a kind not supported yet{/if}{#if importReport.failed},
+            {importReport.failed} failed{/if}.
+        </p>
+        <!-- The export is plaintext credentials sitting in Downloads. Saying
+             so is the whole reason this line exists; an import flow that
+             stays quiet about it leaves every password on disk unencrypted. -->
+        <p class="note warnline">
+          Delete the CSV now — it holds every one of those passwords in plain text.
+        </p>
+      {/if}
     </section>
 
     <section>
@@ -267,6 +322,10 @@
 </div>
 
 <style>
+  .note { font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
+  .note.bad { color: var(--danger); }
+  .note.good { color: var(--ok); }
+  .note.warnline { color: var(--warn); }
   .settings { height: 100%; display: flex; flex-direction: column; }
   .head { padding: 18px 22px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   h2 { font-size: 15px; font-weight: 600; margin: 0; }
@@ -278,15 +337,6 @@
   h3 { font-size: 13px; font-weight: 560; margin: 0 0 4px; }
   .label p { margin: 0; font-size: 12px; line-height: 1.55; max-width: 44ch; }
   button { flex-shrink: 0; }
-  .pairing {
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    background: color-mix(in srgb, var(--accent) 9%, transparent);
-    border-radius: var(--radius-lg);
-    padding: 14px 16px;
-    margin-top: 14px;
-  }
-  .pairing h3 { margin-bottom: 6px; }
-  .pairing p { margin: 0 0 12px; max-width: 48ch; }
   .row { display: flex; gap: 8px; }
   .relay { display: flex; gap: 8px; margin-top: 10px; }
   .relay input { flex: 1; }

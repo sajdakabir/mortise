@@ -47,6 +47,17 @@ export function proofPayload(request) {
         field(request.origin),
         field(request.item_id),
       ]);
+    case "capture":
+      // Mirrors the Rust: the password is covered so a proof cannot be
+      // replayed with a different one, and a missing username encodes the
+      // same as an empty one.
+      return concat([
+        field("capture"),
+        field(request.id),
+        field(request.origin),
+        field(request.username ?? ""),
+        field(request.password),
+      ]);
     default:
       // status and associate are unprovable by design: the first needs no
       // proof, the second is what establishes the key.

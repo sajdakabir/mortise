@@ -11,6 +11,21 @@ use truepass_vault::Vault;
 
 use crate::browser::associations::Association;
 
+/// A login the browser saw submitted, waiting for the user to accept it.
+///
+/// The password is plaintext in memory for as long as this exists, which is
+/// why it is dropped the moment the user decides either way and zeroized when
+/// it goes. Nothing persists it: if the app restarts first, the capture is
+/// lost and the user saves it by hand, which is the safe direction to fail.
+pub struct PendingCapture {
+    /// Origin the browser reported, never the page's own claim.
+    pub origin: String,
+    /// Username field value, if the page had one.
+    pub username: Option<String>,
+    /// The submitted password.
+    pub password: zeroize::Zeroizing<String>,
+}
+
 /// How long without user activity before the vault locks itself.
 ///
 /// Five minutes is the usual default for this class of app. It is deliberately
@@ -37,6 +52,8 @@ pub struct AppState {
     /// Held in memory only. If the app restarts before the extension picks it
     /// up, the user approves again — which is the safe direction to fail.
     approved_association: Mutex<Option<Association>>,
+    /// A submitted login waiting for the user to accept or discard it.
+    pending_capture: Mutex<Option<PendingCapture>>,
 }
 
 impl AppState {
@@ -51,7 +68,36 @@ impl AppState {
             }),
             pending_association: Mutex::new(None),
             approved_association: Mutex::new(None),
+            pending_capture: Mutex::new(None),
         }
+    }
+
+    /// Hold a submitted login for the user to accept.
+    ///
+    /// Replaces any earlier one. Two sign-ins in a row should offer the second,
+    /// not queue both: a backlog of password prompts is how people start
+    /// clicking through them.
+    pub fn set_pending_capture(&self, capture: PendingCapture) {
+        if let Ok(mut pending) = self.pending_capture.lock() {
+            *pending = Some(capture);
+        }
+    }
+
+    /// Origin and username of the waiting capture. Never the password.
+    pub fn pending_capture_summary(&self) -> Option<(String, Option<String>)> {
+        let guard = self.pending_capture.lock().ok()?;
+        let capture = guard.as_ref()?;
+        Some((capture.origin.clone(), capture.username.clone()))
+    }
+
+    /// Take the waiting capture, leaving none behind.
+    pub fn take_pending_capture(&self) -> Option<PendingCapture> {
+        self.pending_capture.lock().ok()?.take()
+    }
+
+    /// Throw the waiting capture away.
+    pub fn clear_pending_capture(&self) {
+        let _ = self.take_pending_capture();
     }
 
     /// Record that a browser is asking to pair.

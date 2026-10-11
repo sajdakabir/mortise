@@ -269,6 +269,67 @@ pub fn save_item(
     })
 }
 
+/// Import a CSV export from another password manager.
+///
+/// Takes a path rather than the file's contents on purpose. The webview is
+/// semi-trusted (threat model §2) and the file is plaintext credentials; if
+/// the UI read it and passed it over IPC, every password in the export would
+/// pass through the JS heap for no benefit. Rust opens it, parses it, and the
+/// webview only ever sees counts.
+#[tauri::command]
+pub fn import_csv(state: State<'_, AppState>, path: String) -> CmdResult<crate::dto::ImportReport> {
+    use truepass_vault::import;
+
+    state.touch();
+
+    let file = std::fs::File::open(&path)
+        .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
+    let (items, report) = import::parse(std::io::BufReader::new(file))?;
+
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(CmdError::no_vault)?;
+
+        // Matching on name plus username, which is what a person means by
+        // "the same login". Importing the same export twice is a normal
+        // mistake and should be a no-op rather than a doubled vault.
+        let existing: std::collections::HashSet<(String, Option<String>)> = v
+            .search("")?
+            .into_iter()
+            .map(|row| (row.meta.title, row.meta.username))
+            .collect();
+
+        let mut imported = 0u32;
+        let mut duplicates = 0u32;
+        let mut failed = 0u32;
+        let mut seen = existing;
+
+        for (meta, payload) in &items {
+            let key = (meta.title.clone(), meta.username.clone());
+            if seen.contains(&key) {
+                duplicates += 1;
+                continue;
+            }
+            match v.create_item(meta, payload) {
+                Ok(_) => {
+                    seen.insert(key);
+                    imported += 1;
+                }
+                // Never log the error: it would carry the row with it.
+                Err(_) => failed += 1,
+            }
+        }
+
+        Ok(crate::dto::ImportReport {
+            source: report.source.label().to_string(),
+            imported,
+            duplicates,
+            empty: report.empty as u32,
+            unsupported: report.unsupported as u32,
+            failed,
+        })
+    })
+}
+
 /// Delete an item.
 #[tauri::command]
 pub fn delete_item(state: State<'_, AppState>, id: String) -> CmdResult<()> {
@@ -402,6 +463,106 @@ pub fn approve_browser(state: State<'_, AppState>) -> CmdResult<String> {
     let id = association.id.clone();
     state.set_approved_association(association);
     Ok(id)
+}
+
+/// The browser currently waiting to be paired, if any.
+///
+/// The event alone is not enough: a browser can ask while the window is on a
+/// screen with no listener attached, and the request then sits in state with
+/// nothing on screen to accept it. The UI asks for this on mount so a request
+/// that arrived earlier is still actionable.
+#[tauri::command]
+pub fn pending_browser(state: State<'_, AppState>) -> Option<String> {
+    state.pending_association()
+}
+
+/// The login waiting to be saved, if any.
+///
+/// Returns the origin and username only. The webview has no need for the
+/// password — it is saving it, not showing it — and the less of it that
+/// exists outside Rust the better.
+#[tauri::command]
+pub fn pending_capture(state: State<'_, AppState>) -> Option<crate::dto::CaptureSummary> {
+    state
+        .pending_capture_summary()
+        .map(|(origin, username)| crate::dto::CaptureSummary { origin, username })
+}
+
+/// Save the waiting login.
+///
+/// The title defaults to the origin's host, which is what the user would type
+/// anyway, and the origin goes into `urls` so autofill matches it next time.
+#[tauri::command]
+pub fn save_capture(state: State<'_, AppState>, title: Option<String>) -> CmdResult<String> {
+    state.touch();
+
+    let capture = state
+        .take_pending_capture()
+        .ok_or_else(|| CmdError::bad_request("Nothing is waiting to be saved."))?;
+
+    let title = title
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| host_of(&capture.origin));
+
+    let meta = truepass_vault::ItemMeta {
+        title,
+        urls: vec![capture.origin.clone()],
+        username: capture.username.clone(),
+        folder: None,
+        tags: Vec::new(),
+    };
+    let payload = truepass_vault::ItemPayload::Login {
+        password: capture.password.to_string(),
+        totp_seed: None,
+        notes: None,
+    };
+
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(CmdError::no_vault)?;
+
+        // Changing a password on a site should move the saved one forward,
+        // not leave the old one behind beside a new entry. The browser only
+        // reaches here when the password is one the vault does not already
+        // hold, so a matching origin and username means exactly this case.
+        //
+        // Only when there is a username to match on: without one, "the same
+        // login" is a guess, and guessing wrong overwrites a password the
+        // user still needs.
+        let parsed = truepass_vault::Origin::parse(&capture.origin);
+        if let (Some(parsed), Some(username)) = (parsed, capture.username.as_deref()) {
+            let existing = v.find_for_origin(&parsed).unwrap_or_default();
+            if let Some(found) = existing
+                .iter()
+                .find(|i| i.meta.username.as_deref() == Some(username))
+            {
+                // Keep the item's own metadata; only the secret moves.
+                let kept = v.item_meta(found.id)?;
+                v.update_item(found.id, &kept, &payload)?;
+                return Ok(crate::dto::id_to_hex(found.id));
+            }
+        }
+
+        let id = v.create_item(&meta, &payload)?;
+        Ok(crate::dto::id_to_hex(id))
+    })
+}
+
+/// Throw away the waiting login.
+#[tauri::command]
+pub fn discard_capture(state: State<'_, AppState>) {
+    state.clear_pending_capture();
+}
+
+/// `https://github.com` becomes `github.com`. Falls back to the whole origin
+/// rather than inventing a name.
+fn host_of(origin: &str) -> String {
+    origin
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(origin)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Decline the pending pairing request.

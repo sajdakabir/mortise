@@ -194,6 +194,81 @@ fn responses_serialize_with_a_type_tag() {
     assert!(listing.contains(r#""type":"logins""#));
 }
 
+// --- capture ---
+
+fn capture(origin: &str, username: Option<&str>, password: &str) -> Request {
+    Request::Capture {
+        id: "abcdef0123456789".into(),
+        origin: origin.into(),
+        username: username.map(str::to_string),
+        password: password.into(),
+        proof: String::new(),
+    }
+}
+
+/// Capture carries a secret *into* the vault, so an unproved one would let any
+/// local process plant an item the user would later trust and use.
+#[test]
+fn a_capture_needs_a_valid_proof() {
+    let request = capture("https://github.com", Some("octocat"), "hunter2");
+    let proof = compute_proof(KEY, &request).unwrap();
+
+    assert!(verify_proof(KEY, &request, &proof));
+    assert!(!verify_proof(OTHER_KEY, &request, &proof));
+}
+
+/// The password is inside the signed payload, so a captured proof cannot be
+/// reused to plant a different password for the same site.
+#[test]
+fn a_capture_proof_does_not_transfer_between_passwords() {
+    let request = capture("https://github.com", Some("octocat"), "hunter2");
+    let proof = compute_proof(KEY, &request).unwrap();
+
+    assert!(!verify_proof(
+        KEY,
+        &capture("https://github.com", Some("octocat"), "something-else"),
+        &proof
+    ));
+}
+
+#[test]
+fn a_capture_proof_does_not_transfer_between_origins() {
+    let request = capture("https://github.com", Some("octocat"), "hunter2");
+    let proof = compute_proof(KEY, &request).unwrap();
+
+    assert!(!verify_proof(
+        KEY,
+        &capture("https://github.evil.example", Some("octocat"), "hunter2"),
+        &proof
+    ));
+}
+
+#[test]
+fn a_capture_proof_does_not_transfer_between_usernames() {
+    let request = capture("https://github.com", Some("octocat"), "hunter2");
+    let proof = compute_proof(KEY, &request).unwrap();
+
+    assert!(!verify_proof(
+        KEY,
+        &capture("https://github.com", Some("someone-else"), "hunter2"),
+        &proof
+    ));
+}
+
+/// Length prefixes are what make this hold: without them, username "ab" with
+/// password "c" and username "a" with password "bc" would sign identically.
+#[test]
+fn a_capture_proof_respects_field_boundaries() {
+    let a = capture("https://x.example", Some("ab"), "c");
+    let b = capture("https://x.example", Some("a"), "bc");
+
+    assert_ne!(
+        compute_proof(KEY, &a),
+        compute_proof(KEY, &b),
+        "field boundaries are not covered by the proof"
+    );
+}
+
 // --- cross-implementation vectors ---
 
 /// Proofs computed by the extension's `proof.js`, pinned here.
@@ -210,7 +285,7 @@ fn responses_serialize_with_a_type_tag() {
 fn rust_and_javascript_agree_on_proofs() {
     const KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
-    let cases: [(Request, &str); 3] = [
+    let cases: [(Request, &str); 5] = [
         (
             Request::Logins {
                 id: "abcdef0123456789".into(),
@@ -235,6 +310,28 @@ fn rust_and_javascript_agree_on_proofs() {
                 proof: String::new(),
             },
             "a2a5541a4e548f756d30185f873238d0b43728b08e75e2e655e43eb59eea5960",
+        ),
+        (
+            Request::Capture {
+                id: "abcdef0123456789".into(),
+                origin: "https://github.com".into(),
+                username: Some("octocat".into()),
+                password: "hunter2".into(),
+                proof: String::new(),
+            },
+            "8ab474a7f01b67d1ca65415bbd328c1be3577a382a1d6fe49d226a2ec7e075ae",
+        ),
+        // Pins that a missing username encodes as an empty field rather than
+        // being skipped, which would shift every later field.
+        (
+            Request::Capture {
+                id: "abcdef0123456789".into(),
+                origin: "https://github.com".into(),
+                username: None,
+                password: "hunter2".into(),
+                proof: String::new(),
+            },
+            "0018a9a9de27cdea51f0a2b01d5218d86d95861d5fc95e826e743a8997144365",
         ),
     ];
 
