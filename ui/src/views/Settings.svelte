@@ -16,6 +16,14 @@
   let sync = $state<SyncStatus | null>(null);
   let relayInput = $state("");
   let syncMessage = $state("");
+  /// Set once Touch ID has been refused for want of a signed build.
+  ///
+  /// Not a failure the user can act on: an unsigned binary cannot create an
+  /// access-controlled keychain item at all, so this is a property of the
+  /// build rather than something that went wrong. Showing it in the red error
+  /// banner for the whole pane said "something broke" about a feature that
+  /// was never going to be available, every time.
+  let biometricUnavailable = $state(false);
   let importing = $state(false);
   let importReport = $state<ImportReport | null>(null);
   let importError = $state("");
@@ -124,7 +132,11 @@
     try {
       onStatus(await ipc.setBiometric(!status.biometric_enabled));
     } catch (e) {
-      if (!(isCmdError(e) && e.code === "cancelled")) error = errorMessage(e);
+      if (isCmdError(e) && e.code === "requires_signed_app") {
+        biometricUnavailable = true;
+      } else if (!(isCmdError(e) && e.code === "cancelled")) {
+        error = errorMessage(e);
+      }
     } finally {
       busy = false;
     }
@@ -221,10 +233,20 @@
             you turn it on.
           </p>
         </div>
-        <button disabled={busy || !status.unlocked} onclick={toggleBiometric}>
+        <button
+          disabled={busy || !status.unlocked || biometricUnavailable}
+          onclick={toggleBiometric}>
           {status.biometric_enabled ? "Turn off" : "Turn on"}
         </button>
       </div>
+
+      {#if biometricUnavailable}
+        <p class="note">
+          Unavailable in this development build. Touch ID needs a signed copy
+          of TruePassword — macOS will not let an unsigned app create a
+          keychain item that asks for your fingerprint.
+        </p>
+      {/if}
     </section>
 
     <section>
