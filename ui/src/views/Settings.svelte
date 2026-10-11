@@ -1,8 +1,9 @@
 <script lang="ts">
   import { ipc } from "../lib/ipc";
+  import { open } from "@tauri-apps/plugin-dialog";
   import {
     errorMessage, isCmdError,
-    type PairedBrowser, type SyncStatus, type VaultStatus,
+    type ImportReport, type PairedBrowser, type SyncStatus, type VaultStatus,
   } from "../lib/types";
 
   let { status, onStatus, onClose }:
@@ -15,6 +16,9 @@
   let sync = $state<SyncStatus | null>(null);
   let relayInput = $state("");
   let syncMessage = $state("");
+  let importing = $state(false);
+  let importReport = $state<ImportReport | null>(null);
+  let importError = $state("");
 
   async function refreshBrowsers() {
     browsers = await ipc.listBrowsers();
@@ -76,6 +80,31 @@
     refreshBrowsers();
     refreshSync();
   });
+
+  /// The picker hands back a path, never the file's bytes. Rust opens and
+  /// parses it, so the plaintext export never enters this webview.
+  async function importCsv() {
+    if (importing) return;
+    importError = "";
+    importReport = null;
+
+    const picked = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "CSV export", extensions: ["csv", "txt"] }],
+    });
+    if (typeof picked !== "string") return;
+
+    importing = true;
+    try {
+      importReport = await ipc.importCsv(picked);
+      onStatus(await ipc.status());
+    } catch (e) {
+      importError = errorMessage(e);
+    } finally {
+      importing = false;
+    }
+  }
 
   async function unpair(id: string) {
     busy = true;
@@ -201,6 +230,45 @@
     <section>
       <div class="spread">
         <div class="label">
+          <h3>Import from another manager</h3>
+          <p class="faint">
+            A CSV export from 1Password, Bitwarden, Chrome, LastPass or Safari.
+            Items already here are skipped, so running it twice is safe.
+          </p>
+        </div>
+        <button disabled={busy || importing || !status.unlocked} onclick={importCsv}>
+          {importing ? "Importing…" : "Choose file"}
+        </button>
+      </div>
+
+      {#if !status.unlocked}
+        <p class="faint note">Unlock the vault first.</p>
+      {/if}
+
+      {#if importError}
+        <p class="note bad">{importError}</p>
+      {/if}
+
+      {#if importReport}
+        <p class="note good">
+          {importReport.source}: imported {importReport.imported}
+          {importReport.imported === 1 ? "item" : "items"}{#if importReport.duplicates}, skipped
+            {importReport.duplicates} already here{/if}{#if importReport.unsupported}, skipped
+            {importReport.unsupported} of a kind not supported yet{/if}{#if importReport.failed},
+            {importReport.failed} failed{/if}.
+        </p>
+        <!-- The export is plaintext credentials sitting in Downloads. Saying
+             so is the whole reason this line exists; an import flow that
+             stays quiet about it leaves every password on disk unencrypted. -->
+        <p class="note warnline">
+          Delete the CSV now — it holds every one of those passwords in plain text.
+        </p>
+      {/if}
+    </section>
+
+    <section>
+      <div class="spread">
+        <div class="label">
           <h3>Recovery key on this Mac</h3>
           <p class="faint">
             {#if status.account_key_remembered}
@@ -232,6 +300,10 @@
 </div>
 
 <style>
+  .note { font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
+  .note.bad { color: var(--danger); }
+  .note.good { color: var(--ok); }
+  .note.warnline { color: var(--warn); }
   .settings { height: 100%; display: flex; flex-direction: column; }
   .head { padding: 18px 22px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   h2 { font-size: 15px; font-weight: 600; margin: 0; }

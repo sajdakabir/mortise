@@ -91,6 +91,16 @@ export function emptyPayload(kind: ItemKind): ItemPayload {
 }
 
 /** A paired browser. */
+/** What an import did. Counts only — no credential ever reaches the webview. */
+export interface ImportReport {
+  source: string;
+  imported: number;
+  duplicates: number;
+  empty: number;
+  unsupported: number;
+  failed: number;
+}
+
 /** Whether browsers know where to find the native helper. */
 export interface NativeHostStatus {
   /** Chromium-family browsers installed on this Mac. */

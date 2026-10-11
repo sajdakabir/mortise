@@ -33,10 +33,15 @@ use crate::model::{ItemMeta, ItemPayload};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
+    /// 1Password, identified by its `OTPAuth` column.
     OnePassword,
+    /// Bitwarden, identified by its `login_uri` column.
     Bitwarden,
+    /// Chrome's built-in password export.
     Chrome,
+    /// LastPass, identified by its `grouping` column.
     LastPass,
+    /// Safari / iCloud Keychain.
     Safari,
     /// Headers we recognise, from something we do not.
     Generic,

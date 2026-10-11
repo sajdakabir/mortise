@@ -94,6 +94,23 @@ pub struct VaultStatus {
     pub biometric_enabled: bool,
 }
 
+/// What an import did.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportReport {
+    /// Exporter the file appeared to come from, for display.
+    pub source: String,
+    /// Items actually written to the vault.
+    pub imported: u32,
+    /// Rows already present, matched on name and username.
+    pub duplicates: u32,
+    /// Rows with nothing worth importing.
+    pub empty: u32,
+    /// Rows of a kind not supported yet, such as cards.
+    pub unsupported: u32,
+    /// Rows that parsed but could not be saved.
+    pub failed: u32,
+}
+
 /// Returned once, on vault creation.
 #[derive(Debug, Clone, Serialize)]
 pub struct NewVault {

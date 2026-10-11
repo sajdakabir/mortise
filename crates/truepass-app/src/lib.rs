@@ -25,6 +25,7 @@ const VAULT_FILE: &str = "truepass.vault";
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let state = AppState::new(dir.join(VAULT_FILE));
@@ -68,6 +69,7 @@ pub fn run() {
             commands::search,
             commands::reveal,
             commands::save_item,
+            commands::import_csv,
             commands::delete_item,
             commands::generate_password,
             commands::password_entropy,

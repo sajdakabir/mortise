@@ -11,8 +11,8 @@
  * to encrypt anything.
  */
 import type {
-  ItemPayload, ItemRow, MetaInput, NativeHostStatus, PairedBrowser,
-  SyncReport, SyncStatus, VaultStatus,
+  ImportReport, ItemPayload, ItemRow, MetaInput, NativeHostStatus,
+  PairedBrowser, SyncReport, SyncStatus, VaultStatus,
 } from "./types";
 
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -39,6 +39,7 @@ export const ipc = {
   saveItem: (id: string | null, meta: MetaInput, payload: ItemPayload) =>
     call<string>("save_item", { id, meta, payload }),
   deleteItem: (id: string) => call<void>("delete_item", { id }),
+  importCsv: (path: string) => call<ImportReport>("import_csv", { path }),
   copySecret: (id: string, field: string) => call<number>("copy_secret", { id, field }),
   generatePassword: (length: number, lower: boolean, upper: boolean, digits: boolean, symbols: boolean) =>
     call<string>("generate_password", { length, lower, upper, digits, symbols }),
@@ -134,6 +135,11 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
     case "forget_account_key":
       mockState.accountKeyRemembered = false;
       return as(status());
+    case "import_csv":
+      return as({
+        source: "Chrome", imported: 12, duplicates: 2,
+        empty: 1, unsupported: 0, failed: 0,
+      });
     case "pending_browser":
       return as(null);
     case "list_browsers":

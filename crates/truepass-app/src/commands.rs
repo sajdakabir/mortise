@@ -269,6 +269,67 @@ pub fn save_item(
     })
 }
 
+/// Import a CSV export from another password manager.
+///
+/// Takes a path rather than the file's contents on purpose. The webview is
+/// semi-trusted (threat model §2) and the file is plaintext credentials; if
+/// the UI read it and passed it over IPC, every password in the export would
+/// pass through the JS heap for no benefit. Rust opens it, parses it, and the
+/// webview only ever sees counts.
+#[tauri::command]
+pub fn import_csv(state: State<'_, AppState>, path: String) -> CmdResult<crate::dto::ImportReport> {
+    use truepass_vault::import;
+
+    state.touch();
+
+    let file = std::fs::File::open(&path)
+        .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
+    let (items, report) = import::parse(std::io::BufReader::new(file))?;
+
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(CmdError::no_vault)?;
+
+        // Matching on name plus username, which is what a person means by
+        // "the same login". Importing the same export twice is a normal
+        // mistake and should be a no-op rather than a doubled vault.
+        let existing: std::collections::HashSet<(String, Option<String>)> = v
+            .search("")?
+            .into_iter()
+            .map(|row| (row.meta.title, row.meta.username))
+            .collect();
+
+        let mut imported = 0u32;
+        let mut duplicates = 0u32;
+        let mut failed = 0u32;
+        let mut seen = existing;
+
+        for (meta, payload) in &items {
+            let key = (meta.title.clone(), meta.username.clone());
+            if seen.contains(&key) {
+                duplicates += 1;
+                continue;
+            }
+            match v.create_item(meta, payload) {
+                Ok(_) => {
+                    seen.insert(key);
+                    imported += 1;
+                }
+                // Never log the error: it would carry the row with it.
+                Err(_) => failed += 1,
+            }
+        }
+
+        Ok(crate::dto::ImportReport {
+            source: report.source.label().to_string(),
+            imported,
+            duplicates,
+            empty: report.empty as u32,
+            unsupported: report.unsupported as u32,
+            failed,
+        })
+    })
+}
+
 /// Delete an item.
 #[tauri::command]
 pub fn delete_item(state: State<'_, AppState>, id: String) -> CmdResult<()> {
