@@ -31,16 +31,55 @@ pub struct Association {
 
 type Store = BTreeMap<String, Association>;
 
+/// In-memory copy of the store, filled on first use.
+///
+/// Every proof check used to read the keychain, which put a keychain call on
+/// the hot path of every autofill. Two things make that worse than merely
+/// wasteful:
+///
+/// 1. macOS re-authorises a keychain item when the reading binary's signature
+///    changes. In a development build `cargo` re-signs on every rebuild, so
+///    each request raised a password prompt — and the app *blocks* while it is
+///    up, so the extension timed out waiting for a reply.
+/// 2. Even signed, it is a synchronous read per request for data that cannot
+///    change without this process being the one to change it.
+///
+/// Caching costs nothing in safety: the process already holds the vault keys
+/// in memory, so an attacker who can read this process has far more than a
+/// pairing key. Writes go through [`save`], which updates both.
+static CACHE: std::sync::Mutex<Option<Store>> = std::sync::Mutex::new(None);
+
 fn load() -> Store {
-    match truepass_macos::load(SERVICE, ACCOUNT, "") {
+    if let Ok(cache) = CACHE.lock()
+        && let Some(store) = cache.as_ref()
+    {
+        return store.clone();
+    }
+
+    let store: Store = match truepass_macos::load(SERVICE, ACCOUNT, "") {
         Ok(Some(bytes)) => serde_json::from_slice(&bytes).unwrap_or_default(),
         _ => Store::new(),
+    };
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = Some(store.clone());
     }
+    store
 }
 
 fn save(store: &Store) -> Result<(), KeychainError> {
     let json = serde_json::to_vec(store).unwrap_or_else(|_| b"{}".to_vec());
-    truepass_macos::store(SERVICE, ACCOUNT, &json, Protection::DeviceUnlocked)
+    truepass_macos::store(SERVICE, ACCOUNT, &json, Protection::DeviceUnlocked)?;
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = Some(store.clone());
+    }
+    Ok(())
+}
+
+/// Drop the cached copy, so the next read goes back to the keychain.
+fn invalidate() {
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = None;
+    }
 }
 
 /// Every paired browser.
@@ -75,6 +114,7 @@ pub fn remove(id: &str) -> Result<(), KeychainError> {
 /// Unpair everything. Called on sign-out.
 pub fn clear() {
     let _ = truepass_macos::delete(SERVICE, ACCOUNT);
+    invalidate();
 }
 
 /// Whether a request carries a valid proof from a paired browser.
