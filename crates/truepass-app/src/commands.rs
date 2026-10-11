@@ -404,6 +404,17 @@ pub fn approve_browser(state: State<'_, AppState>) -> CmdResult<String> {
     Ok(id)
 }
 
+/// The browser currently waiting to be paired, if any.
+///
+/// The event alone is not enough: a browser can ask while the window is on a
+/// screen with no listener attached, and the request then sits in state with
+/// nothing on screen to accept it. The UI asks for this on mount so a request
+/// that arrived earlier is still actionable.
+#[tauri::command]
+pub fn pending_browser(state: State<'_, AppState>) -> Option<String> {
+    state.pending_association()
+}
+
 /// Decline the pending pairing request.
 #[tauri::command]
 pub fn reject_browser(state: State<'_, AppState>) {

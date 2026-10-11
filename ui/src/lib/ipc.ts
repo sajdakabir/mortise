@@ -47,6 +47,7 @@ export const ipc = {
   touch: () => call<void>("touch"),
   approveBrowser: () => call<string>("approve_browser"),
   rejectBrowser: () => call<void>("reject_browser"),
+  pendingBrowser: () => call<string | null>("pending_browser"),
   listBrowsers: () => call<PairedBrowser[]>("list_browsers"),
   unpairBrowser: (id: string) => call<void>("unpair_browser", { id }),
   nativeHostStatus: () => call<NativeHostStatus>("native_host_status"),
@@ -133,6 +134,8 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
     case "forget_account_key":
       mockState.accountKeyRemembered = false;
       return as(status());
+    case "pending_browser":
+      return as(null);
     case "list_browsers":
       return as(mockState.browsers);
     case "native_host_status":

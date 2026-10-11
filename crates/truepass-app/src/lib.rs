@@ -74,6 +74,7 @@ pub fn run() {
             commands::copy_secret,
             commands::approve_browser,
             commands::reject_browser,
+            commands::pending_browser,
             commands::list_browsers,
             commands::unpair_browser,
             commands::native_host_status,

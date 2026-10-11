@@ -2,6 +2,7 @@
   import Setup from "./views/Setup.svelte";
   import Unlock from "./views/Unlock.svelte";
   import Vault from "./views/Vault.svelte";
+  import PairingPrompt from "./lib/PairingPrompt.svelte";
   import { ipc, isMock, onVaultLocked } from "./lib/ipc";
   import type { VaultStatus } from "./lib/types";
 
@@ -59,6 +60,11 @@
       onUnlock={() => (unlocking = true)} />
   {/if}
 </div>
+
+<!-- Outside the routed views on purpose. A browser can ask to pair at any
+     moment, including while the vault is locked or a form is open, and the
+     answer has to be reachable from wherever the user happens to be. -->
+<PairingPrompt onPaired={refreshStatus} />
 
 <style>
   .root { height: 100%; }

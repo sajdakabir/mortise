@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ipc, onBrowserPairingRequest } from "../lib/ipc";
+  import { ipc } from "../lib/ipc";
   import {
     errorMessage, isCmdError,
     type PairedBrowser, type SyncStatus, type VaultStatus,
@@ -15,8 +15,6 @@
   let sync = $state<SyncStatus | null>(null);
   let relayInput = $state("");
   let syncMessage = $state("");
-  /** Name of a browser waiting for approval, if any. */
-  let pairingRequest = $state<string | null>(null);
 
   async function refreshBrowsers() {
     browsers = await ipc.listBrowsers();
@@ -72,31 +70,12 @@
     }
   }
 
+  // The pairing prompt itself lives in the app shell, not here: a browser can
+  // ask at any moment and the approval has to be reachable from any screen.
   $effect(() => {
     refreshBrowsers();
     refreshSync();
-    const stop = onBrowserPairingRequest((name) => { pairingRequest = name; });
-    return () => { stop.then((f) => f()); };
   });
-
-  async function approvePairing() {
-    busy = true;
-    error = "";
-    try {
-      await ipc.approveBrowser();
-      pairingRequest = null;
-      await refreshBrowsers();
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function rejectPairing() {
-    await ipc.rejectBrowser();
-    pairingRequest = null;
-  }
 
   async function unpair(id: string) {
     busy = true;
@@ -181,20 +160,6 @@
       {/if}
     </section>
 
-    {#if pairingRequest}
-      <section class="pairing">
-        <h3>Pair with {pairingRequest}?</h3>
-        <p class="faint">
-          This browser will be able to ask for logins matching the page you are on,
-          and only after you pick one. Approve it only if you just clicked Pair in
-          that browser — nothing else on this Mac can reach your vault without this.
-        </p>
-        <div class="row">
-          <button class="primary" disabled={busy} onclick={approvePairing}>Approve</button>
-          <button disabled={busy} onclick={rejectPairing}>Not now</button>
-        </div>
-      </section>
-    {/if}
 
     <section>
       <div class="spread">
@@ -278,15 +243,6 @@
   h3 { font-size: 13px; font-weight: 560; margin: 0 0 4px; }
   .label p { margin: 0; font-size: 12px; line-height: 1.55; max-width: 44ch; }
   button { flex-shrink: 0; }
-  .pairing {
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    background: color-mix(in srgb, var(--accent) 9%, transparent);
-    border-radius: var(--radius-lg);
-    padding: 14px 16px;
-    margin-top: 14px;
-  }
-  .pairing h3 { margin-bottom: 6px; }
-  .pairing p { margin: 0 0 12px; max-width: 48ch; }
   .row { display: flex; gap: 8px; }
   .relay { display: flex; gap: 8px; margin-top: 10px; }
   .relay input { flex: 1; }
