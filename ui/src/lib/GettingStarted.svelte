@@ -205,7 +205,15 @@
     padding: 32px 24px;
     overflow-y: auto;
   }
-  .card { width: 100%; max-width: 440px; }
+  .card {
+    width: 100%;
+    max-width: 440px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    box-shadow: var(--shadow-1);
+    padding: var(--s5);
+  }
   h2 { font-size: 16px; font-weight: 600; margin: 0; }
   .sub { font-size: 12.5px; margin: 4px 0 22px; }
 
