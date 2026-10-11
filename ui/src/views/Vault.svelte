@@ -2,6 +2,7 @@
   import ItemDetail from "../lib/ItemDetail.svelte";
   import Settings from "./Settings.svelte";
   import ItemEditor from "../lib/ItemEditor.svelte";
+  import GettingStarted from "../lib/GettingStarted.svelte";
   import { ipc } from "../lib/ipc";
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
 
@@ -19,6 +20,9 @@
   let selectedId = $state<string | null>(null);
   let editing = $state<"none" | "new" | "existing" | "settings">("none");
   let error = $state("");
+  /// Bumped when Settings closes, because approving a browser pairing happens
+  /// in there and the getting-started panel has no other way to learn about it.
+  let settingsRevision = $state(0);
 
   const selected = $derived(rows.find((r) => r.id === selectedId) ?? null);
 
@@ -119,7 +123,10 @@
 
   <main>
     {#if editing === "settings"}
-      <Settings {status} onStatus={(s) => (status = s)} onClose={() => (editing = "none")} />
+      <Settings
+        {status}
+        onStatus={(s) => (status = s)}
+        onClose={() => { editing = "none"; settingsRevision += 1; }} />
     {:else if !status.unlocked}
       <div class="placeholder">
         <p>Vault is locked</p>
@@ -132,9 +139,10 @@
     {:else if selected}
       <ItemDetail item={selected} onEdit={() => (editing = "existing")} onDeleted={onDeleted} />
     {:else}
-      <div class="placeholder">
-        <p class="faint">Select an item.</p>
-      </div>
+      <GettingStarted
+        {status}
+        revision={settingsRevision}
+        onAddItem={() => { editing = "new"; selectedId = null; }} />
     {/if}
   </main>
 </div>

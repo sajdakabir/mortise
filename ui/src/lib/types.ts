@@ -91,6 +91,18 @@ export function emptyPayload(kind: ItemKind): ItemPayload {
 }
 
 /** A paired browser. */
+/** Whether browsers know where to find the native helper. */
+export interface NativeHostStatus {
+  /** Chromium-family browsers installed on this Mac. */
+  browsers: string[];
+  /** Those the helper is currently registered with. */
+  registered: string[];
+  /** The extension id currently authorised, if any. */
+  extension_id: string | null;
+  /** Whether the helper binary is actually present beside the app. */
+  proxy_present: boolean;
+}
+
 export interface PairedBrowser {
   id: string;
   name: string;

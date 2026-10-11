@@ -10,5 +10,6 @@
 //! the trust model.
 
 pub mod associations;
+pub mod native_host;
 pub mod protocol;
 pub mod server;

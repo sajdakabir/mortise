@@ -422,6 +422,28 @@ pub fn unpair_browser(id: String) -> CmdResult<()> {
     crate::browser::associations::remove(&id).map_err(CmdError::from)
 }
 
+/// Whether the browser knows where to find our native helper.
+#[tauri::command]
+pub fn native_host_status() -> crate::browser::native_host::HostStatus {
+    crate::browser::native_host::status()
+}
+
+/// Tell every installed Chromium-family browser about the helper.
+///
+/// Writing into the user's own Application Support directory, so no elevation
+/// and no terminal. The extension id is the one thing the app cannot work out
+/// for itself, which is why it is the only argument.
+#[tauri::command]
+pub fn install_native_host(extension_id: String) -> CmdResult<Vec<String>> {
+    crate::browser::native_host::install(&extension_id).map_err(CmdError::from)
+}
+
+/// Remove the registration. Autofill stops working until it is reinstalled.
+#[tauri::command]
+pub fn uninstall_native_host() -> CmdResult<()> {
+    crate::browser::native_host::uninstall().map_err(CmdError::from)
+}
+
 /// Defer auto-lock. Called by the UI on user activity.
 #[tauri::command]
 pub fn touch(state: State<'_, AppState>) {

@@ -92,5 +92,21 @@ impl From<truepass_macos::Error> for CmdError {
     }
 }
 
+impl From<crate::browser::native_host::Error> for CmdError {
+    fn from(e: crate::browser::native_host::Error) -> Self {
+        use crate::browser::native_host::Error as E;
+        // Unlike the vault errors above, every one of these is about the user's
+        // own machine rather than about a secret, so the detail is safe to show
+        // and is the only thing that makes the failure fixable.
+        let code = match e {
+            E::BadExtensionId => "bad_extension_id",
+            E::NoBrowsers => "no_browsers",
+            E::ProxyMissing(_) => "proxy_missing",
+            E::Io(_) => "host_write_failed",
+        };
+        Self::new(code, e.to_string())
+    }
+}
+
 /// Command result alias.
 pub type CmdResult<T> = Result<T, CmdError>;
