@@ -47,6 +47,12 @@ pub fn run() {
                     }
                 }
             });
+            // Pull the pairing keys into memory before the extension can ask
+            // for anything. On its own thread because a keychain read can
+            // block on a user prompt, and blocking startup on that would hang
+            // the window before it draws.
+            std::thread::spawn(browser::associations::warm);
+
             // The browser socket. A failure here is not fatal: the app is
             // perfectly usable without autofill, and refusing to start over it
             // would be a poor trade.

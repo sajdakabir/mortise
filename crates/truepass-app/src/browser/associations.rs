@@ -82,6 +82,17 @@ fn invalidate() {
     }
 }
 
+/// Read the store once so later lookups never touch the keychain.
+///
+/// Called at startup, off the main thread. The point is *where* the keychain
+/// read happens, not whether: if the first read lands on a browser request,
+/// any prompt macOS raises blocks the app while the extension sits waiting,
+/// and autofill looks broken rather than merely slow. Doing it at launch puts
+/// the prompt in front of someone who is already looking at the app.
+pub fn warm() {
+    let _ = load();
+}
+
 /// Every paired browser.
 pub fn list() -> Vec<Association> {
     load().into_values().collect()
