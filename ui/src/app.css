@@ -24,8 +24,9 @@
   --accent: #e8eaf0;
   --accent-ink: #0f1115;
   --accent-dim: #2b303b;
-  /* Used only for focus and selection, where monochrome cannot carry meaning. */
-  --focus: #5b8def;
+  /* Focus and selection. Neutral on purpose: the accent is monochrome, and a
+     blue ring was the one piece of colour in the whole app. */
+  --focus: #9aa2b1;
 
   --danger: #f07178;
   --ok: #9ece6a;
@@ -75,7 +76,7 @@
     --accent: #16181d;
     --accent-ink: #ffffff;
     --accent-dim: #e7eaf1;
-    --focus: #3b6fd4;
+    --focus: #5c6472;
 
     --danger: #c0392b;
     --ok: #3f8f3f;
@@ -107,7 +108,7 @@ body {
 
 /* Text selection in a password manager is usually a prelude to copying
    something, so make it unmistakable. */
-::selection { background: color-mix(in srgb, var(--focus) 35%, transparent); }
+::selection { background: color-mix(in srgb, var(--focus) 30%, transparent); }
 
 button {
   font: inherit;
@@ -158,8 +159,10 @@ input, textarea, select {
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
+  /* The border carries the focus; the ring only softens its edge. Both
+     monochrome, so a focused field reads as brighter rather than coloured. */
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 14%, transparent);
 }
 textarea { resize: vertical; min-height: 72px; font-family: inherit; }
 
