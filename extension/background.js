@@ -87,6 +87,20 @@ const handlers = {
     return response;
   },
 
+  /// Several matches is a choice, and the popup is where there is room to
+  /// show which account is which. Opening it from a page click needs no new
+  /// permission — the gesture came from the user.
+  async openPopup() {
+    try {
+      await chrome.action.openPopup();
+      return { type: "ok" };
+    } catch {
+      // Not available on every Chromium build. The toolbar badge still says
+      // there is something there, so the user can open it themselves.
+      return { type: "error", code: "no_popup", message: "Open TruePassword from the toolbar." };
+    }
+  },
+
   async unpair() {
     await chrome.storage.local.remove(["associationId", "associationKey"]);
     return { type: "ok" };
@@ -108,6 +122,34 @@ const handlers = {
     // Hand the origin back so the popup can show which site it matched
     // against. It is the browser's value, not the page's.
     return response?.type === "logins" ? { ...response, origin } : response;
+  },
+
+  /**
+   * A page reporting that it has a login form.
+   *
+   * Asking from the page rather than on every tab update means the native
+   * host is only consulted for pages that could actually be filled, instead
+   * of once for every page the user visits.
+   *
+   * The reply drives both the toolbar badge and the inline button, so the
+   * user can see a saved login exists without having to click to find out —
+   * which was the whole problem with an invoke-only extension.
+   */
+  async pageHasLogin(_message, sender) {
+    const origin = originOf(sender?.tab);
+    if (!origin) return { type: "logins", items: [] };
+
+    const response = await sendSigned({ type: "logins", origin });
+    const items = response?.type === "logins" ? response.items : [];
+
+    if (sender?.tab?.id != null) {
+      chrome.action.setBadgeText({
+        tabId: sender.tab.id,
+        text: items.length ? String(items.length) : "",
+      });
+      chrome.action.setBadgeBackgroundColor({ color: "#4c7fd4" });
+    }
+    return { type: "logins", items };
   },
 
   /**
@@ -149,8 +191,9 @@ const handlers = {
     return response;
   },
 
-  async fill({ itemId }) {
-    const tab = await activeTab();
+  async fill({ itemId }, sender) {
+    // The sender's tab when a page asked, the active one when the popup did.
+    const tab = sender?.tab ?? (await activeTab());
     const origin = originOf(tab);
     if (!origin) {
       return { type: "error", code: "bad_origin", message: "This page cannot be filled." };
