@@ -3,7 +3,7 @@
   import Unlock from "./views/Unlock.svelte";
   import Vault from "./views/Vault.svelte";
   import PairingPrompt from "./lib/PairingPrompt.svelte";
-  import CapturePrompt from "./lib/CapturePrompt.svelte";
+  import CaptureToast from "./lib/CaptureToast.svelte";
   import { ipc, isMock, onVaultLocked } from "./lib/ipc";
   import type { VaultStatus } from "./lib/types";
 
@@ -14,6 +14,11 @@
   /// Locking keeps search working, so `searchable` stays true and routing on
   /// it alone would leave no way back to the unlock screen.
   let unlocking = $state(false);
+
+  /// Bumped when something outside the vault view changes the items — a login
+  /// captured from the browser, mainly. The list is driven by its own search
+  /// call, so a write from anywhere else is invisible to it until told.
+  let dataRevision = $state(0);
 
   async function refreshStatus() {
     status = await ipc.status();
@@ -57,6 +62,7 @@
   {:else}
     <Vault
       {status}
+      {dataRevision}
       onStatus={(s) => (status = s)}
       onUnlock={() => (unlocking = true)} />
   {/if}
@@ -66,7 +72,7 @@
      moment, including while the vault is locked or a form is open, and the
      answer has to be reachable from wherever the user happens to be. -->
 <PairingPrompt onPaired={refreshStatus} />
-<CapturePrompt onSaved={refreshStatus} />
+<CaptureToast onChanged={() => { dataRevision += 1; refreshStatus(); }} />
 
 <style>
   .root { height: 100%; }
