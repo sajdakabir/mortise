@@ -133,6 +133,13 @@ const handlers = {
       password,
     });
 
+    // Same rule as the content script: opt-in, and the outcome only. The
+    // response carries no secret, so this is safe to print.
+    const { debug } = await chrome.storage.local.get("debug");
+    if (debug) {
+      console.log("TruePassword: capture for", origin, "->", JSON.stringify(response));
+    }
+
     // A badge, because the prompt opens in the app window and the user is
     // looking at the browser. Cleared as soon as they deal with it.
     if (response?.type === "captured" && response.queued) {

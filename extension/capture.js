@@ -19,6 +19,38 @@
  *     check depends on.
  */
 
+/**
+ * Diagnostics, off unless asked for.
+ *
+ * A capture script that logs nothing is impossible to support: "it did not
+ * save my password" has half a dozen causes and no way to tell them apart.
+ * A script that logs by default is noise on every page the user visits, and
+ * one careless line away from printing a password into the console.
+ *
+ * So: opt-in, and it reports only *whether* a field was found, never a value.
+ * Turn on from the service worker console with
+ *   chrome.storage.local.set({ debug: true })
+ */
+let debug = false;
+try {
+  // `?.then` matters: if storage were unavailable the optional chain yields
+  // undefined, and calling .then on it would throw at load and take the whole
+  // script — and therefore every capture — down silently.
+  chrome.storage?.local
+    ?.get("debug")
+    ?.then((v) => {
+      debug = Boolean(v?.debug);
+      log("capture armed on", location.origin);
+    })
+    ?.catch(() => {});
+} catch {
+  // Nothing to do. Diagnostics are a convenience; capture must still work.
+}
+
+function log(...parts) {
+  if (debug) console.log("TruePassword:", ...parts);
+}
+
 /** Visible, enabled, and actually fillable. */
 function usable(el) {
   if (el.disabled || el.type === "hidden") return false;
@@ -64,8 +96,12 @@ function credentialIn(scope) {
   };
 }
 
-function offer(credential) {
-  if (!credential) return;
+function offer(credential, why) {
+  if (!credential) {
+    log(why, "- no filled password field, nothing to offer");
+    return;
+  }
+  log(why, "- offering a credential", credential.username ? "with" : "without", "a username");
   try {
     chrome.runtime.sendMessage({ command: "capture", ...credential });
   } catch {
@@ -78,7 +114,7 @@ function offer(credential) {
 // A real form submit. The reliable case, and the cheap one.
 document.addEventListener(
   "submit",
-  (event) => offer(credentialIn(event.target)),
+  (event) => offer(credentialIn(event.target), "submit"),
   true,
 );
 
@@ -96,7 +132,7 @@ document.addEventListener(
     if (!el) return;
     // Already covered by the submit listener.
     if (el.type === "submit" && el.form) return;
-    offer(credentialIn(document));
+    offer(credentialIn(document), "click");
   },
   true,
 );
@@ -110,7 +146,7 @@ document.addEventListener(
     if (event.key !== "Enter") return;
     const el = event.target;
     if (!(el instanceof HTMLInputElement) || el.type !== "password") return;
-    offer(credentialIn(el.form ?? document));
+    offer(credentialIn(el.form ?? document), "enter");
   },
   true,
 );
