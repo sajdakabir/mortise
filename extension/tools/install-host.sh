@@ -23,6 +23,10 @@ TARGET_DIRS=(
   "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
   "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
   "$HOME/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
+  # Newer forks keep their user data one level down, in "<Product>/User Data".
+  "$HOME/Library/Application Support/Dia/User Data/NativeMessagingHosts"
+  "$HOME/Library/Application Support/Arc/User Data/NativeMessagingHosts"
+  "$HOME/Library/Application Support/Vivaldi/NativeMessagingHosts"
 )
 
 if [[ "${1:-}" == "--uninstall" ]]; then
