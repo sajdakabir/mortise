@@ -98,6 +98,45 @@
   </div>
 </section>
 
+<section class="section" id="guard">
+  <div class="wrap guard">
+    <div class="guard-text">
+      <p class="label">Agent Guard &middot; in design</p>
+      <h2>A key you paste is a key<br>you have published.</h2>
+      <p class="lede">
+        Secrets end up in chat boxes, issue trackers and prompts because that
+        is where the work is. TruePassword recognises one of yours on its way
+        out and kills it at the provider, in the seconds before anyone reads
+        the message.
+      </p>
+      <p class="lede">
+        Revoking is the part that always works &mdash; every provider will let
+        you burn a key. Some go further and let a replacement be minted in the
+        same breath, and where that is true the new one lands in your vault
+        before you have switched windows.
+      </p>
+      <p class="note mono">
+        Issuing a replacement needs a credential that can issue keys. It lives
+        in your vault, on your Mac, and the call goes straight from your
+        machine to the provider &mdash; no server of ours is ever in the path.
+      </p>
+    </div>
+
+    <table class="matrix">
+      <thead>
+        <tr><th class="label">Provider</th><th class="label">On detection</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Cloudflare</td><td class="yes">Revoked &amp; replaced</td></tr>
+        <tr><td>AWS IAM</td><td class="yes">Revoked &amp; replaced</td></tr>
+        <tr><td>OpenAI</td><td>Revoked</td></tr>
+        <tr><td>Anthropic</td><td>Revoked</td></tr>
+        <tr><td>GitHub</td><td class="partial">Flagged, with a link</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 <section class="section" id="limits">
   <div class="wrap limits">
     <div class="limits-head">

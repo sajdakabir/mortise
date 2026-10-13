@@ -294,3 +294,40 @@ p { margin: 0; }
   .hero-inner { padding-top: 56px; }
   .foot-inner { gap: 14px; }
 }
+
+/* --- agent guard ------------------------------------------------------- */
+
+.guard {
+  padding-block: clamp(56px, 8vw, 92px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(32px, 6vw, 72px);
+  align-items: start;
+}
+.guard .label { display: block; margin-bottom: 18px; }
+.guard h2 { margin-bottom: 20px; }
+.guard .lede + .lede { margin-top: 16px; }
+
+/* Not the warning .note from the app — here it is a footnote that qualifies
+   the claim above it, and it should read as precision rather than caution. */
+.guard .note {
+  margin-top: 26px;
+  padding-left: 14px;
+  border-left: 1px solid var(--rule-strong);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-faint);
+  max-width: 52ch;
+}
+
+/* Naming the providers and what actually happens to each. A claim a reader
+   can check beats an adjective they have to trust. */
+.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+.matrix th { text-align: left; padding: 0 0 10px; font-weight: 400; }
+.matrix td { padding: 13px 0; border-top: 1px solid var(--rule); color: var(--text-dim); }
+.matrix tbody tr:last-child td { border-bottom: 1px solid var(--rule); }
+.matrix td:first-child { color: var(--text); }
+.matrix .yes { color: var(--text); }
+.matrix .partial { color: var(--text-faint); }
+
+@media (max-width: 760px) { .guard { grid-template-columns: 1fr; } }
