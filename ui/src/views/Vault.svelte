@@ -3,6 +3,7 @@
   import Settings from "./Settings.svelte";
   import ItemEditor from "../lib/ItemEditor.svelte";
   import GettingStarted from "../lib/GettingStarted.svelte";
+  import Avatar from "../lib/Avatar.svelte";
   import { ipc } from "../lib/ipc";
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
 
@@ -25,8 +26,11 @@
   /// Bumped when Settings closes, because approving a browser pairing happens
   /// in there and the getting-started panel has no other way to learn about it.
   let settingsRevision = $state(0);
+  let searchEl = $state<HTMLInputElement | null>(null);
+  let listEl = $state<HTMLElement | null>(null);
 
   const selected = $derived(rows.find((r) => r.id === selectedId) ?? null);
+  const index = $derived(rows.findIndex((r) => r.id === selectedId));
 
   async function refresh() {
     try {
@@ -44,6 +48,76 @@
     void dataRevision;
     refresh();
   });
+
+  /// Arrow keys move through the list, Enter opens, ⌘F or / focuses search.
+  ///
+  /// A list reachable only with the mouse is most of what separates this from
+  /// the tools people reach for without thinking. Typing is left alone: these
+  /// only fire when the keystroke is not already going into a field, except
+  /// ⌘F, ⌘N and Escape, which should work from anywhere.
+  function onKeydown(event: KeyboardEvent) {
+    // Dialogs own the keyboard while they are up.
+    if (editing !== "none") return;
+
+    const target = event.target as HTMLElement | null;
+    const typing =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target?.isContentEditable === true;
+    const mod = event.metaKey || event.ctrlKey;
+
+    if (mod && event.key === "f") {
+      event.preventDefault();
+      searchEl?.focus();
+      searchEl?.select();
+      return;
+    }
+    if (mod && event.key === "n") {
+      event.preventDefault();
+      if (status.unlocked) { editing = "new"; selectedId = null; }
+      return;
+    }
+    if (mod) return;
+
+    if (event.key === "Escape") {
+      if (query) { query = ""; return; }
+      searchEl?.blur();
+      return;
+    }
+    if (!typing && event.key === "/") {
+      event.preventDefault();
+      searchEl?.focus();
+      return;
+    }
+
+    // Arrows work from the search field too, so you can type and then move
+    // into the results without reaching for the mouse.
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (typing && target !== searchEl) return;
+      if (rows.length === 0) return;
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const next = index < 0 ? (step > 0 ? 0 : rows.length - 1) : index + step;
+      selectedId = rows[Math.max(0, Math.min(rows.length - 1, next))].id;
+      scrollSelectedIntoView();
+      return;
+    }
+
+    if (event.key === "Enter" && target === searchEl && rows.length > 0) {
+      event.preventDefault();
+      selectedId = rows[index < 0 ? 0 : index].id;
+      searchEl?.blur();
+    }
+  }
+
+  function scrollSelectedIntoView() {
+    // After the selection has rendered, not before.
+    requestAnimationFrame(() => {
+      listEl
+        ?.querySelector<HTMLElement>(".item.active")
+        ?.scrollIntoView({ block: "nearest" });
+    });
+  }
 
   async function lock() {
     onStatus(await ipc.lock());
@@ -65,11 +139,20 @@
   }
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <div class="shell">
   <aside>
     <div class="topbar drag">
       <div class="no-drag searchwrap">
-        <input class="search" placeholder="Search" bind:value={query} spellcheck="false" />
+        <input
+          class="search"
+          placeholder="Search"
+          bind:this={searchEl}
+          bind:value={query}
+          spellcheck="false"
+          autocomplete="off" />
+        {#if !query}<kbd class="hint">/</kbd>{/if}
       </div>
     </div>
 
@@ -77,21 +160,29 @@
       <span class="faint count">
         {rows.length}{query ? " found" : status.item_count === 1 ? " item" : " items"}
       </span>
-      <button class="ghost tiny" disabled={!status.unlocked}
+      <button class="ghost tiny" disabled={!status.unlocked} title="New item  ⌘N"
         onclick={() => { editing = "new"; selectedId = null; }}>+ New</button>
     </div>
 
-    <div class="list">
+    <div class="list" bind:this={listEl}>
       {#if error}
         <p class="empty">{error}</p>
       {:else if rows.length === 0}
-        <p class="empty faint">{query ? "Nothing matches." : "No items yet."}</p>
+        <div class="nothing">
+          <p class="faint">{query ? `No match for “${query}”` : "No items yet."}</p>
+          {#if !query && status.unlocked}
+            <button class="ghost tiny" onclick={() => (editing = "new")}>Add your first</button>
+          {/if}
+        </div>
       {:else}
         {#each rows as row (row.id)}
           <button class="item" class:active={row.id === selectedId}
             onclick={() => { selectedId = row.id; editing = "none"; }}>
-            <span class="t">{row.title}</span>
-            <span class="s faint">{row.username ?? KIND_LABEL[row.kind]}</span>
+            <Avatar title={row.title} kind={row.kind} size={28} />
+            <span class="text">
+              <span class="t">{row.title}</span>
+              <span class="s faint">{row.username ?? KIND_LABEL[row.kind]}</span>
+            </span>
           </button>
         {/each}
       {/if}
@@ -132,7 +223,7 @@
         onClose={() => { editing = "none"; settingsRevision += 1; }} />
     {:else if !status.unlocked}
       <div class="placeholder">
-        <p>Vault is locked</p>
+        <p class="locked-title">Vault is locked</p>
         <p class="faint small">
           You can still search and see names. Unlock to reveal, copy or change
           anything.
@@ -162,28 +253,29 @@
 {/if}
 
 <style>
-  .shell { height: 100%; display: grid; grid-template-columns: 268px 1fr; }
+  .shell { height: 100%; display: grid; grid-template-columns: 272px 1fr; }
   aside {
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
-    background: var(--bg-raised);
+    /* Sunken rather than raised: the list is the ground the detail pane sits
+       in front of, and lifting both flattened the two together. */
+    background: var(--bg-sunken);
     min-width: 0;
   }
-  /* Leaves room for the macOS traffic lights under a transparent title bar. */
+
   /* The window has a transparent title bar, so the traffic lights float over
      the top-left of this sidebar. Clearing them with left padding squeezed the
      search into the leftover width; reserving the height instead puts it on
      its own row at full width, which is what every other macOS sidebar does.
      The strip above it stays draggable, so the lights still have a grab area. */
-  .topbar { padding: 38px 10px 8px; flex-shrink: 0; }
-  .searchwrap { width: 100%; }
+  .topbar { padding: 38px var(--s2) var(--s2); flex-shrink: 0; }
+  .searchwrap { width: 100%; position: relative; }
   .search {
     font-size: 12.5px;
-    padding: 6px 10px 6px 28px;
-    border-radius: 7px;
+    padding: 6px 28px;
+    border-radius: var(--radius);
     background: var(--bg-input);
   }
-  .searchwrap { position: relative; }
   /* Magnifier drawn in CSS rather than shipped as an icon file or an inline
      SVG — it is two shapes, and the asset would cost more than it saves. */
   .searchwrap::before {
@@ -211,26 +303,57 @@
     transform-origin: left center;
     pointer-events: none;
   }
-  .listhead { padding: 8px 12px 6px; flex-shrink: 0; }
-  .count { font-size: 11px; }
-  .tiny { font-size: 11px; padding: 2px 8px; }
-  .list { flex: 1; overflow-y: auto; padding: 0 6px 8px; }
-  .item {
-    display: flex; flex-direction: column; gap: 1px;
-    width: 100%; text-align: left;
-    background: transparent; border: none;
-    padding: 7px 10px; border-radius: var(--radius);
+  .hint {
+    position: absolute;
+    right: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
   }
-  .item:hover { background: var(--bg-input); }
-  .item.active { background: var(--accent-dim); }
-  .item.active .t, .item.active .s { color: var(--text); }
-  .t { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-  .s { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-  .empty { padding: 20px 12px; font-size: 12px; }
-  .foot { padding: 9px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
+
+  .listhead { padding: var(--s2) var(--s3) var(--s1); flex-shrink: 0; }
+  .count { font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tiny { font-size: 11px; padding: 3px 8px; }
+
+  .list { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s2); }
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 6px var(--s2);
+    border-radius: var(--radius);
+  }
+  .item + .item { margin-top: 1px; }
+  .item:hover { background: var(--bg-hover); }
+  .item.active { background: var(--bg-active); border-color: var(--border); }
+  .item.active .s { color: var(--text-dim); }
+
+  /* min-width:0 is what lets the ellipsis work inside a flex row. */
+  .text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .t,
+  .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .t { font-size: 13px; font-weight: 500; letter-spacing: -0.005em; }
+  .s { font-size: 11px; }
+
+  .empty { padding: var(--s5) var(--s3); font-size: 12px; }
+  .nothing {
+    padding: var(--s6) var(--s3);
+    text-align: center;
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+  }
+  .nothing p { margin: 0; font-size: 12px; }
+
+  .foot { padding: var(--s2) var(--s3); border-top: 1px solid var(--border); flex-shrink: 0; }
   .unlock { color: var(--warn); }
-  .unlock:hover:not(:disabled) { color: var(--warn); border-color: var(--warn); }
-  .unlockbtn { margin-top: 12px; padding: 6px 20px; }
+  .unlock:hover:not(:disabled) { color: var(--warn); }
+  .unlockbtn { margin-top: var(--s3); padding: 7px var(--s5); }
+
   /* Square so the gear sits centred rather than in a text-shaped box. */
   .icon {
     display: grid;
@@ -241,8 +364,10 @@
     color: var(--text-dim);
   }
   .icon:hover { color: var(--text); }
-  main { min-width: 0; overflow: hidden; }
+
+  main { min-width: 0; overflow: hidden; background: var(--bg); }
   .placeholder { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; }
   .placeholder p { margin: 0; }
-  .small { font-size: 12px; max-width: 260px; line-height: 1.6; }
+  .locked-title { font-size: 14px; font-weight: 560; }
+  .small { font-size: 12px; max-width: 280px; line-height: 1.6; }
 </style>

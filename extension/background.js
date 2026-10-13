@@ -147,7 +147,8 @@ const handlers = {
         tabId: sender.tab.id,
         text: items.length ? String(items.length) : "",
       });
-      chrome.action.setBadgeBackgroundColor({ color: "#4c7fd4" });
+      // Neutral, to match the app: nothing else in the product is coloured.
+      chrome.action.setBadgeBackgroundColor({ color: "#6b7280" });
     }
     return { type: "logins", items };
   },

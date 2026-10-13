@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TruePassword — a password manager that keeps your passwords</title>
+<meta name="description" content="A local-first password manager for macOS. Your vault stays on your Mac; the relay only ever sees ciphertext it cannot read.">
+<link rel="icon" href="mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500&family=Geist+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/">
+      <img src="mark.svg" alt="" width="22" height="22">
+      <span>TruePassword</span>
+    </a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#guard">Agent Guard</a>
+      <a href="#sharing">Sharing</a>
+      <a href="#limits">Limits</a>
+      <a href="https://github.com/sajdakabir/truepassword">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap hero-inner">
+    <p class="label">Local-first password manager &middot; macOS</p>
+    <h1>Your passwords<br>never leave your Mac.</h1>
+    <p class="lede">
+      The vault is encrypted on your machine and stays there. Sync is
+      optional, and the relay that carries it only ever holds ciphertext it
+      has no key for &mdash; including when we are the ones running it.
+    </p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/sajdakabir/truepassword">Read the source</a>
+      <a class="btn ghost" href="https://github.com/sajdakabir/truepassword/blob/master/docs/threat-model.md">Threat model &rarr;</a>
+    </div>
+  </div>
+</section>
+
+<section class="section facts">
+  <div class="wrap facts-grid">
+    <div><p class="label">Vault</p><p class="fact">On your disk</p></div>
+    <div><p class="label">Relay sees</p><p class="fact">Ciphertext</p></div>
+    <div><p class="label">Page access</p><p class="fact">On request</p></div>
+    <div><p class="label">Built with</p><p class="fact">Rust &amp; Tauri</p></div>
+  </div>
+</section>
+<section class="section shot-wrap">
+  <div class="wrap">
+    <p class="label">Fig. 01 &mdash; the vault</p>
+    <!-- Drawn in the page rather than screenshotted. A screenshot of a
+         development build goes stale the day after it is taken, and this one
+         stays honest because the avatar hues below are the real output of the
+         app's own hashing function for those names. -->
+    <div class="shot" aria-label="The TruePassword vault window">
+      <div class="shot-bar"><span></span><span></span><span></span></div>
+      <div class="shot-body">
+        <div class="shot-side">
+          <div class="shot-search">Search</div>
+          <div class="shot-count">5 items<span>+ New</span></div>
+          <div class="shot-row"><i style="--h:81">G</i><b>GitHub<em>octocat</em></b></div>
+          <div class="shot-row on"><i style="--h:301">F</i><b>Fastmail<em>me@fastmail.com</em></b></div>
+          <div class="shot-row"><i style="--h:299">A</i><b>Anthropic API<em>API key</em></b></div>
+          <div class="shot-row"><i style="--h:163">R</i><b>Reddit<em>lurker99</em></b></div>
+          <div class="shot-row"><i style="--h:70">M</i><b>Monzo debit<em>Card</em></b></div>
+        </div>
+        <div class="shot-main">
+          <div class="shot-head"><i style="--h:301">F</i><b>Fastmail<em>Login</em></b></div>
+          <div class="shot-card">
+            <div><span>Username</span><span>me@fastmail.com</span></div>
+            <div><span>Password</span><span class="mono dots">••••••••••••••</span></div>
+            <div><span>Websites</span><span>https://app.fastmail.com</span></div>
+            <div><span>Updated</span><span class="faintish">1 day ago</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="how">
+  <div class="wrap steps">
+    <div class="steps-head">
+      <p class="label">How it works</p>
+      <h2>Three things, and the third<br>is the unusual one.</h2>
+    </div>
+
+    <ol class="step-list">
+      <li>
+        <span class="num mono">01</span>
+        <div>
+          <h3>The vault is a file on your Mac</h3>
+          <p class="dim">
+            Encrypted with a key derived from your master password and a
+            256-bit account key that is generated once and never transmitted.
+            Lose both and the data is gone &mdash; that is the design working,
+            not a bug.
+          </p>
+        </div>
+      </li>
+      <li>
+        <span class="num mono">02</span>
+        <div>
+          <h3>Sync is optional, and blind</h3>
+          <p class="dim">
+            Devices exchange signed, encrypted changes through a relay. Every
+            change is sealed before it leaves and hash-chained on arrival, so a
+            relay that is compromised &mdash; or compelled &mdash; can withhold
+            data but cannot read or forge it.
+          </p>
+        </div>
+      </li>
+      <li>
+        <span class="num mono">03</span>
+        <div>
+          <h3>The extension runs on no page until you ask</h3>
+          <p class="dim">
+            Most managers request access to every site you visit, forever. This
+            one asks the browser for the page only when you invoke it, and the
+            origin it matches against comes from the browser rather than from
+            the page &mdash; so a lookalike site cannot claim to be your bank.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="section" id="guard">
+  <div class="wrap guard">
+    <div class="guard-text">
+      <p class="label">Agent Guard &middot; in design</p>
+      <h2>A key you paste is a key<br>you have published.</h2>
+      <p class="lede">
+        Secrets end up in chat boxes, issue trackers and prompts because that
+        is where the work is. TruePassword recognises one of yours on its way
+        out and kills it at the provider, in the seconds before anyone reads
+        the message.
+      </p>
+      <p class="lede">
+        Revoking is the part that always works &mdash; every provider will let
+        you burn a key. Some go further and let a replacement be minted in the
+        same breath, and where that is true the new one lands in your vault
+        before you have switched windows.
+      </p>
+      <p class="note mono">
+        Issuing a replacement needs a credential that can issue keys. It lives
+        in your vault, on your Mac, and the call goes straight from your
+        machine to the provider &mdash; no server of ours is ever in the path.
+      </p>
+    </div>
+
+    <table class="matrix">
+      <thead>
+        <tr><th class="label">Provider</th><th class="label">On detection</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Cloudflare</td><td class="yes">Revoked &amp; replaced</td></tr>
+        <tr><td>AWS IAM</td><td class="yes">Revoked &amp; replaced</td></tr>
+        <tr><td>OpenAI</td><td>Revoked</td></tr>
+        <tr><td>Anthropic</td><td>Revoked</td></tr>
+        <tr><td>GitHub</td><td class="partial">Flagged, with a link</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section" id="sharing">
+  <div class="wrap sharing">
+    <div class="sharing-head">
+      <p class="label">Sharing &middot; in design</p>
+      <h2>Give someone a credential<br>without giving it to a server.</h2>
+      <p class="lede">
+        Shared vaults work the way the private one does. The key is wrapped to
+        each member&rsquo;s device, the invite link carries it in the part of
+        the URL a browser never sends, and membership is a signed log every
+        device checks for itself.
+      </p>
+    </div>
+
+    <ul class="share-list">
+      <li>
+        <h3>The relay cannot read the vault</h3>
+        <p class="dim">
+          Not as a policy, as a consequence. It holds sealed changes and the
+          signatures over them, and no key that opens either. Tools that keep
+          your secrets server-side can only promise not to look.
+        </p>
+      </li>
+      <li>
+        <h3>The invite never reaches us</h3>
+        <p class="dim">
+          The key rides in the link&rsquo;s fragment &mdash; the part after the
+          <span class="mono">#</span>, which browsers keep local and never put
+          in a request. Send the link however you like; the relay sees a join,
+          not a key.
+        </p>
+      </li>
+      <li>
+        <h3>Removing someone rotates the key</h3>
+        <p class="dim">
+          A new key is issued to everyone who remains, and everything written
+          afterwards is sealed to it. What they already synced is theirs &mdash;
+          no amount of cryptography reaches into someone else&rsquo;s disk, and
+          the app says so when you remove them.
+        </p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section class="section fig2-wrap">
+  <div class="wrap">
+    <p class="label">Fig. 02 &mdash; what each party holds</p>
+    <div class="fig2">
+      <div class="party">
+        <p class="party-label mono">Your Mac</p>
+        <ul class="plain">
+          <li>GitHub &middot; octocat</li>
+          <li>Fastmail &middot; me@fastmail.com</li>
+          <li>Anthropic API key</li>
+          <li class="key">Vault key</li>
+        </ul>
+      </div>
+
+      <div class="party relay">
+        <p class="party-label mono">The relay</p>
+        <div class="cipher" aria-hidden="true">
+          <span>8ca1693ad22ea4bbe1870d201b9074f3e5</span>
+          <span>f95910d7137dd23b87c59012dc6e4f8ca1</span>
+          <span>693ad22ea4bbe1870d201b9074f3e5f959</span>
+          <span>10d7137dd23b87c59012dc6e4f8ca1693a</span>
+          <span>d22ea4bbe1870d201b9074f3e5f95910d7</span>
+          <span>137dd23b87c59012dc6e4f8ca1693ad22e</span>
+          <span>a4bbe1870d201b9074f3e5f95910d7137d</span>
+        </div>
+        <p class="party-note">Sealed changes and the signatures over them. No key that opens either.</p>
+      </div>
+
+      <div class="party">
+        <p class="party-label mono">A member&rsquo;s Mac</p>
+        <ul class="plain">
+          <li>GitHub &middot; octocat</li>
+          <li>Fastmail &middot; me@fastmail.com</li>
+          <li class="muted">&mdash; not shared &mdash;</li>
+          <li class="key">Vault key, wrapped to their device</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="limits">
+  <div class="wrap limits">
+    <div class="limits-head">
+      <p class="label">Limits</p>
+      <h2>What this does not protect you from.</h2>
+      <p class="lede">
+        Every password manager has these. Most do not print them on the
+        marketing page. The full version is in the threat model, which is in
+        the repository and was written before the code.
+      </p>
+    </div>
+
+    <ul class="limit-list">
+      <li>
+        <h3>Malware running as you</h3>
+        <p class="dim">
+          Root access or code injected into the app wins. No user-space
+          password manager survives this, and any that claims to is lying.
+        </p>
+      </li>
+      <li>
+        <h3>A keylogger during unlock</h3>
+        <p class="dim">
+          Biometric unlock narrows the window after the first unlock. It does
+          not close it.
+        </p>
+      </li>
+      <li>
+        <h3>The relay learning who syncs with whom</h3>
+        <p class="dim">
+          Contents are sealed; the fact that two devices talked, and when, is
+          not. Minimised, not eliminated.
+        </p>
+      </li>
+      <li>
+        <h3>Losing both your password and account key</h3>
+        <p class="dim">
+          There is no reset link. This is the cost of nobody else holding a
+          key, and it is not recoverable by us or by anyone.
+        </p>
+      </li>
+      <li>
+        <h3>Someone you shared with keeping a copy</h3>
+        <p class="dim">
+          Revoking rotates the keys going forward. It cannot reach back into
+          what they already synced.
+        </p>
+      </li>
+      <li>
+        <h3>A file that leaks its own shape</h3>
+        <p class="dim">
+          The local database is plain SQLite with encrypted fields, so an
+          attacker holding the file learns how many items exist and roughly
+          how large each one is &mdash; never what they say.
+        </p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section class="section" id="status">
+  <div class="wrap status">
+    <div>
+      <p class="label">Status</p>
+      <h2>Not shipped yet.</h2>
+      <p class="lede">
+        The vault, sync, the browser extension and import from other managers
+        all work. There is no signed build to download, which means no Touch ID
+        and no Chrome Web Store listing until there is. Everything is in the
+        open while it gets there.
+      </p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/sajdakabir/truepassword">Follow on GitHub</a>
+      </div>
+    </div>
+    <ul class="ship-list mono">
+      <li class="done">Encrypted local vault</li>
+      <li class="done">Two-device sync</li>
+      <li class="done">Browser autofill &amp; capture</li>
+      <li class="done">Import from 1Password, Bitwarden, Chrome, LastPass, Safari</li>
+      <li>Signed and notarised build</li>
+      <li>Chrome Web Store listing</li>
+      <li>Shared vaults</li>
+      <li>Agent Guard &mdash; revoke a key the moment it is pasted</li>
+    </ul>
+  </div>
+</section>
+
+<footer class="section foot">
+  <div class="wrap foot-inner">
+    <div class="brand">
+      <img src="mark.svg" alt="" width="20" height="20">
+      <span>TruePassword</span>
+    </div>
+    <nav>
+      <a href="https://github.com/sajdakabir/truepassword">Source</a>
+      <a href="https://github.com/sajdakabir/truepassword/blob/master/docs/threat-model.md">Threat model</a>
+      <a href="https://github.com/sajdakabir/truepassword/blob/master/docs/crypto-spec.md">Crypto spec</a>
+    </nav>
+    <p class="label">Local-first &middot; macOS</p>
+  </div>
+</footer>
+
+</body>
+</html>
