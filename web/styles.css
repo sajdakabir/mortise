@@ -1,0 +1,105 @@
+/* Near-black, off-white, hairlines, no colour.
+   The palette is the app's own, pushed a step darker for a page that is
+   mostly empty space. Nothing here is coloured on purpose: the product's
+   accent is monochrome, and a landing page that introduces a brand colour
+   would be the first thing a visitor sees that the app does not have. */
+:root {
+  --bg: #0a0a0b;
+  --bg-raised: #101013;
+  --text: #ededee;
+  --text-dim: #8d8d93;
+  --text-faint: #5e5e66;
+
+  /* Barely there. Structure should be felt before it is seen — a rule you
+     notice is a rule competing with the words. */
+  --rule: rgba(255, 255, 255, 0.07);
+  --rule-strong: rgba(255, 255, 255, 0.14);
+
+  --ok: #9ece6a;
+
+  --sans: "Geist", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* One column width for the whole page, so every section lines up without
+     each one choosing its own. */
+  --col: 1080px;
+  --gutter: 28px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.75 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a { color: inherit; }
+
+::selection { background: rgba(255, 255, 255, 0.16); }
+
+:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: 3px;
+}
+
+/* --- rhythm ------------------------------------------------------------ */
+
+.wrap {
+  width: 100%;
+  max-width: var(--col);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+/* Sections are separated by a rule rather than by space alone, which is what
+   gives both reference sites their documentary feel. */
+.section { border-top: 1px solid var(--rule); }
+
+/* --- type -------------------------------------------------------------- */
+
+h1, h2, h3 { font-weight: 400; margin: 0; }
+
+h1 {
+  font-size: clamp(38px, 6.4vw, 62px);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: clamp(24px, 3.2vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+h3 { font-size: 15px; letter-spacing: -0.01em; }
+
+p { margin: 0; }
+
+.lede {
+  font-size: clamp(14px, 1.6vw, 16px);
+  color: var(--text-dim);
+  line-height: 1.7;
+  max-width: 46ch;
+}
+
+/* The small uppercase marker both references use to label a region. Mono and
+   widely tracked so it reads as an annotation rather than a heading. */
+.label {
+  font: 400 10.5px/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.dim { color: var(--text-dim); }
+.mono { font-family: var(--mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
