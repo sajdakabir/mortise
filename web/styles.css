@@ -304,7 +304,9 @@ p { margin: 0; }
   gap: clamp(32px, 6vw, 72px);
   align-items: start;
 }
-.guard .label { display: block; margin-bottom: 18px; }
+/* Scoped to the section's own label: the table headers also carry .label,
+   and display:block on a th drops it out of its column. */
+.guard-text > .label { display: block; margin-bottom: 18px; }
 .guard h2 { margin-bottom: 20px; }
 .guard .lede + .lede { margin-top: 16px; }
 
