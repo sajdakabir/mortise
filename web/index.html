@@ -30,16 +30,48 @@
 
 <section class="hero">
   <div class="wrap hero-inner">
-    <p class="label">Local-first password manager &middot; macOS</p>
-    <h1>Your passwords<br>never leave your Mac.</h1>
+    <div class="hero-text">
+      <p class="label">Local-first password manager &middot; macOS</p>
+      <h1>Your passwords never leave your Mac.</h1>
     <p class="lede">
       The vault is encrypted on your machine and stays there. Sync is
       optional, and the relay that carries it only ever holds ciphertext it
       has no key for &mdash; including when we are the ones running it.
     </p>
-    <div class="cta">
-      <a class="btn" href="https://github.com/sajdakabir/truepassword">Read the source</a>
+      <div class="cta">
+        <a class="btn" href="https://github.com/sajdakabir/truepassword">Read the source</a>
       <a class="btn ghost" href="https://github.com/sajdakabir/truepassword/blob/master/docs/threat-model.md">Threat model &rarr;</a>
+      </div>
+    </div>
+
+    <!-- Deliberately wider than its column and cropped by the viewport edge.
+         The window needs about 620px to stay legible and the column is not
+         that wide; letting it run off reads as a window sitting behind the
+         page rather than as a diagram squeezed to fit. -->
+    <div class="hero-shot">
+<div class="shot" aria-label="The TruePassword vault window">
+        <div class="shot-bar"><span></span><span></span><span></span></div>
+        <div class="shot-body">
+          <div class="shot-side">
+            <div class="shot-search">Search</div>
+            <div class="shot-count">5 items<span>+ New</span></div>
+            <div class="shot-row"><i style="--h:81">G</i><b>GitHub<em>octocat</em></b></div>
+            <div class="shot-row on"><i style="--h:301">F</i><b>Fastmail<em>me@fastmail.com</em></b></div>
+            <div class="shot-row"><i style="--h:299">A</i><b>Anthropic API<em>API key</em></b></div>
+            <div class="shot-row"><i style="--h:163">R</i><b>Reddit<em>lurker99</em></b></div>
+            <div class="shot-row"><i style="--h:70">M</i><b>Monzo debit<em>Card</em></b></div>
+          </div>
+          <div class="shot-main">
+            <div class="shot-head"><i style="--h:301">F</i><b>Fastmail<em>Login</em></b></div>
+            <div class="shot-card">
+              <div><span>Username</span><span>me@fastmail.com</span></div>
+              <div><span>Password</span><span class="mono dots">••••••••••••••</span></div>
+              <div><span>Websites</span><span>https://app.fastmail.com</span></div>
+              <div><span>Updated</span><span class="faintish">1 day ago</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -52,39 +84,6 @@
     <div><p class="label">Built with</p><p class="fact">Rust &amp; Tauri</p></div>
   </div>
 </section>
-<section class="section shot-wrap">
-  <div class="wrap">
-    <p class="label">Fig. 01 &mdash; the vault</p>
-    <!-- Drawn in the page rather than screenshotted. A screenshot of a
-         development build goes stale the day after it is taken, and this one
-         stays honest because the avatar hues below are the real output of the
-         app's own hashing function for those names. -->
-    <div class="shot" aria-label="The TruePassword vault window">
-      <div class="shot-bar"><span></span><span></span><span></span></div>
-      <div class="shot-body">
-        <div class="shot-side">
-          <div class="shot-search">Search</div>
-          <div class="shot-count">5 items<span>+ New</span></div>
-          <div class="shot-row"><i style="--h:81">G</i><b>GitHub<em>octocat</em></b></div>
-          <div class="shot-row on"><i style="--h:301">F</i><b>Fastmail<em>me@fastmail.com</em></b></div>
-          <div class="shot-row"><i style="--h:299">A</i><b>Anthropic API<em>API key</em></b></div>
-          <div class="shot-row"><i style="--h:163">R</i><b>Reddit<em>lurker99</em></b></div>
-          <div class="shot-row"><i style="--h:70">M</i><b>Monzo debit<em>Card</em></b></div>
-        </div>
-        <div class="shot-main">
-          <div class="shot-head"><i style="--h:301">F</i><b>Fastmail<em>Login</em></b></div>
-          <div class="shot-card">
-            <div><span>Username</span><span>me@fastmail.com</span></div>
-            <div><span>Password</span><span class="mono dots">••••••••••••••</span></div>
-            <div><span>Websites</span><span>https://app.fastmail.com</span></div>
-            <div><span>Updated</span><span class="faintish">1 day ago</span></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
 <section class="section" id="how">
   <div class="wrap steps">
     <div class="steps-head">

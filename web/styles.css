@@ -134,7 +134,33 @@ p { margin: 0; }
 
 /* --- hero -------------------------------------------------------------- */
 
-.hero-inner { padding-block: clamp(64px, 12vw, 132px) clamp(56px, 9vw, 104px); }
+/* The figure deliberately runs past the column, which otherwise gives the
+   whole page 130-odd pixels of sideways scroll. */
+.hero { overflow-x: clip; }
+.hero-inner {
+  padding-block: clamp(64px, 12vw, 132px) clamp(56px, 9vw, 104px);
+  display: grid;
+  /* The text column is fixed in character width; the figure takes whatever
+     is left and overflows past it. */
+  grid-template-columns: minmax(380px, 46%) 1fr;
+  gap: clamp(28px, 4vw, 56px);
+  align-items: center;
+}
+.hero-text { min-width: 0; }
+/* The hard break was tuned for a full-width hero and strands "Mac." on its
+   own line once the text shares the row with the figure. Balancing lets the
+   browser even them out at whatever width it ends up with. */
+.hero-text h1 { font-size: clamp(36px, 4.6vw, 54px); text-wrap: balance; }
+
+/* The window runs off the right edge of the page on purpose. Scaling it down
+   to fit would make 11px UI text unreadable, which defeats the point of
+   showing the product at all. */
+.hero-shot { min-width: 0; position: relative; }
+.hero-shot .shot {
+  width: 620px;
+  max-width: none;
+  box-shadow: var(--shadow, 0 24px 60px rgba(0, 0, 0, 0.55));
+}
 .hero .label { display: block; margin-bottom: 26px; }
 .hero h1 { margin-bottom: 26px; }
 .hero .lede { margin-bottom: 36px; }
@@ -363,9 +389,6 @@ p { margin: 0; }
 
 /* --- fig. 01: the vault ------------------------------------------------ */
 
-.shot-wrap { padding-block: clamp(48px, 7vw, 76px); }
-.shot-wrap .label { display: block; margin-bottom: 18px; }
-
 .shot {
   border: 1px solid var(--rule-strong);
   border-radius: 10px;
@@ -439,11 +462,11 @@ p { margin: 0; }
 .shot-card .dots { letter-spacing: 0.1em; color: var(--text-dim); }
 .shot-card .faintish { color: var(--text-faint); }
 
-@media (max-width: 680px) {
-  /* The detail pane is the first thing to go: at this width the list is the
-     part that shows what the product is. */
-  .shot-body { grid-template-columns: 1fr; }
-  .shot-main { display: none; }
+/* Below the two-column threshold the figure would be a cropped sliver, which
+   says less than nothing. The hero goes back to text alone. */
+@media (max-width: 940px) {
+  .hero-inner { grid-template-columns: 1fr; }
+  .hero-shot { display: none; }
 }
 
 /* --- fig. 02: what each party holds ------------------------------------ */
