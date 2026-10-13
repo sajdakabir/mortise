@@ -234,3 +234,54 @@ p { margin: 0; }
 
 @media (max-width: 900px) { .limit-list { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .limit-list { grid-template-columns: 1fr; } }
+
+/* --- status ------------------------------------------------------------ */
+
+.status {
+  padding: clamp(56px, 8vw, 92px) 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(32px, 6vw, 72px);
+  align-items: start;
+}
+.status .label { display: block; margin-bottom: 18px; }
+.status h2 { margin-bottom: 20px; }
+.status .lede { margin-bottom: 30px; }
+
+.ship-list { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.ship-list li {
+  display: flex;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--rule);
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+.ship-list li:last-child { border-bottom: 1px solid var(--rule); }
+/* Shipped items are marked and brought forward; the rest stay recessive, so
+   the column reads as progress rather than as a wishlist. */
+.ship-list li::before { content: "○"; color: var(--text-faint); }
+.ship-list li.done { color: var(--text-dim); }
+.ship-list li.done::before { content: "●"; color: var(--ok); }
+
+/* --- footer ------------------------------------------------------------ */
+
+.foot { padding: 30px 0 44px; }
+.foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.foot .brand { font-size: 13px; }
+.foot nav { display: flex; flex-wrap: wrap; gap: 22px; }
+.foot nav a {
+  font: 400 12.5px/1 var(--mono);
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+.foot nav a:hover { color: var(--text); }
+
+@media (max-width: 760px) { .status { grid-template-columns: 1fr; } }
