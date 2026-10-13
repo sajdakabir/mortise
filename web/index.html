@@ -50,5 +50,53 @@
     <div><p class="label">Built with</p><p class="fact">Rust &amp; Tauri</p></div>
   </div>
 </section>
+<section class="section" id="how">
+  <div class="wrap steps">
+    <div class="steps-head">
+      <p class="label">How it works</p>
+      <h2>Three things, and the third<br>is the unusual one.</h2>
+    </div>
+
+    <ol class="step-list">
+      <li>
+        <span class="num mono">01</span>
+        <div>
+          <h3>The vault is a file on your Mac</h3>
+          <p class="dim">
+            Encrypted with a key derived from your master password and a
+            256-bit account key that is generated once and never transmitted.
+            Lose both and the data is gone &mdash; that is the design working,
+            not a bug.
+          </p>
+        </div>
+      </li>
+      <li>
+        <span class="num mono">02</span>
+        <div>
+          <h3>Sync is optional, and blind</h3>
+          <p class="dim">
+            Devices exchange signed, encrypted changes through a relay. Every
+            change is sealed before it leaves and hash-chained on arrival, so a
+            relay that is compromised &mdash; or compelled &mdash; can withhold
+            data but cannot read or forge it.
+          </p>
+        </div>
+      </li>
+      <li>
+        <span class="num mono">03</span>
+        <div>
+          <h3>The extension runs on no page until you ask</h3>
+          <p class="dim">
+            Most managers request access to every site you visit, forever. This
+            one asks the browser for the page only when you invoke it, and the
+            origin it matches against comes from the browser rather than from
+            the page &mdash; so a lookalike site cannot claim to be your bank.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
 </body>
 </html>
