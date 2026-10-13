@@ -134,7 +134,7 @@ p { margin: 0; }
 
 /* --- hero -------------------------------------------------------------- */
 
-.hero { padding: clamp(64px, 12vw, 132px) 0 clamp(56px, 9vw, 104px); }
+.hero-inner { padding-block: clamp(64px, 12vw, 132px) clamp(56px, 9vw, 104px); }
 .hero .label { display: block; margin-bottom: 26px; }
 .hero h1 { margin-bottom: 26px; }
 .hero .lede { margin-bottom: 36px; }
@@ -183,7 +183,7 @@ p { margin: 0; }
 
 /* --- how it works ------------------------------------------------------ */
 
-.steps { padding: clamp(56px, 8vw, 92px) 0; }
+.steps { padding-block: clamp(56px, 8vw, 92px); }
 .steps-head { margin-bottom: clamp(36px, 5vw, 56px); }
 .steps-head .label { display: block; margin-bottom: 18px; }
 
@@ -208,7 +208,7 @@ p { margin: 0; }
 
 /* --- limits ------------------------------------------------------------ */
 
-.limits { padding: clamp(56px, 8vw, 92px) 0; }
+.limits { padding-block: clamp(56px, 8vw, 92px); }
 .limits-head { margin-bottom: clamp(32px, 5vw, 48px); }
 .limits-head .label { display: block; margin-bottom: 18px; }
 .limits-head h2 { margin-bottom: 20px; }
@@ -238,7 +238,7 @@ p { margin: 0; }
 /* --- status ------------------------------------------------------------ */
 
 .status {
-  padding: clamp(56px, 8vw, 92px) 0;
+  padding-block: clamp(56px, 8vw, 92px);
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: clamp(32px, 6vw, 72px);
@@ -266,7 +266,7 @@ p { margin: 0; }
 
 /* --- footer ------------------------------------------------------------ */
 
-.foot { padding: 30px 0 44px; }
+.foot { padding-block: 30px 44px; }
 .foot-inner {
   display: flex;
   flex-wrap: wrap;
@@ -291,6 +291,6 @@ p { margin: 0; }
    past anyway, so they go rather than get abbreviated. */
 @media (max-width: 560px) {
   .nav nav a[href^="#"] { display: none; }
-  .hero { padding-top: 56px; }
+  .hero-inner { padding-top: 56px; }
   .foot-inner { gap: 14px; }
 }
