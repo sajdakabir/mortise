@@ -98,5 +98,65 @@
   </div>
 </section>
 
+<section class="section" id="limits">
+  <div class="wrap limits">
+    <div class="limits-head">
+      <p class="label">Limits</p>
+      <h2>What this does not protect you from.</h2>
+      <p class="lede">
+        Every password manager has these. Most do not print them on the
+        marketing page. The full version is in the threat model, which is in
+        the repository and was written before the code.
+      </p>
+    </div>
+
+    <ul class="limit-list">
+      <li>
+        <h3>Malware running as you</h3>
+        <p class="dim">
+          Root access or code injected into the app wins. No user-space
+          password manager survives this, and any that claims to is lying.
+        </p>
+      </li>
+      <li>
+        <h3>A keylogger during unlock</h3>
+        <p class="dim">
+          Biometric unlock narrows the window after the first unlock. It does
+          not close it.
+        </p>
+      </li>
+      <li>
+        <h3>The relay learning who syncs with whom</h3>
+        <p class="dim">
+          Contents are sealed; the fact that two devices talked, and when, is
+          not. Minimised, not eliminated.
+        </p>
+      </li>
+      <li>
+        <h3>Losing both your password and account key</h3>
+        <p class="dim">
+          There is no reset link. This is the cost of nobody else holding a
+          key, and it is not recoverable by us or by anyone.
+        </p>
+      </li>
+      <li>
+        <h3>Someone you shared with keeping a copy</h3>
+        <p class="dim">
+          Revoking rotates the keys going forward. It cannot reach back into
+          what they already synced.
+        </p>
+      </li>
+      <li>
+        <h3>A file that leaks its own shape</h3>
+        <p class="dim">
+          The local database is plain SQLite with encrypted fields, so an
+          attacker holding the file learns how many items exist and roughly
+          how large each one is &mdash; never what they say.
+        </p>
+      </li>
+    </ul>
+  </div>
+</section>
+
 </body>
 </html>
