@@ -358,3 +358,88 @@ p { margin: 0; }
 
 @media (max-width: 900px) { .share-list { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .share-list { grid-template-columns: 1fr; } }
+
+/* --- fig. 01: the vault ------------------------------------------------ */
+
+.shot-wrap { padding-block: clamp(48px, 7vw, 76px); }
+.shot-wrap .label { display: block; margin-bottom: 18px; }
+
+.shot {
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0d0d10;
+  font-size: 12px;
+}
+.shot-bar {
+  display: flex;
+  gap: 7px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--rule);
+}
+.shot-bar span { width: 10px; height: 10px; border-radius: 50%; background: #2a2a30; }
+.shot-body { display: grid; grid-template-columns: 236px 1fr; min-height: 268px; }
+.shot-side { border-right: 1px solid var(--rule); padding: 12px 10px; background: #0a0a0c; }
+
+.shot-search {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text-faint);
+  margin-bottom: 12px;
+}
+.shot-count {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  padding: 0 4px 8px;
+}
+
+.shot-row { display: flex; align-items: center; gap: 9px; padding: 6px 6px; border-radius: 6px; }
+.shot-row.on { background: rgba(255, 255, 255, 0.06); }
+/* The same tinted-ground avatar the app draws, at the same hues its hashing
+   function produces for these names. */
+.shot-row i,
+.shot-head i {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: hsl(var(--h) 62% 72%);
+  background: hsl(var(--h) 38% 18%);
+  box-shadow: inset 0 0 0 1px hsl(var(--h) 40% 30%);
+}
+.shot-row b,
+.shot-head b { display: flex; flex-direction: column; font-weight: 400; min-width: 0; }
+.shot-row em,
+.shot-head em { font-style: normal; font-size: 10.5px; color: var(--text-faint); }
+
+.shot-main { padding: 16px 18px; }
+.shot-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.shot-head i { width: 30px; height: 30px; border-radius: 9px; font-size: 13px; }
+.shot-head b { font-size: 14px; }
+
+.shot-card { border: 1px solid var(--rule); border-radius: 9px; overflow: hidden; }
+.shot-card > div {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  padding: 10px 14px;
+}
+.shot-card > div + div { border-top: 1px solid var(--rule); }
+.shot-card span:first-child { color: var(--text-faint); font-size: 10.5px; }
+.shot-card .dots { letter-spacing: 0.1em; color: var(--text-dim); }
+.shot-card .faintish { color: var(--text-faint); }
+
+@media (max-width: 680px) {
+  /* The detail pane is the first thing to go: at this width the list is the
+     part that shows what the product is. */
+  .shot-body { grid-template-columns: 1fr; }
+  .shot-main { display: none; }
+}
