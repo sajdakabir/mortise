@@ -137,6 +137,50 @@
   </div>
 </section>
 
+<section class="section" id="sharing">
+  <div class="wrap sharing">
+    <div class="sharing-head">
+      <p class="label">Sharing &middot; in design</p>
+      <h2>Give someone a credential<br>without giving it to a server.</h2>
+      <p class="lede">
+        Shared vaults work the way the private one does. The key is wrapped to
+        each member&rsquo;s device, the invite link carries it in the part of
+        the URL a browser never sends, and membership is a signed log every
+        device checks for itself.
+      </p>
+    </div>
+
+    <ul class="share-list">
+      <li>
+        <h3>The relay cannot read the vault</h3>
+        <p class="dim">
+          Not as a policy, as a consequence. It holds sealed changes and the
+          signatures over them, and no key that opens either. Tools that keep
+          your secrets server-side can only promise not to look.
+        </p>
+      </li>
+      <li>
+        <h3>The invite never reaches us</h3>
+        <p class="dim">
+          The key rides in the link&rsquo;s fragment &mdash; the part after the
+          <span class="mono">#</span>, which browsers keep local and never put
+          in a request. Send the link however you like; the relay sees a join,
+          not a key.
+        </p>
+      </li>
+      <li>
+        <h3>Removing someone rotates the key</h3>
+        <p class="dim">
+          A new key is issued to everyone who remains, and everything written
+          afterwards is sealed to it. What they already synced is theirs &mdash;
+          no amount of cryptography reaches into someone else&rsquo;s disk, and
+          the app says so when you remove them.
+        </p>
+      </li>
+    </ul>
+  </div>
+</section>
+
 <section class="section" id="limits">
   <div class="wrap limits">
     <div class="limits-head">
