@@ -285,3 +285,12 @@ p { margin: 0; }
 .foot nav a:hover { color: var(--text); }
 
 @media (max-width: 760px) { .status { grid-template-columns: 1fr; } }
+
+/* On a phone the two in-page links wrap onto a second line and shove the
+   brand around. They are anchors to sections the reader is about to scroll
+   past anyway, so they go rather than get abbreviated. */
+@media (max-width: 560px) {
+  .nav nav a[href^="#"] { display: none; }
+  .hero { padding-top: 56px; }
+  .foot-inner { gap: 14px; }
+}
