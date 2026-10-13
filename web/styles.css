@@ -443,3 +443,43 @@ p { margin: 0; }
   .shot-body { grid-template-columns: 1fr; }
   .shot-main { display: none; }
 }
+
+/* --- fig. 02: what each party holds ------------------------------------ */
+
+.fig2-wrap { padding-block: clamp(48px, 7vw, 76px); }
+.fig2-wrap .label { display: block; margin-bottom: 18px; }
+
+.fig2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+}
+.party { background: var(--bg); padding: 20px 20px 24px; }
+/* The middle column is the point of the figure, so it gets the only tonal
+   shift on the page — enough to draw the eye, not enough to be a colour. */
+.party.relay { background: #0d0d10; }
+.party-label { font-size: 11px; color: var(--text-faint); margin-bottom: 14px; }
+
+.plain { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.plain li { padding: 7px 0; border-top: 1px solid var(--rule); color: var(--text-dim); }
+.plain li:first-child { border-top: 0; }
+.plain .muted { color: var(--text-faint); font-style: italic; }
+.plain .key { color: var(--text); }
+
+/* Real-looking bytes rather than lorem. It should be obvious at a glance
+   that the middle column is the same data, unreadable. */
+.cipher {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font: 400 9.5px/1.35 var(--mono);
+  color: var(--text-faint);
+  word-break: break-all;
+  opacity: 0.55;
+  user-select: none;
+}
+.party-note { margin-top: 14px; font-size: 11.5px; line-height: 1.6; color: var(--text-dim); }
+
+@media (max-width: 760px) { .fig2 { grid-template-columns: 1fr; } }
