@@ -12,8 +12,43 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<main class="wrap">
-  <p class="label">Scaffold</p>
-</main>
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/">
+      <img src="mark.svg" alt="" width="22" height="22">
+      <span>TruePassword</span>
+    </a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#limits">Limits</a>
+      <a href="https://github.com/sajdakabir/truepassword">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <p class="label">Local-first password manager &middot; macOS</p>
+    <h1>Your passwords<br>never leave your Mac.</h1>
+    <p class="lede">
+      The vault is encrypted on your machine and stays there. Sync is
+      optional, and the relay that carries it only ever holds ciphertext it
+      has no key for &mdash; including when we are the ones running it.
+    </p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/sajdakabir/truepassword">Read the source</a>
+      <a class="btn ghost" href="https://github.com/sajdakabir/truepassword/blob/master/docs/threat-model.md">Threat model &rarr;</a>
+    </div>
+  </div>
+</section>
+
+<section class="section facts">
+  <div class="wrap facts-grid">
+    <div><p class="label">Vault</p><p class="fact">On your disk</p></div>
+    <div><p class="label">Relay sees</p><p class="fact">Ciphertext</p></div>
+    <div><p class="label">Page access</p><p class="fact">On request</p></div>
+    <div><p class="label">Built with</p><p class="fact">Rust &amp; Tauri</p></div>
+  </div>
+</section>
 </body>
 </html>

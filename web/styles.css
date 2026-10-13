@@ -103,3 +103,80 @@ p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* --- nav --------------------------------------------------------------- */
+
+.nav { border-bottom: 1px solid var(--rule); }
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  height: 62px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.brand img { display: block; }
+.nav nav { display: flex; gap: 24px; }
+.nav nav a {
+  font: 400 12.5px/1 var(--mono);
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+.nav nav a:hover { color: var(--text); }
+
+/* --- hero -------------------------------------------------------------- */
+
+.hero { padding: clamp(64px, 12vw, 132px) 0 clamp(56px, 9vw, 104px); }
+.hero .label { display: block; margin-bottom: 26px; }
+.hero h1 { margin-bottom: 26px; }
+.hero .lede { margin-bottom: 36px; }
+
+.cta { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 18px;
+  font: 400 12.5px/1 var(--mono);
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  color: var(--bg);
+  background: var(--text);
+  border: 1px solid var(--text);
+  border-radius: 4px;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.btn:hover { opacity: 0.86; }
+.btn.ghost {
+  color: var(--text-dim);
+  background: transparent;
+  border-color: var(--rule-strong);
+}
+.btn.ghost:hover { color: var(--text); border-color: var(--text-dim); opacity: 1; }
+
+/* --- facts strip ------------------------------------------------------- */
+
+/* Four claims, each one checkable in the repo. Divided by rules rather than
+   boxed, so the row reads as a spec sheet rather than as four cards. */
+.facts-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+.facts-grid > div {
+  padding: 26px 22px 28px;
+  border-left: 1px solid var(--rule);
+}
+.facts-grid > div:first-child { border-left: 0; padding-left: 0; }
+.fact { font-size: 17px; letter-spacing: -0.015em; margin-top: 8px; }
+
+@media (max-width: 760px) {
+  .facts-grid { grid-template-columns: repeat(2, 1fr); }
+  .facts-grid > div:nth-child(3) { border-left: 0; padding-left: 0; }
+  .facts-grid > div:nth-child(n + 3) { border-top: 1px solid var(--rule); }
+  .nav nav { gap: 16px; }
+}
