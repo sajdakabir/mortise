@@ -36,10 +36,15 @@
 
   const letter = $derived((seed.match(/[\p{L}\p{N}]/u)?.[0] ?? "?").toUpperCase());
 
-  /// Golden-ratio steps around the wheel, so adjacent hashes land far apart
-  /// and neighbouring rows rarely share a colour. Saturation and lightness are
-  /// fixed so nothing shouts and everything stays legible on both grounds.
-  const hue = $derived(Math.round(((hash(seed) * 0.618033988749895) % 1) * 360));
+  /// Eight steps of grey rather than a hue.
+  ///
+  /// Colour made the list scannable but it was the only colour in the app, and
+  /// a wall of tinted squares reads as decoration. Lightness distinguishes
+  /// items nearly as well at a glance and keeps the whole interface two-tone.
+  ///
+  /// Golden-ratio stepping still, so adjacent hashes land far apart and
+  /// neighbouring rows rarely share a shade.
+  const step = $derived(Math.floor(((hash(seed) * 0.618033988749895) % 1) * 8));
 
   const FALLBACK: Record<ItemKind, string> = {
     login: "Login",
@@ -53,7 +58,7 @@
 
 <span
   class="avatar"
-  style="--h:{hue}; --size:{size}px"
+  style="--step:{step}; --size:{size}px"
   aria-label={FALLBACK[kind]}
   title={FALLBACK[kind]}>
   {letter}
@@ -71,19 +76,19 @@
     font-weight: 600;
     line-height: 1;
     user-select: none;
-    /* Colour carried in the text and a tinted ground rather than a solid
-       fill: a wall of saturated squares reads as decoration, a wall of
-       tinted ones reads as structure. */
-    color: hsl(var(--h) 62% 72%);
-    background: hsl(var(--h) 38% 18%);
-    box-shadow: inset 0 0 0 1px hsl(var(--h) 40% 30%);
+    /* The step spreads the ground across a narrow band and the letter across
+       a wider one, so even neighbouring shades stay apart without any of them
+       becoming bright enough to pull the eye on its own. */
+    color: hsl(0 0% calc(56% + var(--step) * 4%));
+    background: hsl(0 0% calc(13% + var(--step) * 1.6%));
+    box-shadow: inset 0 0 0 1px hsl(0 0% calc(22% + var(--step) * 1.8%));
   }
 
   @media (prefers-color-scheme: light) {
     .avatar {
-      color: hsl(var(--h) 52% 34%);
-      background: hsl(var(--h) 70% 95%);
-      box-shadow: inset 0 0 0 1px hsl(var(--h) 45% 84%);
+      color: hsl(0 0% calc(44% - var(--step) * 3.5%));
+      background: hsl(0 0% calc(95% - var(--step) * 1.4%));
+      box-shadow: inset 0 0 0 1px hsl(0 0% calc(86% - var(--step) * 1.6%));
     }
   }
 </style>
