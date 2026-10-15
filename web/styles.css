@@ -266,23 +266,53 @@ p { margin: 0; }
 
 /* --- footer ------------------------------------------------------------ */
 
-.foot { padding-block: 30px 44px; }
-.foot-inner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
+.foot { padding-block: 54px 40px; }
+
+.foot-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
 }
-.foot .brand { font-size: 13px; }
-.foot nav { display: flex; flex-wrap: wrap; gap: 22px; }
-.foot nav a {
-  font: 400 12.5px/1 var(--mono);
+
+/* The name is a word most visitors will not know, and a sentence explaining
+   it reads as apology. A dictionary entry does not: it states the word as a
+   fact and lets the gloss carry the argument, which here is the whole product
+   in one line — the lock belongs inside the door, not bolted to the front. */
+.entry { margin: 22px 0 0; }
+.entry dt { font-size: 14px; color: var(--text); }
+.entry dt .ipa, .entry dt i { color: var(--text-faint); margin-left: 5px; }
+.entry dd {
+  margin: 9px 0 0;
+  max-width: 46ch;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.foot-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
+.foot-cols nav { display: flex; flex-direction: column; gap: 11px; margin-top: 16px; }
+.foot-cols nav a {
+  font: 400 14px/1 var(--sans);
   color: var(--text-dim);
   text-decoration: none;
   transition: color 120ms ease;
 }
-.foot nav a:hover { color: var(--text); }
+.foot-cols nav a:hover { color: var(--text); }
+
+.foot-base {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 56px;
+  padding-top: 22px;
+  border-top: 1px solid var(--rule);
+}
+
+@media (max-width: 760px) {
+  .foot-top { grid-template-columns: 1fr; gap: 36px; }
+}
 
 @media (max-width: 760px) { .status { grid-template-columns: 1fr; } }
 
@@ -292,7 +322,6 @@ p { margin: 0; }
 @media (max-width: 560px) {
   .nav nav a[href^="#"] { display: none; }
   .hero-inner { padding-top: 56px; }
-  .foot-inner { gap: 14px; }
 }
 
 /* --- agent guard ------------------------------------------------------- */
@@ -400,20 +429,3 @@ p { margin: 0; }
 .party-note { margin-top: 14px; font-size: 11.5px; line-height: 1.6; color: var(--text-dim); }
 
 @media (max-width: 760px) { .fig2 { grid-template-columns: 1fr; } }
-
-/* The name, explained once, at the bottom. Sized and coloured as an aside:
-   a reader who wants it will find it, and one who does not is not detained
-   by it on the way past. */
-.foot-note {
-  margin-top: 26px;
-  padding-top: 24px;
-  border-top: 1px solid var(--rule);
-}
-.foot-note p {
-  max-width: 62ch;
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--text-faint);
-}
-.foot-note strong { color: var(--text-dim); font-weight: 400; }
