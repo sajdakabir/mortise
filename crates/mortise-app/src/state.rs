@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use mortise_vault::Vault;
 
+use crate::error::CmdError;
 use crate::browser::associations::Association;
 
 /// A login the browser saw submitted, waiting for the user to accept it.
@@ -54,6 +55,12 @@ pub struct AppState {
     approved_association: Mutex<Option<Association>>,
     /// A submitted login waiting for the user to accept or discard it.
     pending_capture: Mutex<Option<PendingCapture>>,
+    /// Why the vault file on disk would not open, if it would not.
+    ///
+    /// Its own lock rather than a field on `Inner`: it is read from inside a
+    /// `with_vault` closure, which runs while `inner` is held, so sharing that
+    /// lock would deadlock on the first failure.
+    open_error: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -69,6 +76,7 @@ impl AppState {
             pending_association: Mutex::new(None),
             approved_association: Mutex::new(None),
             pending_capture: Mutex::new(None),
+            open_error: Mutex::new(None),
         }
     }
 
@@ -190,12 +198,47 @@ impl AppState {
         };
 
         if inner.vault.is_none() && self.vault_path.exists() {
-            // Open lazily and locked. A failure here is surfaced to the caller
-            // as "no vault" rather than panicking the app.
-            inner.vault = Vault::open(&self.vault_path).ok();
+            // Open lazily and locked, and keep the reason on failure.
+            //
+            // This used to discard the error with `.ok()`, so a vault that
+            // existed but would not open — written by a newer schema, say —
+            // reported "no vault on this machine yet". That sends the user
+            // looking for a lost file or a mistyped password, when the file is
+            // there and the password was never reached. The distinction is the
+            // whole of what they need to know, so it is kept.
+            match Vault::open(&self.vault_path) {
+                Ok(v) => {
+                    inner.vault = Some(v);
+                    self.set_open_error(None);
+                }
+                Err(e) => {
+                    eprintln!("mortise: the vault file will not open: {e}");
+                    self.set_open_error(Some(e.to_string()));
+                }
+            }
         }
         let vault = inner.vault.as_mut();
         f(vault)
+    }
+
+    fn set_open_error(&self, reason: Option<String>) {
+        match self.open_error.lock() {
+            Ok(mut g) => *g = reason,
+            Err(p) => *p.into_inner() = reason,
+        }
+    }
+
+    /// Why there is no usable vault: the open failure if there was one,
+    /// otherwise simply that no vault exists.
+    pub fn no_vault_error(&self) -> CmdError {
+        let reason = match self.open_error.lock() {
+            Ok(g) => g.clone(),
+            Err(p) => p.into_inner().clone(),
+        };
+        match reason {
+            Some(r) => CmdError::vault_unopenable(r),
+            None => CmdError::no_vault(),
+        }
     }
 
     /// Install a freshly created vault.

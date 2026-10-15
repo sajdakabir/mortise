@@ -31,6 +31,14 @@ impl CmdError {
         Self::new("no_vault", "No vault on this machine yet.")
     }
 
+    /// A vault file is present but could not be opened.
+    pub fn vault_unopenable(reason: impl Into<String>) -> Self {
+        Self::new(
+            "vault_unopenable",
+            format!("The vault is on this Mac but will not open: {}", reason.into()),
+        )
+    }
+
     /// Something the UI should not have asked for in this state.
     pub fn bad_request(msg: impl Into<String>) -> Self {
         Self::new("bad_request", msg)

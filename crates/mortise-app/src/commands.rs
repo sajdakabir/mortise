@@ -133,7 +133,7 @@ pub fn unlock(
     };
 
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         v.unlock(master_password.as_bytes(), &account_key)?;
         Ok::<(), CmdError>(())
     })?;
@@ -183,7 +183,7 @@ pub async fn unlock_biometric(app: tauri::AppHandle) -> CmdResult<VaultStatus> {
 
     let state = app.state::<AppState>();
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         v.unlock_with_token(&token)?;
         Ok::<(), CmdError>(())
     })?;
@@ -200,7 +200,7 @@ pub async fn unlock_biometric(app: tauri::AppHandle) -> CmdResult<VaultStatus> {
 pub fn set_biometric(state: State<'_, AppState>, enabled: bool) -> CmdResult<VaultStatus> {
     if enabled {
         let token = state.with_vault(|vault| {
-            let v = vault.ok_or_else(CmdError::no_vault)?;
+            let v = vault.ok_or_else(|| state.no_vault_error())?;
             Ok::<_, CmdError>(v.unlock_token()?)
         })?;
         keys::enable_biometric(&token).map_err(CmdError::from)?;
@@ -222,7 +222,7 @@ pub fn forget_account_key(state: State<'_, AppState>) -> CmdResult<VaultStatus> 
 pub fn search(state: State<'_, AppState>, query: String) -> CmdResult<Vec<ItemRow>> {
     state.touch();
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         Ok(v.search(&query)?.into_iter().map(ItemRow::from).collect())
     })
 }
@@ -235,7 +235,7 @@ pub fn reveal(state: State<'_, AppState>, id: String) -> CmdResult<ItemPayload> 
     state.touch();
     let item_id = id_from_hex(&id).ok_or_else(|| CmdError::bad_request("Malformed item id."))?;
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         Ok(v.reveal(item_id)?)
     })
 }
@@ -255,7 +255,7 @@ pub fn save_item(
     let meta = meta.into();
 
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         let item_id = match id {
             Some(hex) => {
                 let item_id =
@@ -287,7 +287,7 @@ pub fn import_csv(state: State<'_, AppState>, path: String) -> CmdResult<crate::
     let (items, report) = import::parse(std::io::BufReader::new(file))?;
 
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
 
         // Matching on name plus username, which is what a person means by
         // "the same login". Importing the same export twice is a normal
@@ -336,7 +336,7 @@ pub fn delete_item(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.touch();
     let item_id = id_from_hex(&id).ok_or_else(|| CmdError::bad_request("Malformed item id."))?;
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         v.delete_item(item_id)?;
         Ok::<(), CmdError>(())
     })
@@ -405,7 +405,7 @@ pub fn copy_secret(
     let item_id = id_from_hex(&id).ok_or_else(|| CmdError::bad_request("Malformed item id."))?;
 
     let value = state.with_vault(|vault| -> CmdResult<Zeroizing<String>> {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         let payload = v.reveal(item_id)?;
         field_of(&payload, &field).ok_or_else(|| CmdError::bad_request("No such field."))
     })?;
@@ -519,7 +519,7 @@ pub fn save_capture(state: State<'_, AppState>, title: Option<String>) -> CmdRes
     };
 
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
 
         // Changing a password on a site should move the saved one forward,
         // not leave the old one behind beside a new entry. The browser only
@@ -628,7 +628,7 @@ pub struct SyncStatus {
 #[tauri::command]
 pub fn sync_status(state: State<'_, AppState>) -> CmdResult<SyncStatus> {
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         Ok(SyncStatus {
             relay_url: v.relay_url()?,
             // Counting needs no key, so this works while locked.
@@ -667,7 +667,7 @@ pub fn set_relay(state: State<'_, AppState>, url: Option<String>) -> CmdResult<S
     }
 
     state.with_vault(|vault| {
-        let v = vault.ok_or_else(CmdError::no_vault)?;
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
         v.set_relay_url(trimmed)?;
         Ok::<(), CmdError>(())
     })?;
@@ -684,7 +684,7 @@ pub async fn sync_now(app: tauri::AppHandle) -> CmdResult<SyncReport> {
         let state = app.state::<AppState>();
         let url = state
             .with_vault(|vault| {
-                let v = vault.ok_or_else(CmdError::no_vault)?;
+                let v = vault.ok_or_else(|| state.no_vault_error())?;
                 v.relay_url().map_err(CmdError::from)
             })?
             .ok_or_else(|| CmdError::bad_request("No relay is configured."))?;
@@ -692,7 +692,7 @@ pub async fn sync_now(app: tauri::AppHandle) -> CmdResult<SyncReport> {
         let syncer = mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(url));
 
         state.with_vault(|vault| {
-            let v = vault.ok_or_else(CmdError::no_vault)?;
+            let v = vault.ok_or_else(|| state.no_vault_error())?;
             syncer.sync(v).map_err(sync_error)
         })
     })
@@ -714,14 +714,14 @@ pub async fn claim_vault_on_relay(app: tauri::AppHandle) -> CmdResult<()> {
         let state = app.state::<AppState>();
         let url = state
             .with_vault(|vault| {
-                let v = vault.ok_or_else(CmdError::no_vault)?;
+                let v = vault.ok_or_else(|| state.no_vault_error())?;
                 v.relay_url().map_err(CmdError::from)
             })?
             .ok_or_else(|| CmdError::bad_request("No relay is configured."))?;
 
         let syncer = mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(url));
         state.with_vault(|vault| {
-            let v = vault.ok_or_else(CmdError::no_vault)?;
+            let v = vault.ok_or_else(|| state.no_vault_error())?;
             syncer.claim(v).map_err(sync_error)
         })
     })

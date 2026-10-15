@@ -36,9 +36,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            // Before anything reads the vault or the keychain: the rename
-            // moved both out from under us. See [`rebrand`].
-            rebrand::migrate(&dir, VAULT_FILE);
+            // Before the vault is opened: the rename moved it out from under
+            // us, and opening first would create an empty one at the new path.
+            // See [`rebrand`]. The keychain half runs off this thread, below.
+            rebrand::migrate_vault(&dir, VAULT_FILE);
             let state = AppState::new(dir.join(VAULT_FILE));
             app.manage(state);
 
@@ -58,11 +59,16 @@ pub fn run() {
                     }
                 }
             });
-            // Pull the pairing keys into memory before the extension can ask
-            // for anything. On its own thread because a keychain read can
-            // block on a user prompt, and blocking startup on that would hang
-            // the window before it draws.
-            std::thread::spawn(browser::associations::warm);
+            // Everything that touches the keychain, in order, on one thread.
+            //
+            // Off the startup path because a keychain read can block on a user
+            // prompt, and blocking startup on that would hang the window
+            // before it draws. The rename migration goes first so a carried-
+            // over pairing is present before the cache is filled from it.
+            std::thread::spawn(|| {
+                rebrand::migrate_keychain();
+                browser::associations::warm();
+            });
 
             // The browser socket. A failure here is not fatal: the app is
             // perfectly usable without autofill, and refusing to start over it

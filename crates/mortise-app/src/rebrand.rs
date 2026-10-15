@@ -29,18 +29,21 @@ fn legacy_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join("Library/Application Support").join(LEGACY_BUNDLE))
 }
 
-/// Carry the vault and the keychain items across, if the old ones are there.
+/// Carry the vault across, if an old one is there.
 ///
-/// Best effort throughout: a failure leaves the old copy untouched and the app
-/// starts as it would for a new user, which is recoverable. Refusing to launch
-/// over a failed migration would not be.
-pub fn migrate(data_dir: &Path, vault_file: &str) {
+/// Synchronous, and must run before the vault is opened: the app would
+/// otherwise create an empty database at the new path and the copy would then
+/// be skipped as "already there".
+///
+/// Best effort: a failure leaves the old copy untouched and the app starts as
+/// it would for a new user, which is recoverable. Refusing to launch over a
+/// failed migration would not be.
+pub fn migrate_vault(data_dir: &Path, vault_file: &str) {
     let Some(old_dir) = legacy_dir() else { return };
-    migrate_vault(&old_dir, data_dir, vault_file);
-    migrate_keychain();
+    copy_vault(&old_dir, data_dir, vault_file);
 }
 
-fn migrate_vault(old_dir: &Path, new_dir: &Path, vault_file: &str) {
+fn copy_vault(old_dir: &Path, new_dir: &Path, vault_file: &str) {
     let old = old_dir.join(LEGACY_VAULT_FILE);
     let new = new_dir.join(vault_file);
     if !old.exists() || new.exists() {
@@ -79,7 +82,15 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-fn migrate_keychain() {
+/// Carry the account key and browser pairings to the new service name.
+///
+/// **Must not be called on the startup path.** macOS re-authorises a keychain
+/// item when the reading binary's signature changes, and an unsigned build is
+/// re-signed on every rebuild, so this read can raise a password prompt — and
+/// the app blocks while it is up. Run it on the same thread as
+/// [`browser::associations::warm`](crate::browser::associations::warm), and
+/// before it, so a migrated pairing is in place by the time the cache fills.
+pub fn migrate_keychain() {
     for account in LEGACY_KEYCHAIN_ITEMS {
         if mortise_macos::exists(crate::KEYCHAIN_SERVICE, account).unwrap_or(false) {
             continue;
