@@ -1,6 +1,6 @@
 /**
  * Regenerates the cross-implementation proof vectors pinned in
- * crates/truepass-app/tests/browser.rs.
+ * crates/mortise-app/tests/browser.rs.
  *
  * Run with: node extension/tools/gen-proof-vectors.mjs
  *

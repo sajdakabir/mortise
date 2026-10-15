@@ -1,7 +1,7 @@
 /**
  * Request proofs.
  *
- * This reimplements `truepass_app_lib::browser::protocol::proof_payload`. The
+ * This reimplements `mortise_app_lib::browser::protocol::proof_payload`. The
  * two must agree byte for byte: length-prefixed fields, big-endian u32 lengths,
  * fixed order. If they drift, every request fails closed.
  *

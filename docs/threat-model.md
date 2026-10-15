@@ -36,7 +36,7 @@ and all of which must be stated in user-facing docs:
 │  │  webview (Svelte UI)         │ ← semi-trusted       │
 │  └──────────────────────────────┘                      │
 │            ↕ unix socket (paired, sealed)              │
-│  truepass-proxy                   ← semi-trusted       │
+│  mortise-proxy                   ← semi-trusted       │
 │            ↕ native messaging                          │
 │  ┌── browser ───────────────────┐                      │
 │  │  background worker            │ ← semi-trusted      │

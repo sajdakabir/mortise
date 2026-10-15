@@ -1,0 +1,33 @@
+[package]
+name = "mortise-app"
+version = "0.1.0"
+description = "TruePassword desktop app"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# Tauri convention: the app lives in a lib so mobile targets can reuse it.
+name = "mortise_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mortise-crypto = { path = "../mortise-crypto" }
+mortise-vault = { path = "../mortise-vault" }
+mortise-macos = { path = "../mortise-macos" }
+mortise-proxy = { path = "../mortise-proxy" }
+tauri = { version = "2.12.1", features = [] }
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zeroize = "1"
+hmac = "0.13.0"
+sha2 = "0.11.0"
+subtle = "2.6.1"
+mortise-sync = { version = "0.1.0", path = "../mortise-sync" }
+tauri-plugin-dialog = "2.7.3"

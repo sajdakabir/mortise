@@ -143,7 +143,7 @@
                      dev checkout: the helper has to be compiled first. -->
                 <p class="warn">
                   The helper binary is missing. Build it with
-                  <code>cargo build -p truepass-proxy</code>, then reopen this.
+                  <code>cargo build -p mortise-proxy</code>, then reopen this.
                 </p>
               {/if}
 

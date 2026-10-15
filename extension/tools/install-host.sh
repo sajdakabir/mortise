@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Installs the native messaging host manifest, which is what tells the browser
-# where to find truepass-proxy and — importantly — which extension is allowed
+# where to find mortise-proxy and — importantly — which extension is allowed
 # to talk to it.
 #
 # Usage:
@@ -58,11 +58,11 @@ fi
 
 PROFILE="debug"
 [[ "${2:-}" == "--release" ]] && PROFILE="release"
-PROXY_PATH="$REPO_ROOT/target/$PROFILE/truepass-proxy"
+PROXY_PATH="$REPO_ROOT/target/$PROFILE/mortise-proxy"
 
 if [[ ! -x "$PROXY_PATH" ]]; then
   echo "error: no proxy binary at $PROXY_PATH" >&2
-  echo "build it first:  cargo build ${PROFILE/debug/} -p truepass-proxy" >&2
+  echo "build it first:  cargo build ${PROFILE/debug/} -p mortise-proxy" >&2
   exit 1
 fi
 

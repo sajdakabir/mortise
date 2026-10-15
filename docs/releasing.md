@@ -54,7 +54,7 @@ cargo tauri build
 ```
 
 Tauri signs with the hardened runtime, applies
-[`entitlements.plist`](../crates/truepass-app/entitlements.plist), submits to
+[`entitlements.plist`](../crates/mortise-app/entitlements.plist), submits to
 Apple's notary service, and staples the ticket. The notarization round trip
 usually takes a few minutes.
 
@@ -70,7 +70,7 @@ xcrun stapler validate "target/release/bundle/macos/TruePassword.app"
 
 ## Entitlements
 
-[`entitlements.plist`](../crates/truepass-app/entitlements.plist) grants exactly
+[`entitlements.plist`](../crates/mortise-app/entitlements.plist) grants exactly
 two things:
 
 - `keychain-access-groups` — required for Touch ID keychain items

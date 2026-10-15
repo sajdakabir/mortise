@@ -7,4 +7,4 @@ node_modules/
 ui/dist/
 
 # tauri generated schemas
-crates/truepass-app/gen/
+crates/mortise-app/gen/

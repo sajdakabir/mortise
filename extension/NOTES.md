@@ -33,11 +33,11 @@ const origin = new URL(tab.url).origin;   // from chrome.tabs, not the page
 
 The page cannot influence `tab.url`. If the content script reported its own
 origin instead, a hostile page could claim to be `github.com` and the vault
-would believe it. Everything in `truepass-vault::origin` is pointless if the
+would believe it. Everything in `mortise-vault::origin` is pointless if the
 origin is attacker-controlled by the time it arrives.
 
 ## The proof must match the Rust exactly
 
-`proof.js` reimplements `truepass_app_lib::browser::protocol::proof_payload`.
+`proof.js` reimplements `mortise_app_lib::browser::protocol::proof_payload`.
 Length-prefixed fields, big-endian `u32`, in a fixed order. If the two ever
 drift, every request fails closed — annoying, but the safe direction.
