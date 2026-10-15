@@ -190,10 +190,11 @@ p { margin: 0; }
 .step-list { list-style: none; margin: 0; padding: 0; }
 .step-list li {
   display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: 24px;
-  padding: 26px 0;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(0, 352px);
+  gap: 26px;
+  padding: 30px 0;
   border-top: 1px solid var(--rule);
+  align-items: start;
 }
 .step-list li:last-child { border-bottom: 1px solid var(--rule); }
 /* The number is an index, not a heading — faint enough to scan past. */
@@ -201,9 +202,41 @@ p { margin: 0; }
 .step-list h3 { margin-bottom: 8px; }
 .step-list p { max-width: 62ch; font-size: 13.5px; }
 
+/* Each step carries a small figure drawn in the mono face rather than a
+   screenshot. A screenshot of a password manager shows a list of rows, which
+   is the least interesting true thing about it; these show the mechanism the
+   prose beside them is claiming, in the product's own vocabulary. Set as text
+   so it stays selectable, searchable and legible at any zoom. */
+.step-fig { margin: 0; min-width: 0; }
+.step-fig pre {
+  margin: 0;
+  padding: 15px 17px;
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--text-faint);
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  /* The block is drawn to a fixed width in characters, so it cannot reflow;
+     on a narrow screen it scrolls inside its own box rather than widening
+     the page. */
+  overflow-x: auto;
+}
+/* The one line that is the point of the figure. */
+.step-fig b { font-weight: 400; color: var(--text); }
+.step-fig figcaption { margin-top: 10px; }
+
+/* Below the three-column width the figure drops under the prose. Capped
+   there, because the blocks are drawn to a fixed character width and a box
+   stretched to the full column is mostly empty space with a rule round it. */
+@media (max-width: 980px) {
+  .step-list li { grid-template-columns: 52px minmax(0, 1fr); }
+  .step-fig { grid-column: 2; margin-top: 6px; max-width: 420px; }
+}
 @media (max-width: 760px) {
-  .step-list li { grid-template-columns: 1fr; gap: 10px; }
+  .step-list li { grid-template-columns: 1fr; gap: 12px; }
   .num { padding-top: 0; }
+  .step-fig { grid-column: 1; }
 }
 
 /* --- limits ------------------------------------------------------------ */

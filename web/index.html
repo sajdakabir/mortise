@@ -63,7 +63,7 @@
     <ol class="step-list">
       <li>
         <span class="num mono">01</span>
-        <div>
+        <div class="step-body">
           <h3>The vault is a file on your Mac</h3>
           <p class="dim">
             Encrypted with a key derived from your master password and a
@@ -72,10 +72,21 @@
             not a bug.
           </p>
         </div>
+      <figure class="step-fig">
+          <pre class="mono">master password   typed, never stored
+account key       256-bit, never sent
+                  ↓  Argon2id, then HKDF
+MUK               unwraps the two below
+DB_KEY            every secret in the vault
+META_KEY          titles and URLs
+
+lose either one   <b>nothing opens, by anyone</b></pre>
+          <figcaption class="label">The key hierarchy, abridged</figcaption>
+        </figure>
       </li>
       <li>
         <span class="num mono">02</span>
-        <div>
+        <div class="step-body">
           <h3>Sync is optional, and blind</h3>
           <p class="dim">
             Devices exchange signed, encrypted changes through a relay. Every
@@ -84,10 +95,18 @@
             data but cannot read or forge it.
           </p>
         </div>
+      <figure class="step-fig">
+          <pre class="mono">↑ change  8f3a…c21   sealed   1.2 KB
+↑ change  b70e…44d   sealed   0.9 KB
+↓ change  4d1c…9ff   sealed   2.1 KB
+
+<b>relay can read          0 bytes</b></pre>
+          <figcaption class="label">One sync, as the relay sees it</figcaption>
+        </figure>
       </li>
       <li>
         <span class="num mono">03</span>
-        <div>
+        <div class="step-body">
           <h3>The extension runs on no page until you ask</h3>
           <p class="dim">
             Most managers request access to every site you visit, forever. This
@@ -96,6 +115,12 @@
             the page &mdash; so a lookalike site cannot claim to be your bank.
           </p>
         </div>
+      <figure class="step-fig">
+          <pre class="mono">                 host access   granted
+typical manager  &lt;all_urls&gt;    on install
+<b>Mortise          activeTab     when you ask</b></pre>
+          <figcaption class="label">What the browser hands over</figcaption>
+        </figure>
       </li>
     </ol>
   </div>
