@@ -15,7 +15,7 @@ use mortise_macos::{Error as KeychainError, Protection};
 
 use super::protocol::{Request, proof_payload};
 
-const SERVICE: &str = "com.truepassword.desktop";
+use crate::KEYCHAIN_SERVICE as SERVICE;
 const ACCOUNT: &str = "browser-associations";
 
 /// One paired browser.

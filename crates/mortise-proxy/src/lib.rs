@@ -29,7 +29,7 @@ pub fn socket_path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(
         PathBuf::from(home)
-            .join("Library/Application Support/com.truepassword.desktop")
+            .join("Library/Application Support/com.mortise.desktop")
             .join("browser.sock"),
     )
 }

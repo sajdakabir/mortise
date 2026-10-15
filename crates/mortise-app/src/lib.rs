@@ -12,6 +12,7 @@ pub mod commands;
 pub mod dto;
 pub mod error;
 pub mod keys;
+pub mod rebrand;
 pub mod state;
 
 use tauri::Manager;
@@ -19,7 +20,14 @@ use tauri::Manager;
 use crate::state::{AppState, TICK_INTERVAL};
 
 /// Vault filename inside the app data directory.
-const VAULT_FILE: &str = "truepass.vault";
+const VAULT_FILE: &str = "mortise.vault";
+
+/// Keychain service for everything this app stores.
+///
+/// Deliberately the same string as the bundle identifier, which is also
+/// what `app_data_dir()` is derived from, so the app has exactly one name
+/// on this machine rather than two that can drift apart.
+pub const KEYCHAIN_SERVICE: &str = "com.mortise.desktop";
 
 /// Build and run the app.
 pub fn run() {
@@ -28,6 +36,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
+            // Before anything reads the vault or the keychain: the rename
+            // moved both out from under us. See [`rebrand`].
+            rebrand::migrate(&dir, VAULT_FILE);
             let state = AppState::new(dir.join(VAULT_FILE));
             app.manage(state);
 

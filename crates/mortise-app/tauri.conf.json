@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TruePassword",
+  "productName": "Mortise",
   "version": "0.1.0",
-  "identifier": "com.truepassword.desktop",
+  "identifier": "com.mortise.desktop",
   "build": {
     "frontendDist": "../../ui/dist",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "TruePassword",
+        "title": "Mortise",
         "width": 1040,
         "height": 720,
         "minWidth": 720,

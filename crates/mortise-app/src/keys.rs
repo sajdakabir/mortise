@@ -35,11 +35,11 @@ use mortise_crypto::secret::Key32;
 use mortise_macos::{Error as KeychainError, Protection};
 use mortise_vault::UnlockToken;
 
-const SERVICE: &str = "com.truepassword.desktop";
+use crate::KEYCHAIN_SERVICE as SERVICE;
 const ACCOUNT_KEY: &str = "account-key";
 const UNLOCK_TOKEN: &str = "unlock-token";
 
-const PROMPT: &str = "Unlock TruePassword";
+const PROMPT: &str = "Unlock Mortise";
 
 /// Remember the account key so unlocking needs only the master password.
 pub fn remember_account_key(key: &Key32) -> Result<(), KeychainError> {

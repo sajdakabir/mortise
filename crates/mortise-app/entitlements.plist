@@ -7,7 +7,7 @@
        unlock silently cannot be set up. -->
   <key>keychain-access-groups</key>
   <array>
-    <string>$(AppIdentifierPrefix)com.truepassword.desktop</string>
+    <string>$(AppIdentifierPrefix)com.mortise.desktop</string>
   </array>
 
   <!-- Hardened runtime is mandatory for notarization. The JIT entitlement is

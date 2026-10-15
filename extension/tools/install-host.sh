@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-HOST_NAME="com.truepassword.proxy"
+HOST_NAME="com.mortise.proxy"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Every Chromium-family browser reads from its own directory.

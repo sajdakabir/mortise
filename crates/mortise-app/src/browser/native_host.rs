@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 /// Must match the `name` the extension passes to `connectNative`.
-const HOST_NAME: &str = "com.truepassword.proxy";
+const HOST_NAME: &str = "com.mortise.proxy";
 
 /// Every Chromium-family browser reads from its own directory, so the manifest
 /// has to be written once per browser rather than to one shared location.

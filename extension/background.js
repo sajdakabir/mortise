@@ -8,7 +8,7 @@
 
 import { computeProof } from "./proof.js";
 
-const HOST = "com.truepassword.proxy";
+const HOST = "com.mortise.proxy";
 
 /** One request, one connection. Mirrors how the proxy behaves on its side. */
 function sendNative(message) {
