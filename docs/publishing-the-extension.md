@@ -33,7 +33,7 @@ The $5 is a lifetime fee, not a subscription.
 extension/tools/package.sh
 ```
 
-Writes `target/extension/truepassword-extension-<version>.zip`. The script
+Writes `target/extension/mortise-extension-<version>.zip`. The script
 assembles from an allowlist and refuses to build on a manifest that would be
 rejected — a `key` field, a description over 132 characters, a missing 128px
 icon, a version that disagrees with `package.json`.
@@ -50,14 +50,14 @@ user-visible feature the permission exists for.
 
 | Permission | What to write |
 |---|---|
-| `nativeMessaging` | Reads credentials from the TruePassword desktop app over a local native messaging host. The vault never leaves the user's machine and the extension never stores credentials itself; this is the only way for it to reach them. |
+| `nativeMessaging` | Reads credentials from the Mortise desktop app over a local native messaging host. The vault never leaves the user's machine and the extension never stores credentials itself; this is the only way for it to reach them. |
 | `activeTab` | Grants access to the current tab only at the moment the user clicks the toolbar icon, so the extension can read the tab's origin and fill the form on that page. Deliberately used in place of host permissions. |
 | `scripting` | Injects a single fill function into the active tab, once, after the user picks a credential. No script runs on page load. |
 | `storage` | Stores the pairing identifier for the desktop app. No credentials, no browsing history. |
 
 **Single purpose**, which the Store requires as one sentence:
 
-> Fills saved credentials from the user's local TruePassword desktop vault into
+> Fills saved credentials from the user's local Mortise desktop vault into
 > login forms, at the user's explicit request.
 
 The strongest thing we have going into review is that we ask for `activeTab`

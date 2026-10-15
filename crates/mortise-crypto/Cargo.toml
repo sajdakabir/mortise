@@ -1,7 +1,7 @@
 [package]
 name = "mortise-crypto"
 version = "0.1.0"
-description = "Cryptographic core for TruePassword. No Tauri, no UI, no network."
+description = "Cryptographic core for Mortise. No Tauri, no UI, no network."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

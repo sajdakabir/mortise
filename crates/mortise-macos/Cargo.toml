@@ -1,7 +1,7 @@
 [package]
 name = "mortise-macos"
 version = "0.1.0"
-description = "macOS keychain integration for TruePassword. The only crate here that uses unsafe."
+description = "macOS keychain integration for Mortise. The only crate here that uses unsafe."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -2,7 +2,7 @@
 //!
 //! The browser spawns this as a subprocess and owns its lifetime. It shuttles
 //! length-prefixed frames between the browser's stdio and a Unix socket owned
-//! by the TruePassword app.
+//! by the Mortise app.
 //!
 //! # Why this exists at all
 //!

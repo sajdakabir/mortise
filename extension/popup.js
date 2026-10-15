@@ -48,7 +48,7 @@ async function render() {
     app.replaceChildren(
       notice(
         "bad",
-        "TruePassword is not running",
+        "Mortise is not running",
         status.message,
         button("Try again", render, true),
       ),
@@ -61,7 +61,7 @@ async function render() {
       notice(
         "warn",
         "Pair this browser",
-        "TruePassword will ask you to approve this browser in its own window. That approval is what stops anything else on this Mac from reading your vault.",
+        "Mortise will ask you to approve this browser in its own window. That approval is what stops anything else on this Mac from reading your vault.",
         button("Pair", pair),
       ),
     );
@@ -92,7 +92,7 @@ async function render() {
         className: "faint pad",
         textContent: status.unlocked
           ? "No saved logins for this site. Note that a login saved for one host does not cover its subdomains."
-          : "Nothing to show. Unlock TruePassword, or there are no logins for this site.",
+          : "Nothing to show. Unlock Mortise, or there are no logins for this site.",
       }),
     );
     return;
@@ -114,7 +114,7 @@ async function render() {
 
 async function pair() {
   app.replaceChildren(
-    notice("warn", "Waiting for approval", "Approve this browser in the TruePassword window, then come back."),
+    notice("warn", "Waiting for approval", "Approve this browser in the Mortise window, then come back."),
   );
 
   const response = await send("associate");
@@ -128,7 +128,7 @@ async function pair() {
     notice(
       response?.code === "approval_required" ? "warn" : "bad",
       response?.code === "approval_required" ? "Not approved yet" : "Pairing failed",
-      response?.message ?? "Could not pair with TruePassword.",
+      response?.message ?? "Could not pair with Mortise.",
       button("Check again", pair, true),
     ),
   );

@@ -180,7 +180,7 @@
                   {/if}
                 </li>
                 <li>
-                  Restart the browser, click the TruePassword icon in the
+                  Restart the browser, click the Mortise icon in the
                   toolbar and press <strong>Pair</strong>. Approve it here and
                   this step ticks itself.
                 </li>

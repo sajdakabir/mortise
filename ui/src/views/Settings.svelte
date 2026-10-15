@@ -243,7 +243,7 @@
       {#if biometricUnavailable}
         <p class="note">
           Unavailable in this development build. Touch ID needs a signed copy
-          of TruePassword — macOS will not let an unsigned app create a
+          of Mortise — macOS will not let an unsigned app create a
           keychain item that asks for your fingerprint.
         </p>
       {/if}
@@ -310,7 +310,7 @@
         <div class="label">
           <h3>Sign out</h3>
           <p class="faint">
-            Locks the vault and removes everything TruePassword keeps in this
+            Locks the vault and removes everything Mortise keeps in this
             Mac's keychain. Your data stays on disk; you will need your master
             password and recovery key to get back in.
           </p>

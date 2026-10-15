@@ -1,4 +1,4 @@
-# TruePassword — Cryptographic Specification v1
+# Mortise — Cryptographic Specification v1
 
 Status: draft, M0. Read [threat-model.md](threat-model.md) first; every choice
 here traces to an adversary listed there.

@@ -30,7 +30,7 @@ function sendNative(message) {
             type: "error",
             code: "no_host",
             message:
-              "Could not reach TruePassword. Check that the app is running and the browser connector is installed.",
+              "Could not reach Mortise. Check that the app is running and the browser connector is installed.",
           });
           return;
         }
@@ -42,7 +42,7 @@ function sendNative(message) {
 
     // sendNativeMessage can hang if the host spawns but never replies.
     setTimeout(
-      () => done({ type: "error", code: "timeout", message: "TruePassword did not respond." }),
+      () => done({ type: "error", code: "timeout", message: "Mortise did not respond." }),
       10_000,
     );
   });
@@ -97,7 +97,7 @@ const handlers = {
     } catch {
       // Not available on every Chromium build. The toolbar badge still says
       // there is something there, so the user can open it themselves.
-      return { type: "error", code: "no_popup", message: "Open TruePassword from the toolbar." };
+      return { type: "error", code: "no_popup", message: "Open Mortise from the toolbar." };
     }
   },
 
@@ -180,7 +180,7 @@ const handlers = {
     // response carries no secret, so this is safe to print.
     const { debug } = await chrome.storage.local.get("debug");
     if (debug) {
-      console.log("TruePassword: capture for", origin, "->", JSON.stringify(response));
+      console.log("Mortise: capture for", origin, "->", JSON.stringify(response));
     }
 
     // A badge, because the prompt opens in the app window and the user is

@@ -27,8 +27,8 @@ pub enum Error {
         supported: u32,
     },
 
-    /// The file is not a TruePassword vault, or is corrupt beyond a key problem.
-    #[error("vault file is corrupt or not a TruePassword vault: {0}")]
+    /// The file is not a Mortise vault, or is corrupt beyond a key problem.
+    #[error("vault file is corrupt or not a Mortise vault: {0}")]
     Corrupt(&'static str),
 
     /// A cryptographic operation failed.

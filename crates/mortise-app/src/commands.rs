@@ -76,7 +76,7 @@ pub fn create_vault(state: State<'_, AppState>, master_password: String) -> CmdR
     }
     if let Some(dir) = state.vault_path().parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            eprintln!("truepass: cannot create vault directory: {e}");
+            eprintln!("mortise: cannot create vault directory: {e}");
             CmdError::bad_request("Could not create the vault directory.")
         })?;
     }
@@ -92,7 +92,7 @@ pub fn create_vault(state: State<'_, AppState>, master_password: String) -> CmdR
     // asks for the password alone. A failure here is not fatal — the user
     // still has the recovery key on screen — so it is logged, not surfaced.
     if let Err(e) = keys::remember_account_key(&account_key) {
-        eprintln!("truepass: could not remember the account key: {e}");
+        eprintln!("mortise: could not remember the account key: {e}");
     }
 
     state.install(vault);
@@ -121,7 +121,7 @@ pub fn unlock(
             let key = recovery::decode(kit)
                 .map_err(|_| CmdError::bad_request("That recovery key is not valid."))?;
             if let Err(e) = keys::remember_account_key(&key) {
-                eprintln!("truepass: could not remember the account key: {e}");
+                eprintln!("mortise: could not remember the account key: {e}");
             }
             key
         }
@@ -411,7 +411,7 @@ pub fn copy_secret(
     })?;
 
     app.clipboard().write_text(value.as_str()).map_err(|e| {
-        eprintln!("truepass: clipboard write failed: {e}");
+        eprintln!("mortise: clipboard write failed: {e}");
         CmdError::bad_request("Could not write to the clipboard.")
     })?;
 
@@ -755,7 +755,7 @@ fn sync_error(e: mortise_sync::Error) -> CmdError {
         ),
         E::Vault(v) => CmdError::from(v),
         other => {
-            eprintln!("truepass: sync error: {other}");
+            eprintln!("mortise: sync error: {other}");
             CmdError::bad_request("Sync failed.")
         }
     }

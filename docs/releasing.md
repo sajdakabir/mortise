@@ -1,4 +1,4 @@
-# Releasing TruePassword
+# Releasing Mortise
 
 Status: M4. Everything here except the final signing and notarization steps is
 done and committed; those two need an Apple Developer account, which nobody has
@@ -61,9 +61,9 @@ usually takes a few minutes.
 Verify afterwards:
 
 ```bash
-codesign --verify --deep --strict --verbose=2 "target/release/bundle/macos/TruePassword.app"
-spctl --assess --type execute --verbose "target/release/bundle/macos/TruePassword.app"
-xcrun stapler validate "target/release/bundle/macos/TruePassword.app"
+codesign --verify --deep --strict --verbose=2 "target/release/bundle/macos/Mortise.app"
+spctl --assess --type execute --verbose "target/release/bundle/macos/Mortise.app"
+xcrun stapler validate "target/release/bundle/macos/Mortise.app"
 ```
 
 `spctl` should say `accepted`, `source=Notarized Developer ID`.

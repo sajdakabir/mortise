@@ -71,7 +71,7 @@ fi
 MANIFEST=$(cat <<JSON
 {
   "name": "$HOST_NAME",
-  "description": "TruePassword native messaging bridge",
+  "description": "Mortise native messaging bridge",
   "path": "$PROXY_PATH",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$EXTENSION_ID/"]
@@ -100,4 +100,4 @@ echo
 echo "Proxy:     $PROXY_PATH"
 echo "Extension: $EXTENSION_ID"
 echo
-echo "Restart your browser, then open TruePassword and pair from the popup."
+echo "Restart your browser, then open Mortise and pair from the popup."

@@ -1,7 +1,7 @@
 [package]
 name = "mortise-vault"
 version = "0.1.0"
-description = "Local encrypted store for TruePassword. SQLite, no network."
+description = "Local encrypted store for Mortise. SQLite, no network."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

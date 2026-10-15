@@ -49,12 +49,12 @@ impl From<mortise_vault::Error> for CmdError {
             E::ItemNotFound => Self::new("not_found", "That item no longer exists."),
             E::SchemaTooNew { .. } => Self::new(
                 "schema_too_new",
-                "This vault was created by a newer version of TruePassword.",
+                "This vault was created by a newer version of Mortise.",
             ),
             // Everything below is either a bug or a damaged file. The UI gets a
             // generic message; the detail goes to the log, not the webview.
             other => {
-                eprintln!("truepass: internal error: {other}");
+                eprintln!("mortise: internal error: {other}");
                 Self::new("internal", "Something went wrong.")
             }
         }
@@ -63,7 +63,7 @@ impl From<mortise_vault::Error> for CmdError {
 
 impl From<mortise_crypto::Error> for CmdError {
     fn from(e: mortise_crypto::Error) -> Self {
-        eprintln!("truepass: crypto error: {e}");
+        eprintln!("mortise: crypto error: {e}");
         Self::new("internal", "Something went wrong.")
     }
 }
@@ -78,14 +78,14 @@ impl From<mortise_macos::Error> for CmdError {
             E::AuthFailed => Self::new("auth_failed", "Authentication failed."),
             E::RequiresSignedApp => Self::new(
                 "requires_signed_app",
-                "Touch ID needs a signed build of TruePassword. It is unavailable in this development build.",
+                "Touch ID needs a signed build of Mortise. It is unavailable in this development build.",
             ),
             E::NotAvailable => Self::new(
                 "biometrics_unavailable",
                 "This Mac cannot use Touch ID or a device passcode for this.",
             ),
             other => {
-                eprintln!("truepass: keychain error: {other}");
+                eprintln!("mortise: keychain error: {other}");
                 Self::new("internal", "Could not reach the keychain.")
             }
         }

@@ -106,7 +106,7 @@ echo
 
 # --- build -----------------------------------------------------------------
 
-ZIP="$OUT_DIR/truepassword-extension-$VERSION.zip"
+ZIP="$OUT_DIR/mortise-extension-$VERSION.zip"
 mkdir -p "$OUT_DIR"
 rm -f "$ZIP"
 

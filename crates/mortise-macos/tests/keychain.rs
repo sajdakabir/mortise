@@ -1,7 +1,7 @@
 //! Keychain round-trip tests against the real login keychain.
 //!
 //! These write to the actual keychain, so every test uses a unique service
-//! name under a `truepass.test.` prefix and deletes what it created. Nothing
+//! name under a `mortise.test.` prefix and deletes what it created. Nothing
 //! here reads a `UserPresence` item: that would raise a Touch ID prompt and
 //! block the suite forever on a machine with nobody sitting at it.
 
@@ -17,7 +17,7 @@ const ACCOUNT: &str = "test-account";
 fn service() -> String {
     static N: AtomicU64 = AtomicU64::new(0);
     format!(
-        "truepass.test.{}.{}",
+        "mortise.test.{}.{}",
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     )

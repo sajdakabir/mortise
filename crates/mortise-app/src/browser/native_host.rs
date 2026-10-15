@@ -117,7 +117,7 @@ fn manifest_path(relative: &str) -> Option<PathBuf> {
 }
 
 /// The proxy ships beside the app binary — `target/debug` in development,
-/// `TruePassword.app/Contents/MacOS` once bundled. Deriving it from the running
+/// `Mortise.app/Contents/MacOS` once bundled. Deriving it from the running
 /// executable means the same code is right in both, and that a rebuilt proxy
 /// never leaves a stale absolute path behind in a browser's manifest.
 fn proxy_path() -> Result<PathBuf, Error> {
@@ -177,7 +177,7 @@ pub fn install(extension_id: &str) -> Result<Vec<String>, Error> {
 fn manifest_json(proxy: &std::path::Path, extension_id: &str) -> Result<Vec<u8>, std::io::Error> {
     let manifest = HostManifest {
         name: HOST_NAME,
-        description: "TruePassword native messaging bridge",
+        description: "Mortise native messaging bridge",
         path: proxy.to_string_lossy().into_owned(),
         kind: "stdio",
         allowed_origins: vec![format!("chrome-extension://{extension_id}/")],
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn the_manifest_is_shaped_the_way_chrome_expects() {
         let json = manifest_json(
-            std::path::Path::new("/Applications/TruePassword.app/Contents/MacOS/mortise-proxy"),
+            std::path::Path::new("/Applications/Mortise.app/Contents/MacOS/mortise-proxy"),
             "abcdefghijklmnopabcdefghijklmnop",
         )
         .unwrap();
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(v["type"], "stdio");
         assert_eq!(
             v["path"],
-            "/Applications/TruePassword.app/Contents/MacOS/mortise-proxy"
+            "/Applications/Mortise.app/Contents/MacOS/mortise-proxy"
         );
         assert_eq!(
             v["allowed_origins"],

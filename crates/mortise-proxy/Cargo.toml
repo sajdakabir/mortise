@@ -1,7 +1,7 @@
 [package]
 name = "mortise-proxy"
 version = "0.1.0"
-description = "Native messaging bridge between the browser extension and TruePassword."
+description = "Native messaging bridge between the browser extension and Mortise."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

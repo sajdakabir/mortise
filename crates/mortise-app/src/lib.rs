@@ -1,4 +1,4 @@
-//! TruePassword desktop app.
+//! Mortise desktop app.
 //!
 //! All crypto and all storage stay in the Rust process. The webview is treated
 //! as untrusted: it receives DTOs over a small explicit IPC surface and never
@@ -68,8 +68,8 @@ pub fn run() {
             // perfectly usable without autofill, and refusing to start over it
             // would be a poor trade.
             match browser::server::start(app.handle()) {
-                Ok(path) => eprintln!("truepass: browser socket at {}", path.display()),
-                Err(e) => eprintln!("truepass: browser autofill unavailable: {e}"),
+                Ok(path) => eprintln!("mortise: browser socket at {}", path.display()),
+                Err(e) => eprintln!("mortise: browser autofill unavailable: {e}"),
             }
 
             Ok(())
@@ -109,5 +109,5 @@ pub fn run() {
             commands::touch,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to start TruePassword");
+        .expect("failed to start Mortise");
 }

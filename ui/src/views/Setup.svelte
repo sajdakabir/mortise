@@ -32,7 +32,7 @@
 <div class="wrap">
   <div class="card">
     {#if !kit}
-      <h1>Set up TruePassword</h1>
+      <h1>Set up Mortise</h1>
       <p class="dim intro">
         Everything stays on this Mac. Your master password is never stored and never
         leaves the device.

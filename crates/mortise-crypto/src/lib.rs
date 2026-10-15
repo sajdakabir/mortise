@@ -1,6 +1,6 @@
 //! # mortise-crypto
 //!
-//! The cryptographic core of TruePassword. This crate has **no** dependency on
+//! The cryptographic core of Mortise. This crate has **no** dependency on
 //! Tauri, the UI, the filesystem, or the network, so it can be reviewed and
 //! tested entirely in isolation.
 //!

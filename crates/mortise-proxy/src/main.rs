@@ -38,7 +38,7 @@ fn forward(request: &[u8]) -> Result<Vec<u8>, (&'static str, String)> {
     let mut socket = UnixStream::connect(&path).map_err(|_| {
         (
             "app_not_running",
-            "TruePassword is not running. Open it to use autofill.".to_string(),
+            "Mortise is not running. Open it to use autofill.".to_string(),
         )
     })?;
 
@@ -46,7 +46,7 @@ fn forward(request: &[u8]) -> Result<Vec<u8>, (&'static str, String)> {
 
     match read_frame(&mut socket) {
         Ok(Some(response)) => Ok(response),
-        Ok(None) => Err(("io", "TruePassword closed the connection".into())),
+        Ok(None) => Err(("io", "Mortise closed the connection".into())),
         Err(e) => Err(("io", e.to_string())),
     }
 }

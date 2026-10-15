@@ -1,4 +1,4 @@
-# TruePassword — Threat Model
+# Mortise — Threat Model
 
 Status: draft, M0. Nothing in this repo should be implemented until this document
 is reviewed and agreed. Every later design decision gets checked against it.
@@ -30,7 +30,7 @@ and all of which must be stated in user-facing docs:
 ```
 ┌─ user's Mac ──────────────────────────────────────────┐
 │                                                        │
-│  ┌── TruePassword.app (Tauri) ──┐                      │
+│  ┌── Mortise.app (Tauri) ──┐                      │
 │  │  Rust core: keys, crypto     │ ← trusted            │
 │  │  ────────── IPC ──────────   │                      │
 │  │  webview (Svelte UI)         │ ← semi-trusted       │

@@ -47,7 +47,7 @@ pub fn start(app: &AppHandle) -> io::Result<PathBuf> {
             let handle = handle.clone();
             std::thread::spawn(move || {
                 if let Err(e) = serve(&handle, stream) {
-                    eprintln!("truepass: browser connection ended: {e}");
+                    eprintln!("mortise: browser connection ended: {e}");
                 }
             });
         }
@@ -139,7 +139,7 @@ fn associate(app: &AppHandle, client_name: &str) -> Response {
 
     Response::error(
         "approval_required",
-        "Approve this browser in the TruePassword window.",
+        "Approve this browser in the Mortise window.",
     )
 }
 
@@ -193,7 +193,7 @@ fn capture(app: &AppHandle, origin: &str, username: Option<&str>, password: &str
         // memory waiting for an unlock that may never come. The user has just
         // typed it, so asking again later costs them nothing.
         if !v.is_unlocked() {
-            return Response::error("locked", "Unlock TruePassword to save this login.");
+            return Response::error("locked", "Unlock Mortise to save this login.");
         }
 
         let existing = v.find_for_origin(&parsed).unwrap_or_default();
@@ -246,7 +246,7 @@ fn credential(app: &AppHandle, item_id: &str, origin: &str) -> Response {
             return Response::error("no_vault", "No vault on this machine.");
         };
         if !v.is_unlocked() {
-            return Response::error("locked", "Unlock TruePassword to fill this.");
+            return Response::error("locked", "Unlock Mortise to fill this.");
         }
 
         // Re-check the origin against the item's own URLs rather than trusting
