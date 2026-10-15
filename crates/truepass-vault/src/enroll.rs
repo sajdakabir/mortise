@@ -189,18 +189,26 @@ pub fn join(
     }
 
     conn.execute(
-        "INSERT INTO vault_meta
-           (id, vault_id, salt, argon2_m_kib, argon2_t, argon2_p, epoch,
-            schema_version, created_at_ms)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO account
+           (id, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
         params![
-            enrollment.vault_id.as_slice(),
             enrollment.salt.as_slice(),
             enrollment.params.m_cost_kib,
             enrollment.params.t_cost,
             enrollment.params.p_cost,
-            enrollment.epoch,
             schema::SCHEMA_VERSION,
+            enrollment.created_at_ms as i64,
+        ],
+    )?;
+
+    conn.execute(
+        "INSERT INTO vault (vault_id, name, kind, epoch, created_at_ms)
+         VALUES (?1, ?2, 0, ?3, ?4)",
+        params![
+            enrollment.vault_id.as_slice(),
+            crate::vault::DEFAULT_VAULT_NAME,
+            enrollment.epoch,
             enrollment.created_at_ms as i64,
         ],
     )?;
