@@ -140,6 +140,28 @@ p { margin: 0; }
 .hero .lede { margin-bottom: 36px; }
 
 .cta { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* What the download actually gets you, next to the button rather than further
+   down the page. A visitor who finds out about Gatekeeper after downloading
+   concludes the file is broken; one who reads it here does not. */
+.cta-note {
+  max-width: 54ch;
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-faint);
+}
+.cta-note a { color: var(--text-dim); }
+.cta-note a:hover { color: var(--text); }
+
+/* The nav's only action. Outlined rather than filled: the hero carries the
+   real call, and two solid buttons on one screen compete. */
+.nav-dl {
+  padding: 5px 11px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+}
+.nav-dl:hover { border-color: var(--text-dim); }
 .btn {
   display: inline-flex;
   align-items: center;
