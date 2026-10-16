@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -195,7 +195,108 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V2)?;
     conn.execute_batch(SCHEMA_V3)?;
     conn.execute_batch(SCHEMA_V4)?;
+    conn.execute_batch(SCHEMA_V5)?;
     Ok(())
+}
+
+/// Added in v5: more than one vault per file.
+///
+/// `vault_meta` conflated two things that have different cardinality. The salt
+/// and Argon2 parameters derive the master unlock key and so are per *account*
+/// — one per file, forever. The vault id and epoch describe one *vault*, and a
+/// file now holds several: your own, plus a vault for each project shared with
+/// you. Splitting them is what makes the rest of this possible.
+///
+/// `vault_key` is rebuilt rather than altered because its primary key changes:
+/// two vaults may each be at epoch 0, so the epoch alone no longer identifies
+/// a key. `item` and `acl_log` only gain a column, so they are altered in
+/// place and backfilled to the one vault that existed.
+const SCHEMA_V5: &str = r#"
+-- Per account. One row, forever.
+CREATE TABLE IF NOT EXISTS account (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    salt            BLOB    NOT NULL,
+    argon2_m_kib    INTEGER NOT NULL,
+    argon2_t        INTEGER NOT NULL,
+    argon2_p        INTEGER NOT NULL,
+    schema_version  INTEGER NOT NULL,
+    created_at_ms   INTEGER NOT NULL
+) STRICT;
+
+-- Per vault. Your own, and one per project.
+CREATE TABLE IF NOT EXISTS vault (
+    vault_id      BLOB    PRIMARY KEY,
+    name          TEXT    NOT NULL,
+    -- 0 personal, 1 project. The personal vault cannot be shared or deleted,
+    -- which is a property of the vault rather than of its contents.
+    kind          INTEGER NOT NULL DEFAULT 0,
+    epoch         INTEGER NOT NULL,
+    created_at_ms INTEGER NOT NULL
+) STRICT;
+
+INSERT OR IGNORE INTO account (id, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms)
+    SELECT 1, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms
+    FROM vault_meta WHERE id = 1;
+
+INSERT OR IGNORE INTO vault (vault_id, name, kind, epoch, created_at_ms)
+    SELECT vault_id, 'Personal', 0, epoch, created_at_ms
+    FROM vault_meta WHERE id = 1;
+
+-- Rebuilt: the primary key gains the vault.
+CREATE TABLE vault_key_v5 (
+    vault_id BLOB    NOT NULL,
+    epoch    INTEGER NOT NULL,
+    wrapped  BLOB    NOT NULL,
+    PRIMARY KEY (vault_id, epoch)
+) STRICT;
+
+INSERT INTO vault_key_v5 (vault_id, epoch, wrapped)
+    SELECT (SELECT vault_id FROM vault LIMIT 1), epoch, wrapped FROM vault_key;
+
+DROP TABLE vault_key;
+ALTER TABLE vault_key_v5 RENAME TO vault_key;
+
+-- Altered in place. The empty default is immediately backfilled; SQLite will
+-- not add a NOT NULL column without one.
+ALTER TABLE item ADD COLUMN vault_id BLOB NOT NULL DEFAULT x'';
+UPDATE item SET vault_id = (SELECT vault_id FROM vault LIMIT 1);
+CREATE INDEX item_vault ON item (vault_id, deleted);
+
+-- seq stays globally unique rather than restarting per vault: each vault's
+-- entries are a subsequence of it, which is enough to order them, and it
+-- avoids rebuilding the table.
+ALTER TABLE acl_log ADD COLUMN vault_id BLOB NOT NULL DEFAULT x'';
+UPDATE acl_log SET vault_id = (SELECT vault_id FROM vault LIMIT 1);
+CREATE INDEX acl_vault ON acl_log (vault_id, seq);
+
+-- The relay cursor is per vault: each syncs independently and at its own
+-- rate. The clock and the relay URL stay on sync_state, which is per device.
+CREATE TABLE IF NOT EXISTS vault_sync (
+    vault_id BLOB    PRIMARY KEY,
+    cursor   INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+INSERT OR IGNORE INTO vault_sync (vault_id, cursor)
+    SELECT vault_id, (SELECT cursor FROM sync_state WHERE id = 1) FROM vault;
+
+DROP TABLE IF EXISTS vault_meta;
+"#;
+
+/// The file's schema version, from whichever table holds it.
+///
+/// v5 moved it out of `vault_meta` and into `account`. Both have to be
+/// readable here: the old one to decide whether to migrate at all, the new one
+/// on every open afterwards.
+fn read_version(conn: &Connection) -> Result<u32> {
+    for sql in [
+        "SELECT schema_version FROM account WHERE id = 1",
+        "SELECT schema_version FROM vault_meta WHERE id = 1",
+    ] {
+        if let Ok(v) = conn.query_row(sql, [], |r| r.get::<_, u32>(0)) {
+            return Ok(v);
+        }
+    }
+    Err(Error::Corrupt("no schema version row"))
 }
 
 /// Bring an older vault up to the current schema.
@@ -203,13 +304,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
 /// Runs inside a transaction: a migration that fails halfway and leaves the
 /// file in neither version is how a vault becomes unopenable.
 pub fn migrate(conn: &Connection) -> Result<()> {
-    let found: u32 = conn
-        .query_row(
-            "SELECT schema_version FROM vault_meta WHERE id = 1",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|_| Error::Corrupt("vault_meta row is missing"))?;
+    let found = read_version(conn)?;
 
     if found >= SCHEMA_VERSION {
         return Ok(());
@@ -225,8 +320,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if found < 4 {
         tx.execute_batch(SCHEMA_V4)?;
     }
+    if found < 5 {
+        tx.execute_batch(SCHEMA_V5)?;
+    }
+    // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(
-        "UPDATE vault_meta SET schema_version = ?1 WHERE id = 1",
+        "UPDATE account SET schema_version = ?1 WHERE id = 1",
         [SCHEMA_VERSION],
     )?;
     tx.commit()?;
@@ -249,13 +348,7 @@ pub fn apply_pragmas(conn: &Connection) -> Result<()> {
 /// A newer version is refused rather than guessed at: opening a file we do not
 /// understand and writing to it is how data gets destroyed.
 pub fn check_version(conn: &Connection) -> Result<()> {
-    let found: u32 = conn
-        .query_row(
-            "SELECT schema_version FROM vault_meta WHERE id = 1",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|_| Error::Corrupt("vault_meta row is missing"))?;
+    let found = read_version(conn)?;
 
     if found > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew {
@@ -269,7 +362,7 @@ pub fn check_version(conn: &Connection) -> Result<()> {
 /// Whether the file has already been initialized.
 pub fn is_initialized(conn: &Connection) -> Result<bool> {
     let count: u32 = conn.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'vault_meta'",
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('vault_meta', 'account')",
         [],
         |r| r.get(0),
     )?;
