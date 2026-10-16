@@ -48,7 +48,7 @@ try {
 }
 
 function log(...parts) {
-  if (debug) console.log("TruePassword:", ...parts);
+  if (debug) console.log("Mortise:", ...parts);
 }
 
 /** Visible, enabled, and actually fillable. */
@@ -195,8 +195,8 @@ document.addEventListener(
 
 /** Shadow DOM so the host page's CSS cannot restyle or hide the button. */
 function mountButton(field, items) {
-  if (field.dataset.truepassMounted) return;
-  field.dataset.truepassMounted = "1";
+  if (field.dataset.mortiseMounted) return;
+  field.dataset.mortiseMounted = "1";
 
   const host = document.createElement("div");
   host.style.cssText = "position:absolute;z-index:2147483646;";
@@ -207,8 +207,8 @@ function mountButton(field, items) {
   button.textContent = items.length === 1 ? "Fill" : `Fill (${items.length})`;
   button.title =
     items.length === 1
-      ? `TruePassword: fill ${items[0].username ?? items[0].title}`
-      : "TruePassword: choose a saved login";
+      ? `Mortise: fill ${items[0].username ?? items[0].title}`
+      : "Mortise: choose a saved login";
   button.style.cssText = [
     "font:600 11px -apple-system,system-ui,sans-serif",
     "padding:3px 8px",

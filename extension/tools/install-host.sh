@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Installs the native messaging host manifest, which is what tells the browser
-# where to find truepass-proxy and — importantly — which extension is allowed
+# where to find mortise-proxy and — importantly — which extension is allowed
 # to talk to it.
 #
 # Usage:
@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-HOST_NAME="com.truepassword.proxy"
+HOST_NAME="com.mortise.proxy"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Every Chromium-family browser reads from its own directory.
@@ -58,11 +58,11 @@ fi
 
 PROFILE="debug"
 [[ "${2:-}" == "--release" ]] && PROFILE="release"
-PROXY_PATH="$REPO_ROOT/target/$PROFILE/truepass-proxy"
+PROXY_PATH="$REPO_ROOT/target/$PROFILE/mortise-proxy"
 
 if [[ ! -x "$PROXY_PATH" ]]; then
   echo "error: no proxy binary at $PROXY_PATH" >&2
-  echo "build it first:  cargo build ${PROFILE/debug/} -p truepass-proxy" >&2
+  echo "build it first:  cargo build ${PROFILE/debug/} -p mortise-proxy" >&2
   exit 1
 fi
 
@@ -71,7 +71,7 @@ fi
 MANIFEST=$(cat <<JSON
 {
   "name": "$HOST_NAME",
-  "description": "TruePassword native messaging bridge",
+  "description": "Mortise native messaging bridge",
   "path": "$PROXY_PATH",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$EXTENSION_ID/"]
@@ -100,4 +100,4 @@ echo
 echo "Proxy:     $PROXY_PATH"
 echo "Extension: $EXTENSION_ID"
 echo
-echo "Restart your browser, then open TruePassword and pair from the popup."
+echo "Restart your browser, then open Mortise and pair from the popup."

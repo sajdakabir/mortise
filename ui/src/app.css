@@ -28,9 +28,18 @@
      blue ring was the one piece of colour in the whole app. */
   --focus: #9aa2b1;
 
+  /* Two tones and one accent.
+     ok and warn were a green and an amber, and between them, the item
+     avatars and the focus ring the interface had four colours doing
+     decorative work. They are greys now: a filled tick still reads as done
+     and a muted label still reads as a caveat, without any of it competing
+     with the content.
+     danger stays red. Red on a delete button and on an error is close to
+     universal, and dropping it to grey would cost real comprehension for the
+     sake of consistency — the one place colour earns its keep. */
   --danger: #f07178;
-  --ok: #9ece6a;
-  --warn: #e0af68;
+  --ok: #b7bbc5;
+  --warn: #959cab;
 
   /* A rhythm, so spacing is chosen from a scale rather than per component. */
   --s1: 4px;
@@ -79,8 +88,8 @@
     --focus: #5c6472;
 
     --danger: #c0392b;
-    --ok: #3f8f3f;
-    --warn: #9a6b1e;
+    --ok: #4b515d;
+    --warn: #626874;
 
     --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06);
     --shadow-2: 0 4px 14px rgba(16, 24, 40, 0.1);

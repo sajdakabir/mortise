@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TruePassword — a password manager that keeps your passwords</title>
+<title>Mortise — a local-first password manager for macOS</title>
 <meta name="description" content="A local-first password manager for macOS. Your vault stays on your Mac; the relay only ever sees ciphertext it cannot read.">
 <link rel="icon" href="mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -16,14 +16,14 @@
   <div class="wrap nav-inner">
     <a class="brand" href="/">
       <img src="mark.svg" alt="" width="22" height="22">
-      <span>TruePassword</span>
+      <span>Mortise</span>
     </a>
     <nav>
       <a href="#how">How it works</a>
       <a href="#guard">Agent Guard</a>
       <a href="#sharing">Sharing</a>
       <a href="#limits">Limits</a>
-      <a href="https://github.com/sajdakabir/truepassword">GitHub</a>
+      <a href="https://github.com/sajdakabir/mortise">GitHub</a>
     </nav>
   </div>
 </header>
@@ -38,8 +38,8 @@
       has no key for &mdash; including when we are the ones running it.
     </p>
     <div class="cta">
-      <a class="btn" href="https://github.com/sajdakabir/truepassword">Read the source</a>
-      <a class="btn ghost" href="https://github.com/sajdakabir/truepassword/blob/master/docs/threat-model.md">Threat model &rarr;</a>
+      <a class="btn" href="https://github.com/sajdakabir/mortise">Read the source</a>
+      <a class="btn ghost" href="https://github.com/sajdakabir/mortise/blob/master/docs/threat-model.md">Threat model &rarr;</a>
     </div>
 
   </div>
@@ -63,7 +63,7 @@
     <ol class="step-list">
       <li>
         <span class="num mono">01</span>
-        <div>
+        <div class="step-body">
           <h3>The vault is a file on your Mac</h3>
           <p class="dim">
             Encrypted with a key derived from your master password and a
@@ -72,10 +72,21 @@
             not a bug.
           </p>
         </div>
+      <figure class="step-fig">
+          <pre class="mono">master password   typed, never stored
+account key       256-bit, never sent
+                  ↓  Argon2id, then HKDF
+MUK               unwraps the two below
+DB_KEY            every secret in the vault
+META_KEY          titles and URLs
+
+lose either one   <b>nothing opens, by anyone</b></pre>
+          <figcaption class="label">The key hierarchy, abridged</figcaption>
+        </figure>
       </li>
       <li>
         <span class="num mono">02</span>
-        <div>
+        <div class="step-body">
           <h3>Sync is optional, and blind</h3>
           <p class="dim">
             Devices exchange signed, encrypted changes through a relay. Every
@@ -84,10 +95,18 @@
             data but cannot read or forge it.
           </p>
         </div>
+      <figure class="step-fig">
+          <pre class="mono">↑ change  8f3a…c21   sealed   1.2 KB
+↑ change  b70e…44d   sealed   0.9 KB
+↓ change  4d1c…9ff   sealed   2.1 KB
+
+<b>relay can read          0 bytes</b></pre>
+          <figcaption class="label">One sync, as the relay sees it</figcaption>
+        </figure>
       </li>
       <li>
         <span class="num mono">03</span>
-        <div>
+        <div class="step-body">
           <h3>The extension runs on no page until you ask</h3>
           <p class="dim">
             Most managers request access to every site you visit, forever. This
@@ -96,6 +115,12 @@
             the page &mdash; so a lookalike site cannot claim to be your bank.
           </p>
         </div>
+      <figure class="step-fig">
+          <pre class="mono">                 host access   granted
+typical manager  &lt;all_urls&gt;    on install
+<b>Mortise          activeTab     when you ask</b></pre>
+          <figcaption class="label">What the browser hands over</figcaption>
+        </figure>
       </li>
     </ol>
   </div>
@@ -108,7 +133,7 @@
       <h2>A key you paste is a key<br>you have published.</h2>
       <p class="lede">
         Secrets end up in chat boxes, issue trackers and prompts because that
-        is where the work is. TruePassword recognises one of yours on its way
+        is where the work is. Mortise recognises one of yours on its way
         out and kills it at the provider, in the seconds before anyone reads
         the message.
       </p>
@@ -297,7 +322,7 @@
         open while it gets there.
       </p>
       <div class="cta">
-        <a class="btn" href="https://github.com/sajdakabir/truepassword">Follow on GitHub</a>
+        <a class="btn" href="https://github.com/sajdakabir/mortise">Follow on GitHub</a>
       </div>
     </div>
     <ul class="ship-list mono">
@@ -314,17 +339,45 @@
 </section>
 
 <footer class="section foot">
-  <div class="wrap foot-inner">
-    <div class="brand">
-      <img src="mark.svg" alt="" width="20" height="20">
-      <span>TruePassword</span>
+  <div class="wrap foot-top">
+    <div class="foot-id">
+      <div class="brand">
+        <img src="mark.svg" alt="" width="20" height="20">
+        <span>Mortise</span>
+      </div>
+      <dl class="entry">
+        <dt>mor&middot;tise <span class="ipa">/&#712;m&#596;&#720;t&#618;s/</span> <i>n.</i></dt>
+        <dd>
+          a recess cut into one piece of material so that another seats inside
+          it, joining the two without a fastening.
+        </dd>
+      </dl>
     </div>
-    <nav>
-      <a href="https://github.com/sajdakabir/truepassword">Source</a>
-      <a href="https://github.com/sajdakabir/truepassword/blob/master/docs/threat-model.md">Threat model</a>
-      <a href="https://github.com/sajdakabir/truepassword/blob/master/docs/crypto-spec.md">Crypto spec</a>
-    </nav>
+
+    <div class="foot-cols">
+      <div>
+        <p class="label">Product</p>
+        <nav>
+          <a href="#how">How it works</a>
+          <a href="#guard">Agent Guard</a>
+          <a href="#sharing">Sharing</a>
+          <a href="#limits">Limits</a>
+        </nav>
+      </div>
+      <div>
+        <p class="label">Source</p>
+        <nav>
+          <a href="https://github.com/sajdakabir/mortise">GitHub</a>
+          <a href="https://github.com/sajdakabir/mortise/blob/master/docs/threat-model.md">Threat model</a>
+          <a href="https://github.com/sajdakabir/mortise/blob/master/docs/crypto-spec.md">Crypto spec</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap foot-base">
     <p class="label">Local-first &middot; macOS</p>
+    <p class="label">AGPL-3.0 &middot; no account, no telemetry</p>
   </div>
 </footer>
 

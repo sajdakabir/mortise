@@ -1,0 +1,25 @@
+name,url,username,password,notes,folder,type
+GitHub,https://github.com,sajdakabir,fake-gh-9f2kLm4pQ7,Personal account,Personal,login
+Vercel,https://vercel.com,sajda.kbir@gmail.com,fake-vc-3xR8nT2wYb,,Personal,login
+Linear,https://linear.app,sajda.kbir@gmail.com,fake-ln-7mK4vJ9sDa,,Personal,login
+Cloudflare,https://dash.cloudflare.com,sajda.kbir@gmail.com,fake-cf-5pQ2zX8nHe,DNS and Workers,Personal,login
+AWS Console,https://console.aws.amazon.com,acme-deploy,fake-aws-6tY3bN7kWu,Shared with the team,acme-api,login
+Fastmail,https://app.fastmail.com,sajdakabir,fake-fm-2wE5rT8yUi,,Personal,login
+OpenAI,https://platform.openai.com,,placeholder-openai-key-0000000000000,Billing alerts on,Personal,apikey
+Anthropic,https://console.anthropic.com,,placeholder-anthropic-key-0000000000,,Personal,apikey
+Stripe live key,https://dashboard.stripe.com,,placeholder-stripe-key-000000000,Rotate quarterly,acme-api,apikey
+Resend,https://resend.com,,placeholder-resend-key-00000,Transactional email,acme-api,apikey
+DATABASE_URL,,,postgres://acme:fakepw@db.internal:5432/acme_prod,,acme-api/prod,env
+REDIS_URL,,,redis://cache.internal:6379/0,,acme-api/prod,env
+JWT_SECRET,,,fake-jwt-Hq82nZpLx4Vt9RkBcWmE,Rotating invalidates all sessions,acme-api/prod,env
+STRIPE_SECRET_KEY,,,placeholder-stripe-key-000000000,Same key as the Stripe item,acme-api/prod,env
+SENTRY_DSN,,,https://fake0000@o123456.ingest.sentry.io/7654321,,acme-api/prod,env
+DATABASE_URL,,,postgres://acme:devpw@localhost:5432/acme_dev,,acme-api/dev,env
+REDIS_URL,,,redis://localhost:6379/0,,acme-api/dev,env
+JWT_SECRET,,,dev-only-not-secret,,acme-api/dev,env
+NEXT_PUBLIC_API_URL,,,https://api.acme.com,Public — safe in the bundle,acme-web/prod,env
+SESSION_SECRET,,,fake-sess-Yb7KpQ2nRw9ZxLmTvE4,,acme-web/prod,env
+GitHub recovery codes,,,,"4f2a-9bd1
+7c33-0ea8
+1b55-62fc
+Stored here because the phone is the other factor.",Personal,note

@@ -2316,6 +2316,117 @@ dependencies = [
 ]
 
 [[package]]
+name = "mortise-app"
+version = "0.1.0"
+dependencies = [
+ "hmac",
+ "mortise-crypto",
+ "mortise-macos",
+ "mortise-proxy",
+ "mortise-sync",
+ "mortise-vault",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
+name = "mortise-crypto"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "blake3",
+ "chacha20poly1305",
+ "data-encoding",
+ "ed25519-dalek",
+ "getrandom 0.4.3",
+ "hex",
+ "hkdf",
+ "hmac",
+ "hpke",
+ "proptest",
+ "serde",
+ "sha2 0.11.0",
+ "subtle",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
+name = "mortise-macos"
+version = "0.1.0"
+dependencies = [
+ "core-foundation",
+ "core-foundation-sys",
+ "security-framework-sys",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
+name = "mortise-proxy"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "mortise-relay"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "blake3",
+ "http-body-util",
+ "mortise-crypto",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "mortise-sync"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "data-encoding",
+ "mortise-crypto",
+ "mortise-relay",
+ "mortise-vault",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
+name = "mortise-vault"
+version = "0.1.0"
+dependencies = [
+ "csv",
+ "mortise-crypto",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4665,117 +4776,6 @@ dependencies = [
  "memchr",
  "nom",
  "petgraph",
-]
-
-[[package]]
-name = "truepass-app"
-version = "0.1.0"
-dependencies = [
- "hmac",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "thiserror 2.0.21",
- "truepass-crypto",
- "truepass-macos",
- "truepass-proxy",
- "truepass-sync",
- "truepass-vault",
- "zeroize",
-]
-
-[[package]]
-name = "truepass-crypto"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "blake3",
- "chacha20poly1305",
- "data-encoding",
- "ed25519-dalek",
- "getrandom 0.4.3",
- "hex",
- "hkdf",
- "hmac",
- "hpke",
- "proptest",
- "serde",
- "sha2 0.11.0",
- "subtle",
- "thiserror 2.0.21",
- "zeroize",
-]
-
-[[package]]
-name = "truepass-macos"
-version = "0.1.0"
-dependencies = [
- "core-foundation",
- "core-foundation-sys",
- "security-framework-sys",
- "thiserror 2.0.21",
- "zeroize",
-]
-
-[[package]]
-name = "truepass-proxy"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "truepass-relay"
-version = "0.1.0"
-dependencies = [
- "axum",
- "blake3",
- "http-body-util",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "truepass-crypto",
-]
-
-[[package]]
-name = "truepass-sync"
-version = "0.1.0"
-dependencies = [
- "axum",
- "data-encoding",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "truepass-crypto",
- "truepass-relay",
- "truepass-vault",
- "ureq",
-]
-
-[[package]]
-name = "truepass-vault"
-version = "0.1.0"
-dependencies = [
- "csv",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "truepass-crypto",
- "zeroize",
 ]
 
 [[package]]

@@ -1,0 +1,17 @@
+[package]
+name = "mortise-macos"
+version = "0.1.0"
+description = "macOS keychain integration for Mortise. The only crate here that uses unsafe."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+security-framework-sys = "2.14"
+
+[dependencies]
+thiserror = "2"
+zeroize = "1"

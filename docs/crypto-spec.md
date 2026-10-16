@@ -1,4 +1,4 @@
-# TruePassword — Cryptographic Specification v1
+# Mortise — Cryptographic Specification v1
 
 Status: draft, M0. Read [threat-model.md](threat-model.md) first; every choice
 here traces to an adversary listed there.
@@ -146,7 +146,7 @@ against a process that is still running. Full sign-out drops `META_KEY` too.
 On macOS, SQLCipher means either vendoring OpenSSL into the binary or requiring
 brew's OpenSSL on every build machine. Both work against the explicit "keep it
 light" product goal, and both add a second crypto stack to audit beside the one
-in `truepass-crypto`.
+in `mortise-crypto`.
 
 What SQLCipher actually buys is metadata-at-rest encryption, and the table above
 already provides that through the audited XChaCha20-Poly1305 path.
@@ -261,7 +261,7 @@ concatenated with other text. The Tier-2 pattern pass is the backstop.
 
 ## 9. Implementation rules
 
-- All crypto in `truepass-crypto`, a standalone crate with **no** dependency on
+- All crypto in `mortise-crypto`, a standalone crate with **no** dependency on
   Tauri, the UI, or the network. It must be testable in isolation.
 - Known-answer tests for every derivation in §2.1. Fixed vectors, committed.
 - Property tests: seal/open round-trips, AAD tampering is rejected, signature

@@ -1,0 +1,26 @@
+[package]
+name = "mortise-sync"
+version = "0.1.0"
+description = "Client side of Mortise sync. Moves signed ciphertext to and from a relay."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+mortise-crypto = { path = "../mortise-crypto" }
+mortise-vault = { path = "../mortise-vault" }
+# Protocol and request signing only — no axum, no tokio in the client.
+mortise-relay = { path = "../mortise-relay", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+data-encoding = "2"
+ureq = "3"
+
+[dev-dependencies]
+mortise-relay = { path = "../mortise-relay", features = ["server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tempfile = "3"
+axum = "0.8.9"
+serde_json = "1"
