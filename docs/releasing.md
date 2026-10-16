@@ -32,7 +32,27 @@ Note the certificate type: **Developer ID Application**, not "Mac App Store" or
 the App Store, and picking the wrong one is a common and confusing waste of an
 afternoon.
 
-## Building
+## Cutting a release
+
+Push a tag and the `Release` workflow does the rest on a clean macOS runner —
+tests, clippy and `svelte-check`, then the bundle, then a GitHub release with
+the `.dmg` and a `SHA256SUMS`:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+The tag must match `version` in `crates/mortise-app/tauri.conf.json` or the
+workflow stops before building. Run the workflow manually from the Actions tab
+to build without publishing.
+
+Signing uses repository secrets — `APPLE_SIGNING_IDENTITY`, `APPLE_CERTIFICATE`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
+Until they are set the workflow still succeeds and publishes an **unsigned**
+build, saying so in the release notes. That is deliberate: a silent unsigned
+release is worse than a loud one.
+
+## Building locally
 
 ```bash
 cargo tauri build

@@ -1,0 +1,136 @@
+name: Release
+
+# Cut a release by pushing a tag:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Everything below runs on a clean macOS runner, so a release cannot quietly
+# depend on something that only exists on one developer's Mac.
+on:
+  push:
+    tags: ["v*"]
+  # Builds and uploads the bundle as a workflow artifact without publishing a
+  # release, for checking the pipeline works before committing to a tag.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # The tag is what people will quote when they report a bug, so it has to
+      # name the version the binary actually reports. A v0.2.0 tag shipping a
+      # 0.1.0 app is the kind of mistake nobody notices until it matters.
+      - name: Tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          app=$(python3 -c "import json;print(json.load(open('crates/mortise-app/tauri.conf.json'))['version'])")
+          tag=${GITHUB_REF_NAME#v}
+          if [ "$app" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match tauri.conf.json version $app"
+            exit 1
+          fi
+          echo "version $app"
+
+      - run: npm --prefix ui ci
+
+      # A password manager that ships a release its own tests never ran against
+      # is not worth the convenience of a faster pipeline.
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: npm --prefix ui run check
+
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --locked --version "^2.0"
+
+      # Signing is wired but inert until the secrets exist. Tauri reads these
+      # from the environment; absent, it produces an unsigned bundle rather
+      # than failing, which is the honest state of this project today.
+      - name: Build
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: cargo tauri build
+
+      - name: Say whether this build was signed
+        id: signed
+        run: |
+          app="target/release/bundle/macos/Mortise.app"
+          if codesign --verify --deep --strict "$app" 2>/dev/null; then
+            echo "signed=yes" >> "$GITHUB_OUTPUT"
+            codesign -dv "$app" 2>&1 | head -5
+          else
+            echo "signed=no" >> "$GITHUB_OUTPUT"
+            echo "unsigned build"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mortise-macos
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/*.app
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ steps.signed.outputs.signed }}
+        run: |
+          notes=$(mktemp)
+          if [ "$SIGNED" = "no" ]; then
+            cat >> "$notes" <<'EOF'
+          ## This build is not signed
+
+          macOS will refuse to open it on first launch. That is Gatekeeper doing
+          its job, not a fault in the download — but it does mean you are taking
+          this binary on trust, which is a poor thing to ask of a password
+          manager. Building from source is the better option until there is a
+          signed build.
+
+          To open it anyway: right-click the app, choose Open, then confirm.
+
+          EOF
+          fi
+          cat >> "$notes" <<'EOF'
+          ## Verify what you downloaded
+
+          Checksums are attached as `SHA256SUMS`. Compare before opening:
+
+          ```
+          shasum -a 256 -c SHA256SUMS
+          ```
+          EOF
+          cd target/release/bundle
+          shasum -a 256 dmg/*.dmg > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$notes" \
+            dmg/*.dmg SHA256SUMS
