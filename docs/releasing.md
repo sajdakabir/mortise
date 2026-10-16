@@ -97,5 +97,6 @@ inherits if they get code execution in the process.
   compromised Developer ID. Not set up yet.
 - **Reproducible builds.** Would let someone verify a release binary matches this
   source. Worth doing for a password manager; not attempted yet.
-- **The icon is placeholder art.** Generated, not designed. Replace before any
-  public release.
+- **The build is not reproducible or signed in CI.** Releases are cut by hand
+  from a developer's Mac, which means the person cutting them is part of the
+  trusted set. Narrowing that is the point of the two items above.
