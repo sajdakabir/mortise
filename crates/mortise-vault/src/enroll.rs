@@ -113,8 +113,11 @@ impl Vault {
     /// Epochs this device holds a key for.
     pub fn known_epochs(&self) -> Result<Vec<u32>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT epoch FROM vault_key ORDER BY epoch")?;
-        let rows = stmt.query_map([], |r| r.get::<_, u32>(0))?;
+        let mut stmt =
+            conn.prepare("SELECT epoch FROM vault_key WHERE vault_id = ?1 ORDER BY epoch")?;
+        let rows = stmt.query_map(params![self.meta().vault_id.as_bytes().as_slice()], |r| {
+            r.get::<_, u32>(0)
+        })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
@@ -189,18 +192,26 @@ pub fn join(
     }
 
     conn.execute(
-        "INSERT INTO vault_meta
-           (id, vault_id, salt, argon2_m_kib, argon2_t, argon2_p, epoch,
-            schema_version, created_at_ms)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO account
+           (id, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
         params![
-            enrollment.vault_id.as_slice(),
             enrollment.salt.as_slice(),
             enrollment.params.m_cost_kib,
             enrollment.params.t_cost,
             enrollment.params.p_cost,
-            enrollment.epoch,
             schema::SCHEMA_VERSION,
+            enrollment.created_at_ms as i64,
+        ],
+    )?;
+
+    conn.execute(
+        "INSERT INTO vault (vault_id, name, kind, epoch, created_at_ms)
+         VALUES (?1, ?2, 0, ?3, ?4)",
+        params![
+            enrollment.vault_id.as_slice(),
+            crate::vault::DEFAULT_VAULT_NAME,
+            enrollment.epoch,
             enrollment.created_at_ms as i64,
         ],
     )?;
@@ -217,8 +228,8 @@ pub fn join(
     )?;
     for (epoch, wrapped) in &enrollment.vault_keys {
         conn.execute(
-            "INSERT INTO vault_key (epoch, wrapped) VALUES (?1, ?2)",
-            params![epoch, wrapped],
+            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)",
+            params![enrollment.vault_id.as_slice(), epoch, wrapped],
         )?;
     }
     for (id, signing_key) in &enrollment.known_devices {
