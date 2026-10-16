@@ -368,3 +368,108 @@ pub fn is_initialized(conn: &Connection) -> Result<bool> {
     )?;
     Ok(count == 1)
 }
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    /// A database at v4: everything up to and including SCHEMA_V4, with the
+    /// rows a real vault would hold.
+    fn v4_with_data() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute_batch(SCHEMA_V2).unwrap();
+        conn.execute_batch(SCHEMA_V3).unwrap();
+        conn.execute_batch(SCHEMA_V4).unwrap();
+        conn.execute(
+            "INSERT INTO vault_meta
+               (id, vault_id, salt, argon2_m_kib, argon2_t, argon2_p, epoch,
+                schema_version, created_at_ms)
+             VALUES (1, x'0102030405060708090a0b0c0d0e0f10', x'aa', 65536, 3, 4, 7, 4, 1700000000000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO vault_key (epoch, wrapped) VALUES (7, x'bb')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO item (item_id, version, epoch, kind, sealed_meta,
+                               sealed_item_key, ciphertext, created_at_ms, updated_at_ms)
+             VALUES (x'99', 1, 7, 1, x'01', x'02', x'03', 1700000000000, 1700000000000)",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    /// The migration that runs on a real user's vault, which is the only one
+    /// whose failure costs someone their passwords. Checked here because a
+    /// half-applied v5 is exactly how a vault becomes unopenable by the code
+    /// that shipped with it.
+    #[test]
+    fn v4_migrates_to_v5_without_losing_anything() {
+        let conn = v4_with_data();
+        assert_eq!(read_version(&conn).unwrap(), 4);
+
+        migrate(&conn).unwrap();
+
+        assert_eq!(read_version(&conn).unwrap(), SCHEMA_VERSION);
+
+        // vault_meta's two halves landed in the right tables.
+        let (salt, m, t, p): (Vec<u8>, u32, u32, u32) = conn
+            .query_row(
+                "SELECT salt, argon2_m_kib, argon2_t, argon2_p FROM account WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!((salt, m, t, p), (vec![0xaa], 65536, 3, 4));
+
+        let (vault_id, epoch): (Vec<u8>, u32) = conn
+            .query_row("SELECT vault_id, epoch FROM vault", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(epoch, 7);
+        // Pinned rather than merely compared to itself: if the migration left
+        // every vault_id empty, the two assertions below would both pass
+        // against x'' and prove nothing.
+        assert_eq!(
+            vault_id,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            "the vault did not keep the id vault_meta carried"
+        );
+
+        // The key kept its epoch and gained the id of the vault it belongs to.
+        let (key_vault, key_epoch): (Vec<u8>, u32) = conn
+            .query_row("SELECT vault_id, epoch FROM vault_key", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(key_epoch, 7);
+        assert_eq!(key_vault, vault_id, "the key was orphaned from its vault");
+
+        // Items were adopted by the vault rather than left with an empty id.
+        let item_vault: Vec<u8> = conn
+            .query_row("SELECT vault_id FROM item", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(item_vault, vault_id, "the item was orphaned from its vault");
+    }
+
+    #[test]
+    fn migrating_an_already_current_vault_does_nothing() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO account
+               (id, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms)
+             VALUES (1, x'aa', 65536, 3, 4, ?1, 1700000000000)",
+            [SCHEMA_VERSION],
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(read_version(&conn).unwrap(), SCHEMA_VERSION);
+    }
+}
