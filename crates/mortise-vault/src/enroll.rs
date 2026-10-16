@@ -113,8 +113,11 @@ impl Vault {
     /// Epochs this device holds a key for.
     pub fn known_epochs(&self) -> Result<Vec<u32>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT epoch FROM vault_key ORDER BY epoch")?;
-        let rows = stmt.query_map([], |r| r.get::<_, u32>(0))?;
+        let mut stmt =
+            conn.prepare("SELECT epoch FROM vault_key WHERE vault_id = ?1 ORDER BY epoch")?;
+        let rows = stmt.query_map(params![self.meta().vault_id.as_bytes().as_slice()], |r| {
+            r.get::<_, u32>(0)
+        })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
@@ -225,8 +228,8 @@ pub fn join(
     )?;
     for (epoch, wrapped) in &enrollment.vault_keys {
         conn.execute(
-            "INSERT INTO vault_key (epoch, wrapped) VALUES (?1, ?2)",
-            params![epoch, wrapped],
+            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)",
+            params![enrollment.vault_id.as_slice(), epoch, wrapped],
         )?;
     }
     for (id, signing_key) in &enrollment.known_devices {

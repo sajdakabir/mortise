@@ -174,8 +174,9 @@ impl Vault {
             params![device.id().as_bytes().as_slice(), device.wrap(&muk)?],
         )?;
         conn.execute(
-            "INSERT INTO vault_key (epoch, wrapped) VALUES (?1, ?2)",
+            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)",
             params![
+                vault_id.as_bytes().as_slice(),
                 vault_key.epoch().value(),
                 vault_key.wrap_for(device.public(), vault_id)?.to_bytes()
             ],
@@ -279,9 +280,10 @@ impl Vault {
         {
             let mut stmt = self
                 .conn
-                .prepare("SELECT epoch, wrapped FROM vault_key ORDER BY epoch")?;
-            let rows =
-                stmt.query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
+                .prepare("SELECT epoch, wrapped FROM vault_key WHERE vault_id = ?1 ORDER BY epoch")?;
+            let rows = stmt.query_map(params![self.meta.vault_id.as_bytes().as_slice()], |r| {
+                Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))
+            })?;
             for row in rows {
                 let (epoch, wrapped) = row?;
                 let wrapped = WrappedVaultKey::from_bytes(&wrapped)?;
@@ -353,7 +355,7 @@ impl Vault {
         }
         self.conn.execute(
             "UPDATE vault SET epoch = ?1 WHERE vault_id = ?2",
-            params![epoch.value()],
+            params![epoch.value(), self.meta.vault_id.as_bytes().as_slice()],
         )?;
         self.meta.epoch = epoch;
         Ok(())
@@ -364,9 +366,13 @@ impl Vault {
         let device = self.device()?;
         let wrapped = key.wrap_for(device.public(), self.meta.vault_id)?;
         self.conn.execute(
-            "INSERT INTO vault_key (epoch, wrapped) VALUES (?1, ?2)
-             ON CONFLICT (epoch) DO UPDATE SET wrapped = ?2",
-            params![key.epoch().value(), wrapped.to_bytes()],
+            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)
+             ON CONFLICT (vault_id, epoch) DO UPDATE SET wrapped = ?3",
+            params![
+                self.meta.vault_id.as_bytes().as_slice(),
+                key.epoch().value(),
+                wrapped.to_bytes()
+            ],
         )?;
         if let Some(unlocked) = self.unlocked.as_mut() {
             unlocked.vault_keys.insert(key.epoch(), key);
