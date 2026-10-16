@@ -189,8 +189,17 @@ pub fn parse<R: Read>(reader: R) -> Result<(Vec<(ItemMeta, ItemPayload)>, ParseR
         // Bitwarden and 1Password mark cards and identities in a type column.
         // Importing those as logins would put a card number in a password
         // field, so they are counted and skipped until there is real support.
+        //
+        // API keys and env secrets are a different case: both are a single
+        // opaque string, which is exactly what the password column already
+        // holds, so they map across without inventing anything.
         if let Some(k) = kind.as_deref()
-            && !matches!(k, "login" | "note" | "securenote" | "secure note" | "1")
+            && !matches!(
+                k,
+                "login" | "note" | "securenote" | "secure note" | "1"
+                    | "apikey" | "api key" | "api_key" | "token"
+                    | "env" | "envsecret" | "env secret" | "secret"
+            )
         {
             report.unsupported += 1;
             continue;
@@ -208,13 +217,19 @@ pub fn parse<R: Read>(reader: R) -> Result<(Vec<(ItemMeta, ItemPayload)>, ParseR
 
         // A note row has no password, so importing it as a login would create
         // an item whose only content sat in a field the UI hides by default.
-        let payload = match password {
-            Some(password) => ItemPayload::Login {
+        let payload = match (kind.as_deref(), password) {
+            (Some("apikey" | "api key" | "api_key" | "token"), Some(secret)) => {
+                ItemPayload::ApiKey { key: secret, notes }
+            }
+            (Some("env" | "envsecret" | "env secret" | "secret"), Some(secret)) => {
+                ItemPayload::EnvSecret { value: secret }
+            }
+            (_, Some(password)) => ItemPayload::Login {
                 password,
                 totp_seed: cell(&row, i_totp),
                 notes,
             },
-            None => ItemPayload::SecureNote {
+            (_, None) => ItemPayload::SecureNote {
                 body: notes.unwrap_or_default(),
             },
         };
@@ -250,6 +265,33 @@ mod tests {
             ItemPayload::Login { password, .. } => password,
             _ => panic!("expected a login"),
         }
+    }
+
+    #[test]
+    fn a_type_column_can_name_an_api_key_or_an_env_secret() {
+        let (items, report) = parse_str(
+            "name,username,password,type\n\
+             Stripe,,placeholder-key-abc,apikey\n\
+             DATABASE_URL,,postgres://localhost/acme,env\n",
+        );
+        assert_eq!(report.parsed, 2);
+        assert_eq!(report.unsupported, 0);
+        assert!(matches!(&items[0].1, ItemPayload::ApiKey { key, .. } if key == "placeholder-key-abc"));
+        assert!(
+            matches!(&items[1].1, ItemPayload::EnvSecret { value } if value == "postgres://localhost/acme")
+        );
+    }
+
+    /// Cards carry four fields no CSV column here holds, so they stay skipped
+    /// rather than being flattened into a password.
+    #[test]
+    fn a_card_row_is_still_counted_and_skipped() {
+        let (items, report) = parse_str(
+            "name,username,password,type\n\
+             Visa,,4111-not-a-card,card\n",
+        );
+        assert!(items.is_empty());
+        assert_eq!(report.unsupported, 1);
     }
 
     #[test]

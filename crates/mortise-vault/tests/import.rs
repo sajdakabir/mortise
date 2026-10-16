@@ -96,3 +96,23 @@ fn imported_logins_are_findable_by_origin() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].meta.title, "GitHub");
 }
+
+/// The sample CSV at the repository root is what a new user is pointed at to
+/// fill an empty vault. It is checked here so it cannot drift out of step with
+/// the parser and hand someone a file that silently imports nothing.
+#[test]
+fn the_sample_csv_parses() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../sample-data.csv");
+    let file = std::fs::File::open(path).expect("sample-data.csv is missing");
+    let (items, report) = import::parse(file).expect("sample-data.csv should parse");
+
+    assert_eq!(report.unsupported, 0, "every row should be a kind we support");
+    assert_eq!(report.empty, 0, "no row should be dropped as empty");
+    assert_eq!(items.len(), report.parsed);
+
+    let count = |f: fn(&ItemPayload) -> bool| items.iter().filter(|(_, p)| f(p)).count();
+    assert_eq!(count(|p| matches!(p, ItemPayload::Login { .. })), 6);
+    assert_eq!(count(|p| matches!(p, ItemPayload::ApiKey { .. })), 4);
+    assert_eq!(count(|p| matches!(p, ItemPayload::EnvSecret { .. })), 10);
+    assert_eq!(count(|p| matches!(p, ItemPayload::SecureNote { .. })), 1);
+}
