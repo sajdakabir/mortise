@@ -269,6 +269,205 @@ pub fn save_item(
     })
 }
 
+/// One project and what is in it.
+#[derive(serde::Serialize)]
+pub struct ProjectSummary {
+    /// The project's name, which is also its identity.
+    pub name: String,
+    /// Environments that have at least one secret, in a stable order.
+    pub environments: Vec<String>,
+    /// Secrets across every environment.
+    pub secret_count: u32,
+}
+
+/// Projects, derived from the items rather than stored separately.
+///
+/// A project exists exactly as long as something is in it. There is no create
+/// step to get out of step with reality and no empty project to tidy up.
+#[tauri::command]
+pub fn projects(state: State<'_, AppState>) -> CmdResult<Vec<ProjectSummary>> {
+    state.touch();
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+        let mut found: std::collections::BTreeMap<String, (std::collections::BTreeSet<String>, u32)> =
+            std::collections::BTreeMap::new();
+        for row in v.search("")? {
+            let Some(project) = row.meta.project.clone() else {
+                continue;
+            };
+            let entry = found.entry(project).or_default();
+            if let Some(env) = row.meta.environment.clone() {
+                entry.0.insert(env);
+            }
+            entry.1 += 1;
+        }
+        Ok(found
+            .into_iter()
+            .map(|(name, (environments, secret_count))| ProjectSummary {
+                name,
+                environments: environments.into_iter().collect(),
+                secret_count,
+            })
+            .collect())
+    })
+}
+
+/// What a pasted `.env` did.
+#[derive(serde::Serialize)]
+pub struct EnvImportReport {
+    /// Variables written as new items.
+    pub added: u32,
+    /// Variables that replaced an existing value in this environment.
+    pub updated: u32,
+    /// Variables whose value was already exactly what is stored.
+    pub unchanged: u32,
+    /// Lines that were blank or a comment.
+    pub skipped: u32,
+    /// Lines that were not a `KEY=value` and were left alone.
+    pub unreadable: u32,
+    /// Keys defined more than once in the pasted text; the last won.
+    pub duplicates: Vec<String>,
+}
+
+/// Write a pasted `.env` into a project's environment.
+///
+/// Updates in place rather than appending. Pasting a file twice is how people
+/// check they pasted it, and a vault that doubled every variable each time
+/// would be unusable within a day.
+#[tauri::command]
+pub fn import_env(
+    state: State<'_, AppState>,
+    project: String,
+    environment: String,
+    text: String,
+) -> CmdResult<EnvImportReport> {
+    use mortise_vault::envfile;
+
+    state.touch();
+    let project = project.trim().to_string();
+    let environment = environment.trim().to_string();
+    if project.is_empty() || environment.is_empty() {
+        return Err(CmdError::bad_request(
+            "A project and an environment are both needed.",
+        ));
+    }
+
+    let (vars, parsed) = envfile::parse(&text);
+    if vars.is_empty() {
+        return Err(CmdError::bad_request(
+            "Nothing in that looked like KEY=value.",
+        ));
+    }
+
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+
+        // Existing secrets in this exact environment, by name.
+        let mut here: std::collections::HashMap<String, mortise_crypto::item::ItemId> =
+            std::collections::HashMap::new();
+        for row in v.search("")? {
+            if row.kind == mortise_vault::ItemKind::EnvSecret
+                && row.meta.project.as_deref() == Some(project.as_str())
+                && row.meta.environment.as_deref() == Some(environment.as_str())
+            {
+                here.insert(row.meta.title.clone(), row.id);
+            }
+        }
+
+        let mut report = EnvImportReport {
+            added: 0,
+            updated: 0,
+            unchanged: 0,
+            skipped: parsed.skipped as u32,
+            unreadable: parsed.unreadable as u32,
+            duplicates: parsed.duplicates,
+        };
+
+        for var in vars {
+            let meta = mortise_vault::ItemMeta {
+                title: var.key.clone(),
+                urls: Vec::new(),
+                username: None,
+                folder: Some(format!("{project}/{environment}")),
+                project: Some(project.clone()),
+                environment: Some(environment.clone()),
+                tags: Vec::new(),
+            };
+            let payload = mortise_vault::ItemPayload::EnvSecret {
+                value: var.value.clone(),
+            };
+
+            match here.get(&var.key) {
+                Some(&id) => {
+                    // Comparing before writing keeps the change log, and so
+                    // the sync traffic, to what actually changed.
+                    let same = matches!(
+                        v.reveal(id)?,
+                        mortise_vault::ItemPayload::EnvSecret { ref value } if *value == var.value
+                    );
+                    if same {
+                        report.unchanged += 1;
+                    } else {
+                        v.update_item(id, &meta, &payload)?;
+                        report.updated += 1;
+                    }
+                }
+                None => {
+                    v.create_item(&meta, &payload)?;
+                    report.added += 1;
+                }
+            }
+        }
+
+        Ok(report)
+    })
+}
+
+/// A project's environment as `.env` text.
+#[tauri::command]
+pub fn export_env(
+    state: State<'_, AppState>,
+    project: String,
+    environment: String,
+) -> CmdResult<String> {
+    use mortise_vault::envfile;
+
+    state.touch();
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+
+        let mut rows: Vec<_> = v
+            .search("")?
+            .into_iter()
+            .filter(|row| {
+                row.kind == mortise_vault::ItemKind::EnvSecret
+                    && row.meta.project.as_deref() == Some(project.as_str())
+                    && row.meta.environment.as_deref() == Some(environment.as_str())
+            })
+            .collect();
+        // Alphabetical, so the file is diffable against the last time someone
+        // exported it rather than ordered by whenever each was created.
+        rows.sort_by(|a, b| a.meta.title.cmp(&b.meta.title));
+
+        let mut vars = Vec::new();
+        for row in rows {
+            // Bound, then matched by reference: ItemPayload is ZeroizeOnDrop,
+            // so a field cannot be moved out of a temporary.
+            let payload = v.reveal(row.id)?;
+            if let mortise_vault::ItemPayload::EnvSecret { value } = &payload {
+                vars.push(envfile::EnvVar {
+                    key: row.meta.title,
+                    value: value.clone(),
+                });
+            }
+        }
+        if vars.is_empty() {
+            return Err(CmdError::bad_request("No secrets in that environment."));
+        }
+        Ok(envfile::format(&vars))
+    })
+}
+
 /// Import a CSV export from another password manager.
 ///
 /// Takes a path rather than the file's contents on purpose. The webview is
