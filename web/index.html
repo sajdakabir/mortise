@@ -24,6 +24,7 @@
       <a href="#sharing">Sharing</a>
       <a href="#limits">Limits</a>
       <a href="https://github.com/sajdakabir/mortise">GitHub</a>
+      <a class="nav-dl" href="https://github.com/sajdakabir/mortise/releases/latest">Download</a>
     </nav>
   </div>
 </header>
@@ -38,9 +39,16 @@
       has no key for &mdash; including when we are the ones running it.
     </p>
     <div class="cta">
-      <a class="btn" href="https://github.com/sajdakabir/mortise">Read the source</a>
+      <a class="btn" href="https://github.com/sajdakabir/mortise/releases/latest">Download for Mac</a>
+      <a class="btn ghost" href="https://github.com/sajdakabir/mortise">Read the source</a>
       <a class="btn ghost" href="https://github.com/sajdakabir/mortise/blob/master/docs/threat-model.md">Threat model &rarr;</a>
     </div>
+    <p class="cta-note">
+      The build is not signed yet, so macOS will refuse it on first open &mdash;
+      right-click, Open, confirm. Checksums are on
+      <a href="https://github.com/sajdakabir/mortise/releases">every release</a>,
+      and building from source stays the better option until that changes.
+    </p>
 
   </div>
 </section>
@@ -317,9 +325,10 @@ typical manager  &lt;all_urls&gt;    on install
       <h2>Not shipped yet.</h2>
       <p class="lede">
         The vault, sync, the browser extension and import from other managers
-        all work. There is no signed build to download, which means no Touch ID
-        and no Chrome Web Store listing until there is. Everything is in the
-        open while it gets there.
+        all work, and every tagged build is published with its checksums. None
+        of them is signed yet, which means Gatekeeper complains, there is no
+        Touch ID, and no Chrome Web Store listing until that changes.
+        Everything is in the open while it gets there.
       </p>
       <div class="cta">
         <a class="btn" href="https://github.com/sajdakabir/mortise">Follow on GitHub</a>
