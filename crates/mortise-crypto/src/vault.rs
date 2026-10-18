@@ -110,6 +110,28 @@ impl VaultKey {
     /// Seal this vault key to a member device.
     pub fn wrap_for(&self, recipient: &DevicePublic, vault: VaultId) -> Result<WrappedVaultKey> {
         let aad = wrap_aad(vault, self.epoch);
+        // NOTE: Base mode carries no sender identity.
+        //
+        // A successful `unwrap_for` therefore proves only that somebody who
+        // knew the recipient's public key produced this blob — not that an
+        // admin did, and not that the key inside is the one the vault agreed
+        // on. Nothing else closes that: `WrappedVaultKey` is unsigned, the
+        // AAD binds only vault and epoch (both attacker-chosen when the
+        // attacker is minting), and the signed `AclOp::RotateKey` commits to
+        // a counter rather than to key material.
+        //
+        // So a party who can write where a device reads its wrapped keys — a
+        // hostile relay, or a revoked member who already synced the ACL and
+        // holds every remaining device's public key — can substitute a vault
+        // key of their choosing and have it accepted, defeating the forward
+        // secrecy revocation is supposed to give.
+        //
+        // Fixing it means HPKE Auth mode here and in `unwrap_for`, with the
+        // authenticated sender required to be an admin at that epoch, or a
+        // BLAKE3 commitment to the key inside the signed RotateKey entry.
+        // Either changes the wrapped-key format, so it is a versioned change
+        // and an amendment to crypto-spec §3 and §6 — which specify this
+        // construction and are themselves unsound here.
         let (encapped, ciphertext) = hpke::single_shot_seal::<HpkeAead, HpkeKdf, Kem>(
             &OpModeS::Base,
             &recipient.kex_public()?,

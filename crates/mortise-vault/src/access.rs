@@ -25,6 +25,20 @@ use crate::error::{Error, Result};
 use crate::vault::{Vault, now_ms};
 
 /// What a revocation did, and what it could not undo.
+///
+/// # This is local only
+///
+/// **A revocation currently takes effect on the device that issued it and
+/// nowhere else.** The sync layer carries changes, not ACL entries —
+/// [`Vault::unpushed_acl_entries`] has no caller outside tests — so peers
+/// never learn of the removal, never see the key rotation, and go on
+/// accepting the removed device's changes and writing under the epoch whose
+/// key it still holds. The relay also has no device-removal endpoint, so it
+/// keeps serving that device every change the others push.
+///
+/// The fields below therefore describe an intent rather than a completed
+/// state, and `rewrapped_for` counts keys that were sealed and discarded.
+/// Sharing must not ship until ACL entries sync.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Revocation {
     /// The epoch now in force.
@@ -378,8 +392,18 @@ impl Vault {
             if recipient.id() == self.device()?.id() {
                 continue; // already stored above
             }
-            // The sealed copies travel with the ACL log; a device that is
-            // offline picks them up on its next sync.
+            // Computed and then dropped, because there is nowhere to put it.
+            //
+            // The intent was that these sealed copies travel with the ACL log
+            // and an offline device collects them on its next sync. That
+            // mechanism does not exist: the sync layer carries changes only,
+            // and `unpushed_acl_entries` below has no caller outside tests.
+            // Until it does, a revocation takes effect on this device and
+            // nowhere else — see the warning on `Revocation`.
+            //
+            // The wrap is still performed so that a failure to seal for a
+            // remaining member surfaces here rather than at the moment the
+            // transport is finally wired up.
             let _ = self
                 .current_vault_key()?
                 .wrap_for(recipient, self.meta().vault_id)?;
