@@ -511,6 +511,8 @@ pub fn save_capture(state: State<'_, AppState>, title: Option<String>) -> CmdRes
         username: capture.username.clone(),
         folder: None,
         tags: Vec::new(),
+        project: None,
+        environment: None,
     };
     let payload = mortise_vault::ItemPayload::Login {
         password: capture.password.to_string(),

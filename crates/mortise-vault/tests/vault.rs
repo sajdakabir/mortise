@@ -53,6 +53,8 @@ fn login(title: &str) -> (ItemMeta, ItemPayload) {
             username: Some("octocat".into()),
             folder: Some("Work".into()),
             tags: vec!["devtools-zqx".into()],
+            project: None,
+            environment: None,
         },
         ItemPayload::Login {
             password: "s3cr3t-p4ssw0rd-value".into(),
