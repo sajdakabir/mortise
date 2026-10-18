@@ -56,6 +56,10 @@ pub struct ItemRow {
     pub urls: Vec<String>,
     /// Containing folder.
     pub folder: Option<String>,
+    /// Project, for the developer-secrets workspace.
+    pub project: Option<String>,
+    /// Environment within that project.
+    pub environment: Option<String>,
     /// Tags.
     pub tags: Vec<String>,
     /// Last modified, milliseconds since the Unix epoch.
@@ -71,6 +75,8 @@ impl From<ItemSummary> for ItemRow {
             username: s.meta.username,
             urls: s.meta.urls,
             folder: s.meta.folder,
+            project: s.meta.project,
+            environment: s.meta.environment,
             tags: s.meta.tags,
             updated_at_ms: s.updated_at_ms,
         }
@@ -144,6 +150,12 @@ pub struct MetaInput {
     /// Tags.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Project this belongs to, for the developer-secrets layer.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Environment within that project.
+    #[serde(default)]
+    pub environment: Option<String>,
 }
 
 impl From<MetaInput> for ItemMeta {
@@ -157,6 +169,8 @@ impl From<MetaInput> for ItemMeta {
                 .collect(),
             username: m.username.filter(|u| !u.trim().is_empty()),
             folder: m.folder.filter(|f| !f.trim().is_empty()),
+            project: m.project.filter(|p| !p.trim().is_empty()),
+            environment: m.environment.filter(|e| !e.trim().is_empty()),
             tags: m
                 .tags
                 .into_iter()

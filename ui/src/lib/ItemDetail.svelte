@@ -137,8 +137,20 @@
       {#if hasSecret}
         <div class="field-row">
           <span class="k">{secretLabel}</span>
-          <span class="v mono secret" class:masked={!shown}>
-            {shown && payload ? secretText : "••••••••••••••••"}
+          <!-- A revealed value that happens to be empty rendered as a blank
+               cell: the button said Hide, so it was revealed, but nothing
+               distinguished an empty secret from something having gone wrong.
+               Said in words, and in the muted style, so it cannot be mistaken
+               for a secret whose text is literally "(empty)". -->
+          <span class="v mono secret" class:masked={!shown}
+            class:none={shown && payload !== null && secretText === ""}>
+            {#if !shown || !payload}
+              ••••••••••••••••
+            {:else if secretText === ""}
+              (empty)
+            {:else}
+              {secretText}
+            {/if}
           </span>
           <div class="row">
             <button class="ghost tiny"
@@ -240,6 +252,7 @@
   .k { font-size: 11.5px; color: var(--text-dim); }
   .v { overflow-wrap: anywhere; font-size: 13px; }
   /* Dots want to be loose and even; a real secret wants to be readable. */
+  .secret.none { color: var(--text-faint); font-family: var(--font); }
   .secret.masked { letter-spacing: 0.12em; color: var(--text-dim); }
   .tiny { font-size: 11px; padding: 3px 8px; }
 

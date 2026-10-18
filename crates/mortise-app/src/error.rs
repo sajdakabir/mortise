@@ -59,6 +59,10 @@ impl From<mortise_vault::Error> for CmdError {
                 "schema_too_new",
                 "This vault was created by a newer version of Mortise.",
             ),
+            // Written to be read by a person: "a project with that name
+            // already exists" is the whole answer, and replacing it with
+            // "something went wrong" leaves someone retyping the same name.
+            E::Invalid(message) => Self::new("invalid", message),
             // Everything below is either a bug or a damaged file. The UI gets a
             // generic message; the detail goes to the log, not the webview.
             other => {

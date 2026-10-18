@@ -66,6 +66,8 @@ fn blank_metadata_fields_are_dropped() {
         username: Some("   ".into()),
         folder: Some("".into()),
         tags: vec!["dev".into(), " ".into()],
+        project: None,
+        environment: None,
     }
     .into();
 
@@ -84,6 +86,8 @@ fn populated_metadata_is_preserved() {
         username: Some("octocat".into()),
         folder: Some("Work".into()),
         tags: vec!["dev".into(), "ci".into()],
+        project: None,
+        environment: None,
     }
     .into();
 

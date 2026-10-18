@@ -1,0 +1,14 @@
+# Run dev binaries through a script that code-signs them first.
+#
+# The keychain identifies an unsigned binary by its code-directory hash, which
+# changes on every rebuild, so the account key's ACL stops matching and macOS
+# asks for the login password again. Signing with a stable identity fixes that.
+# See scripts/dev-sign-and-run.sh for the whole story and the one-time setup.
+#
+# The script is a no-op without the certificate, so this costs a fresh
+# checkout nothing.
+[target.aarch64-apple-darwin]
+runner = "scripts/dev-sign-and-run.sh"
+
+[target.x86_64-apple-darwin]
+runner = "scripts/dev-sign-and-run.sh"

@@ -7,6 +7,8 @@ export interface ItemRow {
   username: string | null;
   urls: string[];
   folder: string | null;
+  project: string | null;
+  environment: string | null;
   tags: string[];
   updated_at_ms: number;
 }
@@ -139,4 +141,23 @@ export interface SyncReport {
   pulled: number;
   applied: number;
   rejected: number;
+}
+
+/// One project and what is in it, as `projects` returns it.
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  description: string;
+  environments: string[];
+  secret_count: number;
+}
+
+/// What a pasted `.env` did.
+export interface EnvImportReport {
+  added: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  unreadable: number;
+  duplicates: string[];
 }

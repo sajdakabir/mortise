@@ -15,10 +15,12 @@ pub mod access;
 pub mod changelog;
 pub mod enroll;
 pub mod error;
+pub mod envfile;
 pub mod import;
 pub mod items;
 pub mod model;
 pub mod origin;
+pub mod projects;
 pub mod schema;
 pub mod vault;
 

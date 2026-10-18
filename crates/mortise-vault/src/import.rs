@@ -234,11 +234,22 @@ pub fn parse<R: Read>(reader: R) -> Result<(Vec<(ItemMeta, ItemPayload)>, ParseR
             },
         };
 
+        // A folder of "acme-api/prod" is how every exporter spells a project
+        // and an environment, because none of them has a field for either.
+        // Split it rather than make someone re-file forty secrets by hand.
+        let folder = cell(&row, i_folder);
+        let (project, environment) = match folder.as_deref().and_then(|f| f.split_once('/')) {
+            Some((p, e)) => (Some(p.trim().to_string()), Some(e.trim().to_string())),
+            None => (folder.clone(), None),
+        };
+
         let meta = ItemMeta {
             title,
             urls: cell(&row, i_url).into_iter().collect(),
             username: cell(&row, i_user),
-            folder: cell(&row, i_folder),
+            folder,
+            project,
+            environment,
             tags: Vec::new(),
         };
 
@@ -292,6 +303,31 @@ mod tests {
         );
         assert!(items.is_empty());
         assert_eq!(report.unsupported, 1);
+    }
+
+    #[test]
+    fn a_folder_of_project_slash_environment_is_split_into_both() {
+        let (items, _) = parse_str(
+            "name,password,folder,type\n\
+             DATABASE_URL,postgres://x,acme-api/prod,env\n\
+             GitHub,hunter2,Personal,login\n\
+             NESTED,v,acme/web/prod,env\n",
+        );
+        assert_eq!(items[0].0.project.as_deref(), Some("acme-api"));
+        assert_eq!(items[0].0.environment.as_deref(), Some("prod"));
+
+        // No slash means the whole thing is the project and there is no
+        // environment to invent.
+        assert_eq!(items[1].0.project.as_deref(), Some("Personal"));
+        assert_eq!(items[1].0.environment, None);
+
+        // Split on the first slash only: the rest is the environment's name,
+        // whatever shape it is.
+        assert_eq!(items[2].0.project.as_deref(), Some("acme"));
+        assert_eq!(items[2].0.environment.as_deref(), Some("web/prod"));
+
+        // The folder itself survives, so nothing is lost by the split.
+        assert_eq!(items[0].0.folder.as_deref(), Some("acme-api/prod"));
     }
 
     #[test]

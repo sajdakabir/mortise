@@ -65,6 +65,24 @@ pub struct ItemMeta {
     /// Containing folder, if any.
     #[serde(default)]
     pub folder: Option<String>,
+    /// The project this belongs to, for the developer-secrets layer.
+    ///
+    /// A plain string rather than a foreign key: a project is a label on its
+    /// items and nothing else owns it, so creating one costs no row and
+    /// renaming one cannot leave an item pointing at something gone.
+    ///
+    /// Not yet the unit of sharing. That has to be a vault, because the ACL,
+    /// the key epoch and the member list all hang off one — see `vault` in
+    /// the schema. Promoting a project to its own vault later means
+    /// re-sealing its items under that vault's key, which is mechanical.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Which environment within the project: `dev`, `staging`, `prod`.
+    ///
+    /// Free-form on purpose. Every team draws these lines differently, and a
+    /// fixed enum would be wrong for someone on the first day.
+    #[serde(default)]
+    pub environment: Option<String>,
     /// Free-form tags.
     #[serde(default)]
     pub tags: Vec<String>,
