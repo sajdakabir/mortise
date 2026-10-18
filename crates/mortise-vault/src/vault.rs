@@ -76,6 +76,10 @@ pub struct VaultMeta {
     pub created_at_ms: u64,
 }
 
+/// What the vault a new file is created with is called. It is the one vault
+/// that cannot be shared or deleted, so its name is fixed rather than chosen.
+pub const DEFAULT_VAULT_NAME: &str = "Personal";
+
 /// Secret state, present only while unlocked. Dropped — and therefore
 /// zeroized — by [`Vault::lock`].
 struct Unlocked {
@@ -135,18 +139,26 @@ impl Vault {
         };
 
         conn.execute(
-            "INSERT INTO vault_meta
-               (id, vault_id, salt, argon2_m_kib, argon2_t, argon2_p, epoch,
-                schema_version, created_at_ms)
-             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO account
+               (id, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
             params![
-                vault_id.as_bytes().as_slice(),
                 salt.as_slice(),
                 params.m_cost_kib,
                 params.t_cost,
                 params.p_cost,
-                meta.epoch.value(),
                 schema::SCHEMA_VERSION,
+                meta.created_at_ms as i64,
+            ],
+        )?;
+
+        conn.execute(
+            "INSERT INTO vault (vault_id, name, kind, epoch, created_at_ms)
+             VALUES (?1, ?2, 0, ?3, ?4)",
+            params![
+                vault_id.as_bytes().as_slice(),
+                DEFAULT_VAULT_NAME,
+                meta.epoch.value(),
                 meta.created_at_ms as i64,
             ],
         )?;
@@ -162,8 +174,9 @@ impl Vault {
             params![device.id().as_bytes().as_slice(), device.wrap(&muk)?],
         )?;
         conn.execute(
-            "INSERT INTO vault_key (epoch, wrapped) VALUES (?1, ?2)",
+            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)",
             params![
+                vault_id.as_bytes().as_slice(),
                 vault_key.epoch().value(),
                 vault_key.wrap_for(device.public(), vault_id)?.to_bytes()
             ],
@@ -267,9 +280,10 @@ impl Vault {
         {
             let mut stmt = self
                 .conn
-                .prepare("SELECT epoch, wrapped FROM vault_key ORDER BY epoch")?;
-            let rows =
-                stmt.query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
+                .prepare("SELECT epoch, wrapped FROM vault_key WHERE vault_id = ?1 ORDER BY epoch")?;
+            let rows = stmt.query_map(params![self.meta.vault_id.as_bytes().as_slice()], |r| {
+                Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))
+            })?;
             for row in rows {
                 let (epoch, wrapped) = row?;
                 let wrapped = WrappedVaultKey::from_bytes(&wrapped)?;
@@ -340,8 +354,8 @@ impl Vault {
             return Err(Error::Corrupt("epoch must advance"));
         }
         self.conn.execute(
-            "UPDATE vault_meta SET epoch = ?1 WHERE id = 1",
-            params![epoch.value()],
+            "UPDATE vault SET epoch = ?1 WHERE vault_id = ?2",
+            params![epoch.value(), self.meta.vault_id.as_bytes().as_slice()],
         )?;
         self.meta.epoch = epoch;
         Ok(())
@@ -352,9 +366,13 @@ impl Vault {
         let device = self.device()?;
         let wrapped = key.wrap_for(device.public(), self.meta.vault_id)?;
         self.conn.execute(
-            "INSERT INTO vault_key (epoch, wrapped) VALUES (?1, ?2)
-             ON CONFLICT (epoch) DO UPDATE SET wrapped = ?2",
-            params![key.epoch().value(), wrapped.to_bytes()],
+            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)
+             ON CONFLICT (vault_id, epoch) DO UPDATE SET wrapped = ?3",
+            params![
+                self.meta.vault_id.as_bytes().as_slice(),
+                key.epoch().value(),
+                wrapped.to_bytes()
+            ],
         )?;
         if let Some(unlocked) = self.unlocked.as_mut() {
             unlocked.vault_keys.insert(key.epoch(), key);
@@ -433,8 +451,12 @@ impl Vault {
 fn read_meta(conn: &Connection) -> Result<VaultMeta> {
     let row = conn
         .query_row(
-            "SELECT vault_id, salt, argon2_m_kib, argon2_t, argon2_p, epoch, created_at_ms
-             FROM vault_meta WHERE id = 1",
+            "SELECT v.vault_id, a.salt, a.argon2_m_kib, a.argon2_t, a.argon2_p,
+                    v.epoch, v.created_at_ms
+             FROM vault v, account a
+             WHERE a.id = 1
+             ORDER BY v.kind, v.created_at_ms
+             LIMIT 1",
             [],
             |r| {
                 Ok((
@@ -449,7 +471,7 @@ fn read_meta(conn: &Connection) -> Result<VaultMeta> {
             },
         )
         .optional()?
-        .ok_or(Error::Corrupt("vault_meta row is missing"))?;
+        .ok_or(Error::Corrupt("no vault row"))?;
 
     let vault_id: [u8; 16] = row
         .0
