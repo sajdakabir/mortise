@@ -928,6 +928,37 @@ pub fn sync_status(state: State<'_, AppState>) -> CmdResult<SyncStatus> {
     })
 }
 
+/// Whether the URL's *host* is this machine.
+///
+/// Hand-parsed rather than pulling in a URL crate for one check: take what
+/// sits between the scheme and the first `/`, `?` or `#`, drop any userinfo
+/// before the last `@` so `http://127.0.0.1@evil.example` is read as
+/// `evil.example`, then drop the port.
+pub fn is_loopback_host(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    let host_port = match authority.rsplit_once('@') {
+        Some((_, after)) => after,
+        None => authority,
+    };
+    let host = if let Some(end) = host_port.strip_prefix('[').and_then(|r| r.find(']')) {
+        // IPv6 literal: the brackets are part of the host, the port is after.
+        &host_port[..end + 2]
+    } else {
+        host_port.split(':').next().unwrap_or_default()
+    };
+
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "[::1]"
+    )
+}
+
 /// Point this vault at a relay, or clear it to turn sync off.
 ///
 /// Clearing leaves the change log intact — sync stops, nothing is lost, and
@@ -944,9 +975,14 @@ pub fn set_relay(state: State<'_, AppState>, url: Option<String>) -> CmdResult<S
         }
         // http is allowed for a relay on this machine during development, but
         // anywhere else it would put device keys and sync timing in the clear.
-        if u.starts_with("http://")
-            && !(u.contains("127.0.0.1") || u.contains("localhost") || u.contains("[::1]"))
-        {
+        //
+        // Matched against the host, not anywhere in the string. `contains`
+        // accepted http://relay.localhost.evil.example/, http://evil.example/
+        // ?r=localhost and http://evil.example/#127.0.0.1 — a URL a support
+        // page or a relay operator could hand someone, which then carried the
+        // whole sync stream in plaintext while looking like it had been
+        // checked.
+        if u.starts_with("http://") && !is_loopback_host(u) {
             return Err(CmdError::bad_request(
                 "Use https:// for a relay that is not on this machine.",
             ));
