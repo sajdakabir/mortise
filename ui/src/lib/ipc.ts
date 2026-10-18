@@ -72,6 +72,8 @@ export const ipc = {
   deleteProject: (projectId: string) => call<void>("delete_project", { projectId }),
   importEnv: (project: string, environment: string, text: string) =>
     call<EnvImportReport>("import_env", { project, environment, text }),
+  importEnvFile: (project: string, environment: string, path: string) =>
+    call<EnvImportReport>("import_env_file", { project, environment, path }),
   exportEnv: (project: string, environment: string) =>
     call<string>("export_env", { project, environment }),
 };
@@ -138,6 +140,7 @@ const MOCK_ROWS: ItemRow[] = [
   row("h", "env", "JWT_SECRET", { project: "acme-api", environment: "prod" }),
   row("i", "env", "DATABASE_URL", { project: "acme-api", environment: "dev" }),
   row("j", "env", "REDIS_URL", { project: "acme-api", environment: "dev" }),
+  row("m", "env", "EMPTY_ON_PURPOSE", { project: "acme-api", environment: "dev" }),
   row("k", "env", "SESSION_SECRET", { project: "acme-web", environment: "prod" }),
 ];
 
@@ -245,8 +248,17 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
         : mockState.rows;
       return as(hits);
     }
-    case "reveal":
+    case "reveal": {
+      const r = mockState.rows.find((x) => x.id === args.id);
+      // One row deliberately holds an empty value: a .env may legitimately
+      // contain KEY=, and revealing that must look different from not having
+      // revealed it at all.
+      if (r?.kind === "env")
+        return as({ kind: "EnvSecret", value: r.title === "EMPTY_ON_PURPOSE" ? "" : `value-of-${r.title}` });
+      if (r?.kind === "apikey") return as({ kind: "ApiKey", key: "placeholder-key", notes: null });
+      if (r?.kind === "note") return as({ kind: "SecureNote", body: "a note" });
       return as({ kind: "Login", password: "correct-horse-battery-staple", totp_seed: null, notes: null });
+    }
     case "save_item":
       return as(String(args.id ?? "f".repeat(32)));
     case "delete_item":
@@ -296,6 +308,8 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       mockState.projects.splice(i, 1);
       return as(undefined);
     }
+    case "import_env_file":
+      return as({ added: 2, updated: 0, unchanged: 0, skipped: 1, unreadable: 0, duplicates: [] });
     case "import_env": {
       const project = String(args.project), environment = String(args.environment);
       let added = 0, updated = 0;

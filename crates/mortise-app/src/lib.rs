@@ -98,6 +98,7 @@ pub fn run() {
             commands::add_environment,
             commands::delete_project,
             commands::import_env,
+            commands::import_env_file,
             commands::export_env,
             commands::delete_item,
             commands::generate_password,

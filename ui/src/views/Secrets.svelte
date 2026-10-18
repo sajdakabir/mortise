@@ -6,7 +6,8 @@
   /// searching for it, a secret is found by knowing which project and which
   /// environment it is in. One flat list cannot serve both without making the
   /// commoner case worse.
-  import { ipc } from "../lib/ipc";
+  import { ipc, isMock } from "../lib/ipc";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { errorMessage, type ProjectSummary, type EnvImportReport } from "../lib/types";
 
   import type { Snippet } from "svelte";
@@ -20,7 +21,17 @@
   let projects = $state<ProjectSummary[]>([]);
   let project = $state<string | null>(null);
   let environment = $state<string | null>(null);
-  let rows = $state<{ title: string }[]>([]);
+  let rows = $state<{ id: string; title: string }[]>([]);
+  /// Values revealed in this session, by item id. Cleared whenever the
+  /// environment changes: a value left on screen after you have navigated
+  /// away is a value on screen for longer than anyone asked for.
+  let shown = $state<Record<string, string>>({});
+  let copiedId = $state<string | null>(null);
+
+  /// The add-one-secret row.
+  let adding = $state(false);
+  let newKey = $state("");
+  let newValue = $state("");
   let error = $state("");
   let busy = $state(false);
 
@@ -73,12 +84,13 @@
     const p = project, e = environment;
     revision;
     if (!p || !e) { rows = []; return; }
+    shown = {};
     ipc.search("")
       .then((all) =>
         (rows = all
           .filter((r) => r.kind === "env")
           .filter((r) => r.project === p && r.environment === e)
-          .map((r) => ({ title: r.title }))
+          .map((r) => ({ id: r.id, title: r.title }))
           .sort((a, b) => a.title.localeCompare(b.title))),
       )
       .catch((err) => (error = errorMessage(err)));
@@ -154,6 +166,66 @@
     if (event.key === "Escape") pasting = false;
   }
 
+  async function reveal(id: string) {
+    try {
+      error = "";
+      const payload = await ipc.reveal(id);
+      shown[id] = payload.kind === "EnvSecret" ? payload.value : "";
+    } catch (e) {
+      error = errorMessage(e);
+    }
+  }
+
+  async function copyValue(id: string) {
+    try {
+      error = "";
+      // Copied inside Rust: the value goes to the clipboard and is cleared on
+      // a timer without ever passing through this window.
+      await ipc.copySecret(id, "value");
+      copiedId = id;
+      setTimeout(() => { if (copiedId === id) copiedId = null; }, 1800);
+    } catch (e) {
+      error = errorMessage(e);
+    }
+  }
+
+  async function addSecret() {
+    if (busy || !project || !environment) return;
+    busy = true;
+    try {
+      error = "";
+      await ipc.importEnv(project, environment, `${newKey}=${newValue}`);
+      newKey = "";
+      newValue = "";
+      adding = false;
+      revision += 1;
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /// Read a `.env` from disk.
+  ///
+  /// The path goes to Rust and Rust opens it. Reading it here would pull a
+  /// file of plaintext secrets through the webview for no benefit.
+  async function uploadEnv() {
+    if (!project || !environment) return;
+    try {
+      error = "";
+      const picked = isMock
+        ? "/tmp/mock.env"
+        : await open({ multiple: false, filters: [{ name: "Env file", extensions: ["env", "txt", ""] }] });
+      if (typeof picked !== "string") return;
+      report = await ipc.importEnvFile(project, environment, picked);
+      revision += 1;
+      await load();
+    } catch (e) {
+      error = errorMessage(e);
+    }
+  }
+
   async function copyEnv() {
     if (!project || !environment) return;
     try {
@@ -226,20 +298,66 @@
           {/if}
         </div>
         <div class="row">
+          <button class="ghost tiny"
+            onclick={() => { adding = true; newKey = ""; newValue = ""; }}>+ Secret</button>
           <button class="ghost tiny" onclick={openPaste}>Paste .env</button>
+          <button class="ghost tiny" onclick={uploadEnv}>Upload</button>
           <button class="ghost tiny" onclick={copyEnv} disabled={rows.length === 0}>
             {copied ? "Copied" : "Copy as .env"}
           </button>
         </div>
       </header>
 
-      {#if rows.length === 0}
-        <p class="faint empty">Nothing in this environment.</p>
+      {#if rows.length === 0 && !adding}
+        <!-- An empty environment is the one place someone is certain to be
+             stuck, so it carries the three ways out rather than stating the
+             obvious and leaving them to hunt the toolbar. -->
+        <div class="blank">
+          <p class="faint">Nothing in <strong>{environment}</strong> yet.</p>
+          <div class="row">
+            <button class="primary" onclick={openPaste}>Paste .env</button>
+            <button onclick={uploadEnv}>Upload a file</button>
+            <button onclick={() => { adding = true; newKey = ""; newValue = ""; }}>
+              Add one secret</button>
+          </div>
+        </div>
       {:else}
         <ul class="keys mono">
-          {#each rows as row (row.title)}
-            <li><span class="k">{row.title}</span><span class="v faint">••••••••</span></li>
+          {#each rows as row (row.id)}
+            <li>
+              <span class="k">{row.title}</span>
+              <!-- Keyed on presence rather than truthiness: a .env may hold
+                   KEY= with nothing after it, and a revealed empty value has
+                   to look different from one that is still hidden. -->
+              <span class="v" class:faint={!(row.id in shown)}>
+                {#if row.id in shown}
+                  {shown[row.id] === "" ? "(empty)" : shown[row.id]}
+                {:else}••••••••{/if}
+              </span>
+              <span class="acts">
+                <button class="ghost tiny"
+                  onclick={() => { if (row.id in shown) { const n = { ...shown }; delete n[row.id]; shown = n; } else reveal(row.id); }}>
+                  {row.id in shown ? "Hide" : "Reveal"}
+                </button>
+                <button class="ghost tiny" onclick={() => copyValue(row.id)}>
+                  {copiedId === row.id ? "Copied" : "Copy"}
+                </button>
+              </span>
+            </li>
           {/each}
+
+          {#if adding}
+            <li class="addrow">
+              <!-- svelte-ignore a11y_autofocus -->
+              <input class="k" autofocus bind:value={newKey} placeholder="KEY_NAME" spellcheck="false" />
+              <input class="v" bind:value={newValue} placeholder="value" spellcheck="false"
+                onkeydown={(e) => { if (e.key === "Enter" && newKey.trim()) addSecret(); }} />
+              <span class="acts">
+                <button class="ghost tiny" disabled={busy || !newKey.trim()} onclick={addSecret}>Save</button>
+                <button class="ghost tiny" onclick={() => (adding = false)}>Cancel</button>
+              </span>
+            </li>
+          {/if}
         </ul>
       {/if}
     {/if}
@@ -369,10 +487,24 @@
 
   .keys { list-style: none; margin: 0; padding: 0; }
   .keys li {
-    display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
-    padding: 8px var(--s2); border-bottom: 1px solid var(--border); font-size: 12.5px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+    align-items: center; gap: var(--s3);
+    padding: 7px var(--s2); border-bottom: 1px solid var(--border); font-size: 12.5px;
   }
   .keys .k { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .keys .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The row actions appear on hover or focus. Two buttons on every row at
+     rest turns a list of names into a wall of controls. */
+  .acts { display: flex; gap: var(--s1); opacity: 0; transition: opacity var(--fast); }
+  .keys li:hover .acts, .acts:focus-within { opacity: 1; }
+  .addrow input {
+    font: 400 12.5px/1 var(--mono);
+    padding: 4px 6px;
+  }
+  .addrow .acts { opacity: 1; }
+
+  .blank { display: grid; place-items: center; gap: var(--s4); padding: var(--s6) 0; text-align: center; }
 
   .empty { padding: var(--s3) var(--s2); font-size: 12.5px; }
   .nothing { display: grid; place-items: center; gap: var(--s3); padding: var(--s6) 0; text-align: center; }

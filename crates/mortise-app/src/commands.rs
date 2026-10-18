@@ -482,6 +482,23 @@ pub fn import_env(
     })
 }
 
+/// Write a `.env` file from disk into a project's environment.
+///
+/// Takes a path rather than the file's contents, for the same reason
+/// `import_csv` does: the webview is semi-trusted and the file is plaintext
+/// secrets. Rust opens it, and the webview only ever sees counts.
+#[tauri::command]
+pub fn import_env_file(
+    state: State<'_, AppState>,
+    project: String,
+    environment: String,
+    path: String,
+) -> CmdResult<EnvImportReport> {
+    let text = std::fs::read_to_string(&path)
+        .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
+    import_env(state, project, environment, text)
+}
+
 /// A project's environment as `.env` text.
 #[tauri::command]
 pub fn export_env(
