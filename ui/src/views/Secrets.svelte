@@ -498,8 +498,23 @@
   .proj .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .proj .n { font-variant-numeric: tabular-nums; font-size: 11px; }
 
-  .body { padding: var(--s4); overflow-y: auto; min-width: 0; }
-  .head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4); }
+  /* The body is a column, not a scroll box. Scrolling the whole thing took
+     the environment tabs and the file actions off screen as soon as a project
+     had more than a dozen secrets — exactly when you most want to switch
+     environment or paste a new file. Only the key list scrolls. */
+  .body {
+    padding: var(--s4);
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4);
+    flex-shrink: 0;
+  }
 
   /* A segmented control: the environments are a small fixed set and exactly
      one is in view, which is the one case where this beats a list. */
@@ -511,7 +526,12 @@
   .env:first-child { border-left: 0; }
   .env.active { background: var(--bg-active); color: var(--text); }
 
-  .keys { list-style: none; margin: 0; padding: 0; }
+  .keys {
+    list-style: none; margin: 0; padding: 0;
+    flex: 1; min-height: 0; overflow-y: auto;
+    /* Room for the last row's actions to clear the window edge. */
+    padding-bottom: var(--s2);
+  }
   .keys li {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
@@ -548,6 +568,7 @@
   .row.end { justify-content: flex-end; margin-top: var(--s3); }
   .sheet textarea { min-height: 170px; font: 400 12px/1.6 var(--mono); }
   .lockbar {
+    flex-shrink: 0;
     display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
     margin-bottom: var(--s4); padding: 8px var(--s3);
     background: color-mix(in srgb, var(--warn) 10%, transparent);

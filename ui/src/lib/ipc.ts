@@ -142,6 +142,17 @@ const MOCK_ROWS: ItemRow[] = [
   row("i", "env", "DATABASE_URL", { project: "acme-api", environment: "dev" }),
   row("j", "env", "REDIS_URL", { project: "acme-api", environment: "dev" }),
   row("m", "env", "EMPTY_ON_PURPOSE", { project: "acme-api", environment: "dev" }),
+  row("env0", "env", "CREDENTIALS_ENCRYPTION_KEY", { project: "acme-api", environment: "dev" }),
+  row("env1", "env", "NEXT_PUBLIC_SUPABASE_URL", { project: "acme-api", environment: "dev" }),
+  row("env2", "env", "NEXT_PUBLIC_SUPABASE_ANON_KEY", { project: "acme-api", environment: "dev" }),
+  row("env3", "env", "SUPABASE_SERVICE_ROLE_KEY", { project: "acme-api", environment: "dev" }),
+  row("env4", "env", "OPENROUTER_MANAGEMENT_KEY", { project: "acme-api", environment: "dev" }),
+  row("env5", "env", "RUNTIME_BASE_URL", { project: "acme-api", environment: "dev" }),
+  row("env6", "env", "RUNTIME_PROVIDER", { project: "acme-api", environment: "dev" }),
+  row("env7", "env", "RUNTIME_PREVIEW_MODE", { project: "acme-api", environment: "dev" }),
+  row("env8", "env", "SENTRY_DSN", { project: "acme-api", environment: "dev" }),
+  row("env9", "env", "JWT_SECRET", { project: "acme-api", environment: "dev" }),
+  row("env10", "env", "SMTP_PASSWORD", { project: "acme-api", environment: "dev" }),
   row("k", "env", "SESSION_SECRET", { project: "acme-web", environment: "prod" }),
 ];
 
