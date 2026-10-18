@@ -131,6 +131,7 @@ const MOCK_ROWS: ItemRow[] = [
   row("a", "login", "GitHub", { username: "octocat", urls: ["https://github.com"], folder: "Work", tags: ["dev"] }),
   row("b", "login", "Fastmail", { username: "me@fastmail.com", urls: ["https://app.fastmail.com"], folder: "Personal" }),
   row("c", "apikey", "Anthropic API", { urls: ["https://console.anthropic.com"], folder: "Work", tags: ["ai"] }),
+  row("n", "apikey", "Key with no value yet", { folder: "Work" }),
   row("d", "note", "Recovery codes", { folder: "Personal" }),
   row("e", "card", "Monzo debit", { folder: "Personal" }),
   // Enough of a developer-secrets shape to exercise the Secrets workspace:
@@ -255,7 +256,8 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       // revealed it at all.
       if (r?.kind === "env")
         return as({ kind: "EnvSecret", value: r.title === "EMPTY_ON_PURPOSE" ? "" : `value-of-${r.title}` });
-      if (r?.kind === "apikey") return as({ kind: "ApiKey", key: "placeholder-key", notes: null });
+      if (r?.kind === "apikey")
+        return as({ kind: "ApiKey", key: r.title.includes("no value") ? "" : "placeholder-key", notes: null });
       if (r?.kind === "note") return as({ kind: "SecureNote", body: "a note" });
       return as({ kind: "Login", password: "correct-horse-battery-staple", totp_seed: null, notes: null });
     }
