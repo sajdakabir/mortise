@@ -14,7 +14,6 @@ pub enum Error {
     #[error("vault is locked")]
     Locked,
 
-    /// No item with that id.
     /// The caller asked for something the vault will not do: a project with
     /// no name, a duplicate, deleting one that still holds secrets.
     ///
@@ -23,6 +22,7 @@ pub enum Error {
     #[error("{0}")]
     Invalid(&'static str),
 
+    /// No item with that id.
     #[error("item not found")]
     ItemNotFound,
 
