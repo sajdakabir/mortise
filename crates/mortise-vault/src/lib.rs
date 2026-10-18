@@ -15,6 +15,7 @@ pub mod access;
 pub mod changelog;
 pub mod enroll;
 pub mod error;
+pub mod envfile;
 pub mod import;
 pub mod items;
 pub mod model;
