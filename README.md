@@ -78,6 +78,30 @@ npm --prefix ui install
 cargo tauri dev
 ```
 
+### The keychain prompt, and how to stop it
+
+A dev build asks for your login keychain password on most runs. The account
+key's keychain item trusts the application that created it, and an unsigned
+binary is identified there by its code-directory hash — which `cargo` changes
+on every rebuild. "Always Allow" pins that one hash and the next build
+invalidates it.
+
+A *signed* binary is matched on its certificate instead, which does not change
+when the code does. One self-signed certificate, created once, fixes it:
+
+> Keychain Access → Certificate Assistant → Create a Certificate…
+> Name `Mortise Dev`, Identity Type **Self Signed Root**, Certificate Type
+> **Code Signing**.
+
+`cargo` is already configured to sign dev builds with it (see
+`.cargo/config.toml` and `scripts/dev-sign-and-run.sh`). The first run
+afterwards still prompts once, because the stored item has never seen this
+signed application — click **Always Allow** there and it stays allowed across
+every rebuild after it.
+
+Without the certificate nothing changes and the build runs unsigned, so a
+fresh checkout needs no setup.
+
 To produce a `.app` and `.dmg`:
 
 ```bash
