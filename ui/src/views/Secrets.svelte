@@ -52,6 +52,7 @@
   let pasteEnv = $state("");
   let report = $state<EnvImportReport | null>(null);
   let copied = $state(false);
+  let copiedNote = $state("");
   /// Bumped after a write. The key list is keyed on the project and the
   /// environment, so a paste into the environment already on screen changes
   /// neither and the list would keep showing what was there before.
@@ -243,14 +244,20 @@
     }
   }
 
+  /// Copy the whole environment.
+  ///
+  /// Rust reads, formats and writes the clipboard, and clears it on the same
+  /// timer a single-secret copy uses. This window never sees the text — which
+  /// it used to, and then wrote to the clipboard itself with nothing to clear
+  /// it afterwards.
   async function copyEnv() {
     if (!project || !environment) return;
     try {
       error = "";
-      const text = await ipc.exportEnv(project, environment);
-      await navigator.clipboard.writeText(text);
+      const report = await ipc.copyEnv(project, environment);
+      copiedNote = `${report.copied} copied · clears in ${report.clears_in_secs}s`;
       copied = true;
-      setTimeout(() => (copied = false), 2000);
+      setTimeout(() => (copied = false), report.clears_in_secs * 1000);
     } catch (e) {
       error = errorMessage(e);
     }
@@ -329,7 +336,7 @@
           <button class="ghost tiny" disabled={!unlocked} onclick={openPaste}>Paste .env</button>
           <button class="ghost tiny" disabled={!unlocked} onclick={uploadEnv}>Upload</button>
           <button class="ghost tiny" onclick={copyEnv} disabled={!unlocked || rows.length === 0}>
-            {copied ? "Copied" : "Copy as .env"}
+            {copied ? copiedNote : "Copy as .env"}
           </button>
         </div>
       </header>

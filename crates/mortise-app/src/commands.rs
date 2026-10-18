@@ -504,17 +504,30 @@ pub fn import_env_file(
     import_env(state, project, environment, text)
 }
 
-/// A project's environment as `.env` text.
+/// Copy a project's environment to the clipboard as `.env` text.
+///
+/// The text never crosses the IPC boundary. An earlier version returned it to
+/// the webview, which made it the bulk variant the surface rules at the top of
+/// this file say does not exist: two calls enumerated every project and
+/// environment, and one call per environment dumped every secret in it, with
+/// no id and no per-item action. The webview then wrote it to the clipboard
+/// itself, so unlike every other copy here nothing ever cleared it.
+///
+/// Rust reads, formats, writes and schedules the same verified clear as
+/// [`copy_secret`], and the webview learns only how many variables went and
+/// how long it has.
 #[tauri::command]
-pub fn export_env(
+pub fn copy_env(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     project: String,
     environment: String,
-) -> CmdResult<String> {
+) -> CmdResult<EnvCopyReport> {
     use mortise_vault::envfile;
+    use tauri_plugin_clipboard_manager::ClipboardExt;
 
     state.touch();
-    state.with_vault(|vault| {
+    let text = state.with_vault(|vault| -> CmdResult<Zeroizing<String>> {
         let v = vault.ok_or_else(|| state.no_vault_error())?;
 
         let mut rows: Vec<_> = v
@@ -526,13 +539,13 @@ pub fn export_env(
                     && row.meta.environment.as_deref() == Some(environment.as_str())
             })
             .collect();
-        // Alphabetical, so the file is diffable against the last time someone
-        // exported it rather than ordered by whenever each was created.
+        // Alphabetical, so the file diffs against the last export rather than
+        // against the order things happened to be created in.
         rows.sort_by(|a, b| a.meta.title.cmp(&b.meta.title));
 
         let mut vars = Vec::new();
         for row in rows {
-            // Bound, then matched by reference: ItemPayload is ZeroizeOnDrop,
+            // Bound then matched by reference: ItemPayload is ZeroizeOnDrop,
             // so a field cannot be moved out of a temporary.
             let payload = v.reveal(row.id)?;
             if let mortise_vault::ItemPayload::EnvSecret { value } = &payload {
@@ -545,8 +558,43 @@ pub fn export_env(
         if vars.is_empty() {
             return Err(CmdError::bad_request("No secrets in that environment."));
         }
-        Ok(envfile::format(&vars))
+        Ok(Zeroizing::new(envfile::format(&vars)))
+    })?;
+
+    let count = text.lines().filter(|l| !l.trim().is_empty()).count() as u32;
+
+    app.clipboard().write_text(text.as_str()).map_err(|e| {
+        eprintln!("mortise: clipboard write failed: {e}");
+        CmdError::bad_request("Could not write to the clipboard.")
+    })?;
+
+    let expected = Zeroizing::new(text.as_str().to_owned());
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(CLIPBOARD_CLEAR_AFTER);
+        if handle
+            .clipboard()
+            .read_text()
+            .map(Zeroizing::new)
+            .is_ok_and(|current| *current == *expected)
+        {
+            let _ = handle.clipboard().write_text(String::new());
+        }
+    });
+
+    Ok(EnvCopyReport {
+        copied: count,
+        clears_in_secs: CLIPBOARD_CLEAR_AFTER.as_secs(),
     })
+}
+
+/// What a bulk copy did. Counts only — never the text.
+#[derive(serde::Serialize)]
+pub struct EnvCopyReport {
+    /// Variables placed on the clipboard.
+    pub copied: u32,
+    /// Seconds until the clipboard is cleared.
+    pub clears_in_secs: u64,
 }
 
 /// Import a CSV export from another password manager.
