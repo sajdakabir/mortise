@@ -109,8 +109,19 @@ pub fn list() -> Vec<Association> {
 
 /// Pair a new browser and persist it.
 pub fn create(name: &str) -> Result<Association, KeychainError> {
-    let id = hex(&mortise_crypto::rand::bytes::<16>().unwrap_or([0; 16]));
-    let key = hex(&mortise_crypto::rand::bytes::<32>().unwrap_or([0; 32]));
+    // Fail rather than substitute a constant. This is the only place the
+    // browser path generates a key, and a zero key verifies every proof an
+    // attacker cares to compute — so a swallowed RNG error would turn a rare
+    // failure into a silent, permanently open door that still reports a
+    // successful pairing.
+    let (Ok(id_bytes), Ok(key_bytes)) = (
+        mortise_crypto::rand::bytes::<16>(),
+        mortise_crypto::rand::bytes::<32>(),
+    ) else {
+        return Err(KeychainError::NotAvailable);
+    };
+    let id = hex(&id_bytes);
+    let key = hex(&key_bytes);
 
     let association = Association {
         id: id.clone(),

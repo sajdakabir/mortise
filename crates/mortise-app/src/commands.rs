@@ -98,7 +98,12 @@ pub fn create_vault(state: State<'_, AppState>, master_password: String) -> CmdR
     state.install(vault);
     state.touch();
 
-    Ok(NewVault { recovery_kit: kit })
+    // The one place the account key leaves Rust, and the reason the vault
+    // exists: the user has to be able to write it down. Everything upstream
+    // keeps it in Zeroizing; this copy is deliberate and documented in dto.rs.
+    Ok(NewVault {
+        recovery_kit: kit.to_string(),
+    })
 }
 
 /// Unlock with the master password.
@@ -692,14 +697,19 @@ pub fn copy_secret(
 
     // Clear only if the clipboard still holds what we put there. Overwriting
     // whatever the user copied in the meantime would be its own small disaster.
-    let expected = value.to_string();
+    // Zeroizing, not a bare String: `value` derefs to String, so `to_string`
+    // would allocate an unprotected copy of the password that lives for the
+    // whole clear window and is freed without being wiped.
+    let expected = Zeroizing::new(value.as_str().to_owned());
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(CLIPBOARD_CLEAR_AFTER);
         if handle
             .clipboard()
             .read_text()
-            .is_ok_and(|current| current == expected)
+            // The clipboard read is itself the secret; wipe it too.
+            .map(Zeroizing::new)
+            .is_ok_and(|current| *current == *expected)
         {
             let _ = handle.clipboard().write_text(String::new());
         }

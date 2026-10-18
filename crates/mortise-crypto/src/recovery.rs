@@ -14,6 +14,7 @@
 //! transcription confusions cannot arise. The checksum catches the rest before
 //! the user sits through a 64 MiB Argon2 run that was never going to succeed.
 
+use zeroize::Zeroizing;
 use data_encoding::BASE32_NOPAD;
 
 use crate::error::{Error, Result};
@@ -29,14 +30,22 @@ const GROUP: usize = 5;
 const CHECKSUM_LEN: usize = 2;
 
 /// Render an account key as a recovery kit string.
-pub fn encode(account_key: &Key32) -> String {
-    let mut payload = Vec::with_capacity(32 + CHECKSUM_LEN);
+///
+/// Every buffer on the way is `Zeroizing`, including the returned string. The
+/// account key is the one secret with no replacement path — spec §9 says never
+/// to hold key material in a plain `String`, and this is the worst place to
+/// make an exception. Capacities are reserved up front so a reallocation
+/// cannot strand a half-copy in freed heap that the wipe never reaches.
+pub fn encode(account_key: &Key32) -> Zeroizing<String> {
+    let mut payload = Zeroizing::new(Vec::with_capacity(32 + CHECKSUM_LEN));
     payload.extend_from_slice(account_key.expose());
     payload.extend_from_slice(&checksum(account_key.expose()));
 
-    let encoded = BASE32_NOPAD.encode(&payload);
+    let encoded = Zeroizing::new(BASE32_NOPAD.encode(&payload));
 
-    let mut out = String::with_capacity(PREFIX.len() + encoded.len() + encoded.len() / GROUP + 1);
+    let mut out = Zeroizing::new(String::with_capacity(
+        PREFIX.len() + encoded.len() + encoded.len() / GROUP + 1,
+    ));
     out.push_str(PREFIX);
     for (i, ch) in encoded.chars().enumerate() {
         if i % GROUP == 0 {
@@ -53,20 +62,22 @@ pub fn encode(account_key: &Key32) -> String {
 /// dashes, surrounding whitespace, and a missing prefix are all accepted. What
 /// is not tolerated is a failed checksum.
 pub fn decode(kit: &str) -> Result<Key32> {
-    let cleaned: String = kit
-        .trim()
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != '-')
-        .collect::<String>()
-        .to_ascii_uppercase();
+    let mut cleaned = Zeroizing::new(String::with_capacity(kit.len()));
+    for ch in kit.trim().chars() {
+        if !ch.is_whitespace() && ch != '-' {
+            cleaned.push(ch.to_ascii_uppercase());
+        }
+    }
 
     let body = cleaned
         .strip_prefix(&PREFIX.to_ascii_uppercase())
         .unwrap_or(&cleaned);
 
-    let payload = BASE32_NOPAD
-        .decode(body.as_bytes())
-        .map_err(|_| Error::RecoveryKit)?;
+    let payload = Zeroizing::new(
+        BASE32_NOPAD
+            .decode(body.as_bytes())
+            .map_err(|_| Error::RecoveryKit)?,
+    );
 
     if payload.len() != 32 + CHECKSUM_LEN {
         return Err(Error::RecoveryKit);
