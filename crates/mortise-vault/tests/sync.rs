@@ -426,13 +426,17 @@ fn hlc_ordering_is_total_across_devices() {
     assert!(Hlc::new(9) < a);
 }
 
-/// A delete that arrives before the item it deletes must stay deleted.
+/// A change whose parent is missing is refused, not applied around.
 ///
-/// The relay chooses what each pull contains, so it can serve the delete on
-/// its own and the upsert on a later page. `deletions_propagate` only covers
-/// the case where the receiving device already holds the item.
+/// The relay chooses what each pull contains, so it can withhold one change
+/// and serve its descendants. Accepting those leaves a hole nothing notices:
+/// here, a delete applied without its upsert used to leave no tombstone, and
+/// the upsert then reinstated a secret the user had deleted.
+///
+/// Rejecting keeps the sync cursor behind the gap, so the withheld change is
+/// re-pulled rather than lost — the second delivery below is that retry.
 #[test]
-fn a_delete_that_arrives_first_is_not_undone_by_the_item() {
+fn a_change_whose_parent_is_missing_is_rejected_until_it_arrives() {
     let mut p = Pair::new();
     let id = p
         .a
@@ -440,21 +444,25 @@ fn a_delete_that_arrives_first_is_not_undone_by_the_item() {
         .unwrap();
     p.a.delete_item(id).unwrap();
 
-    // Both changes exist on A. Deliver them to B in the order a hostile relay
-    // would choose: the delete alone, then the upsert.
     let changes = p.a.unpushed_changes(1000).unwrap();
     assert!(changes.len() >= 2, "expected an upsert and a delete");
-    let (first, rest) = changes.split_at(1);
+    let (upsert, delete) = changes.split_at(1);
 
-    p.b.ingest(rest).unwrap();
-    p.b.apply_pending().unwrap();
-    p.b.ingest(first).unwrap();
+    // The relay serves the delete alone, withholding the upsert it descends
+    // from. It must not be applied.
+    let report = p.b.ingest(delete).unwrap();
+    assert_eq!(report.rejected, 1, "an orphaned change was accepted");
     p.b.apply_pending().unwrap();
 
-    assert_eq!(
-        p.b.item_count().unwrap(),
-        0,
-        "a deleted secret came back when its upsert arrived after the delete"
-    );
+    // The withheld change arrives.
+    p.b.ingest(upsert).unwrap();
+    p.b.apply_pending().unwrap();
+
+    // And the delete, re-pulled because the cursor never passed it.
+    let report = p.b.ingest(delete).unwrap();
+    assert_eq!(report.rejected, 0, "the delete should apply once its parent is here");
+    p.b.apply_pending().unwrap();
+
+    assert_eq!(p.b.item_count().unwrap(), 0, "a deleted secret came back");
     assert!(matches!(p.b.reveal(id), Err(Error::ItemNotFound)));
 }

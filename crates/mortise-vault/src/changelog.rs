@@ -311,6 +311,10 @@ impl Vault {
     pub fn ingest(&mut self, changes: &[Change]) -> Result<IngestReport> {
         let vault_id = self.meta().vault_id;
         let mut report = IngestReport::default();
+        // Ids accepted in this batch, so a change can be parented on one that
+        // arrived alongside it rather than only on one already stored.
+        let mut accepted: std::collections::HashSet<[u8; 32]> =
+            std::collections::HashSet::new();
 
         for change in changes {
             if change.vault() != vault_id {
@@ -345,7 +349,26 @@ impl Vault {
                 report.duplicates += 1;
                 continue;
             }
+            // Every parent must be one we already hold. This is the check
+            // `change.rs` names as the third of the three that make a hostile
+            // relay unable to reorder history, and it was the one not
+            // implemented — so a relay could drop a single change and serve
+            // its descendants, and they applied cleanly with nothing to
+            // notice the hole. Rejecting here keeps the cursor behind the gap,
+            // so the missing ancestor is re-pulled rather than lost.
+            let mut parents_known = true;
+            for parent in change.parents() {
+                if !accepted.contains(parent.as_bytes()) && !self.has_change(*parent)? {
+                    parents_known = false;
+                    break;
+                }
+            }
+            if !parents_known {
+                report.rejected += 1;
+                continue;
+            }
 
+            accepted.insert(*change.id().as_bytes());
             self.store_change(change, false)?;
             self.merge_clock(change.hlc())?;
             report.accepted += 1;
