@@ -31,6 +31,15 @@
   /// neither and the list would keep showing what was there before.
   let revision = $state(0);
 
+  /// The create-project sheet.
+  let creating = $state(false);
+  let newName = $state("");
+  let newDescription = $state("");
+
+  /// Inline add-an-environment field, shown from the segmented control.
+  let addingEnv = $state(false);
+  let newEnv = $state("");
+
   const current = $derived(projects.find((p) => p.name === project) ?? null);
 
   async function load() {
@@ -70,6 +79,43 @@
   });
 
   $effect(() => { if (unlocked) load(); });
+
+  async function createProject() {
+    if (busy) return;
+    busy = true;
+    try {
+      error = "";
+      const p = await ipc.createProject(newName, newDescription);
+      creating = false;
+      newName = "";
+      newDescription = "";
+      await load();
+      project = p.name;
+      environment = p.environments[0] ?? null;
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function addEnvironment() {
+    if (busy || !current) return;
+    busy = true;
+    try {
+      error = "";
+      const p = await ipc.addEnvironment(current.id, newEnv);
+      addingEnv = false;
+      const added = newEnv.trim();
+      newEnv = "";
+      await load();
+      if (p.environments.includes(added)) environment = added;
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
 
   function openPaste() {
     pasteProject = project ?? "";
@@ -120,7 +166,9 @@
   <aside class="rail">
     <div class="railhead spread">
       <span class="label">Projects</span>
-      <button class="ghost tiny" disabled={!unlocked} onclick={openPaste}>+ New</button>
+      <button class="ghost tiny" disabled={!unlocked}
+        onclick={() => { newName = ""; newDescription = ""; error = ""; creating = true; }}>
+        + New</button>
     </div>
     {#if projects.length === 0}
       <p class="faint empty">No projects yet.</p>
@@ -135,12 +183,14 @@
   </aside>
 
   <section class="body">
-    {#if error}<div class="error">{error}</div>{/if}
+    {#if error && !creating && !pasting}<div class="error">{error}</div>{/if}
 
     {#if !current}
       <div class="nothing">
-        <p class="faint">Paste a <code>.env</code> to start a project.</p>
-        <button class="primary" disabled={!unlocked} onclick={openPaste}>Paste .env</button>
+        <p class="faint">No projects yet. One per codebase, with its own environments.</p>
+        <button class="primary" disabled={!unlocked}
+          onclick={() => { newName = ""; newDescription = ""; error = ""; creating = true; }}>
+          New project</button>
       </div>
     {:else}
       <header class="head">
@@ -150,6 +200,16 @@
               class="env" class:active={e === environment}
               onclick={() => (environment = e)}>{e}</button>
           {/each}
+          {#if addingEnv}
+            <input class="envinput" bind:value={newEnv} placeholder="preview"
+              onkeydown={(e) => {
+                if (e.key === "Enter") addEnvironment();
+                if (e.key === "Escape") { addingEnv = false; newEnv = ""; }
+              }} />
+          {:else}
+            <button class="env add" title="Add an environment"
+              onclick={() => { addingEnv = true; newEnv = ""; }}>+</button>
+          {/if}
         </div>
         <div class="row">
           <button class="ghost tiny" onclick={openPaste}>Paste .env</button>
@@ -172,6 +232,40 @@
   </section>
 </div>
 
+{#if creating}
+  <div class="scrim" role="presentation"></div>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="sheet" role="dialog" aria-label="New project" tabindex="-1"
+    onkeydown={(e) => { if (e.key === "Escape") creating = false; }}>
+    <div class="spread sheethead">
+      <strong>New project</strong>
+      <button class="ghost tiny" onclick={() => (creating = false)}>Cancel</button>
+    </div>
+    {#if error}<div class="error">{error}</div>{/if}
+    <p class="hint">
+      One per codebase. It starts with <code>dev</code>, <code>staging</code>
+      and <code>prod</code>; you can add more.
+    </p>
+
+    <div class="field">
+      <label for="np">Name</label>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input id="np" autofocus bind:value={newName} placeholder="acme-api"
+        onkeydown={(e) => { if (e.key === "Enter" && newName.trim()) createProject(); }} />
+    </div>
+    <div class="field">
+      <label for="nd">Description <span class="faint">optional</span></label>
+      <input id="nd" bind:value={newDescription} placeholder="The billing API" />
+    </div>
+
+    <div class="row end">
+      <button class="primary" disabled={busy || !newName.trim()} onclick={createProject}>
+        {busy ? "Creating…" : "Create project"}
+      </button>
+    </div>
+  </div>
+{/if}
+
 {#if pasting}
   <!-- Closing on a click outside would throw away a file someone has just
        pasted, which is the one thing this sheet holds. It closes from the
@@ -184,6 +278,8 @@
       <strong>Paste .env</strong>
       <button class="ghost tiny" onclick={() => (pasting = false)}>Close</button>
     </div>
+
+    {#if error}<div class="error">{error}</div>{/if}
 
     <div class="row two">
       <div class="field">
@@ -268,4 +364,12 @@
   .row.end { justify-content: flex-end; margin-top: var(--s3); }
   .sheet textarea { min-height: 170px; font: 400 12px/1.6 var(--mono); }
   .report { font-size: 12px; color: var(--text-dim); margin: 0 0 var(--s2); }
+  .hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 var(--s4); line-height: 1.6; }
+  .env.add { padding: 5px 10px; color: var(--text-faint); }
+  .env.add:hover { color: var(--text); }
+  .envinput {
+    width: 96px; border: 0; border-left: 1px solid var(--border); border-radius: 0;
+    background: transparent; padding: 4px 10px; font-size: 12px;
+  }
+  .envinput:focus { outline: none; box-shadow: none; }
 </style>

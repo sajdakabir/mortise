@@ -65,6 +65,11 @@ export const ipc = {
   syncNow: () => call<SyncReport>("sync_now"),
   claimVaultOnRelay: () => call<void>("claim_vault_on_relay"),
   projects: () => call<ProjectSummary[]>("projects"),
+  createProject: (name: string, description: string) =>
+    call<ProjectSummary>("create_project", { name, description }),
+  addEnvironment: (projectId: string, environment: string) =>
+    call<ProjectSummary>("add_environment", { projectId, environment }),
+  deleteProject: (projectId: string) => call<void>("delete_project", { projectId }),
   importEnv: (project: string, environment: string, text: string) =>
     call<EnvImportReport>("import_env", { project, environment, text }),
   exportEnv: (project: string, environment: string) =>
@@ -143,6 +148,10 @@ const mockState = {
   browsers: [] as PairedBrowser[],
   nativeHost: null as string | null,
   relayUrl: null as string | null,
+  projects: [
+    { id: "p1", name: "acme-api", description: "The API", environments: ["dev", "staging", "prod"] },
+    { id: "p2", name: "acme-web", description: "", environments: ["prod"] },
+  ],
 };
 
 async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
@@ -253,24 +262,39 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
     }
     case "password_entropy":
       return as(Math.log2(70) * Number(args.length ?? 20));
-    case "projects": {
-      const found = new Map<string, { envs: Set<string>; n: number }>();
-      for (const r of mockState.rows) {
-        if (!r.project) continue;
-        const e = found.get(r.project) ?? { envs: new Set<string>(), n: 0 };
-        if (r.environment) e.envs.add(r.environment);
-        e.n += 1;
-        found.set(r.project, e);
-      }
+    case "projects":
       return as(
-        [...found.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([name, v]) => ({
-            name,
-            environments: [...v.envs].sort(),
-            secret_count: v.n,
-          })),
+        mockState.projects.map((p) => ({
+          ...p,
+          secret_count: mockState.rows.filter((r) => r.project === p.name).length,
+        })),
       );
+    case "create_project": {
+      const name = String(args.name).trim();
+      if (!name) throw { code: "invalid", message: "a project needs a name" };
+      if (mockState.projects.some((p) => p.name.toLowerCase() === name.toLowerCase()))
+        throw { code: "invalid", message: "a project with that name already exists" };
+      const p = { id: `p${mockState.projects.length + 1}`, name,
+        description: String(args.description ?? ""), environments: ["dev", "staging", "prod"] };
+      mockState.projects.push(p);
+      return as({ ...p, secret_count: 0 });
+    }
+    case "add_environment": {
+      const p = mockState.projects.find((x) => x.id === args.projectId);
+      if (!p) throw { code: "invalid", message: "no such project" };
+      const e = String(args.environment).trim();
+      if (p.environments.some((x) => x.toLowerCase() === e.toLowerCase()))
+        throw { code: "invalid", message: "that environment already exists" };
+      p.environments.push(e);
+      return as({ ...p, secret_count: mockState.rows.filter((r) => r.project === p.name).length });
+    }
+    case "delete_project": {
+      const i = mockState.projects.findIndex((x) => x.id === args.projectId);
+      if (i < 0) throw { code: "invalid", message: "no such project" };
+      if (mockState.rows.some((r) => r.project === mockState.projects[i].name))
+        throw { code: "invalid", message: "that project still has secrets in it" };
+      mockState.projects.splice(i, 1);
+      return as(undefined);
     }
     case "import_env": {
       const project = String(args.project), environment = String(args.environment);

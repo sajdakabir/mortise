@@ -272,43 +272,102 @@ pub fn save_item(
 /// One project and what is in it.
 #[derive(serde::Serialize)]
 pub struct ProjectSummary {
-    /// The project's name, which is also its identity.
+    /// Identifier, hex.
+    pub id: String,
+    /// Display name.
     pub name: String,
-    /// Environments that have at least one secret, in a stable order.
+    /// Optional description.
+    pub description: String,
+    /// Environments, in the order they were added.
     pub environments: Vec<String>,
     /// Secrets across every environment.
     pub secret_count: u32,
 }
 
-/// Projects, derived from the items rather than stored separately.
-///
-/// A project exists exactly as long as something is in it. There is no create
-/// step to get out of step with reality and no empty project to tidy up.
+/// Every project, with a count of what is in it.
 #[tauri::command]
 pub fn projects(state: State<'_, AppState>) -> CmdResult<Vec<ProjectSummary>> {
     state.touch();
     state.with_vault(|vault| {
         let v = vault.ok_or_else(|| state.no_vault_error())?;
-        let mut found: std::collections::BTreeMap<String, (std::collections::BTreeSet<String>, u32)> =
-            std::collections::BTreeMap::new();
+
+        // Counted from the items rather than stored on the project, so the
+        // number cannot drift away from what is actually there.
+        let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         for row in v.search("")? {
-            let Some(project) = row.meta.project.clone() else {
-                continue;
-            };
-            let entry = found.entry(project).or_default();
-            if let Some(env) = row.meta.environment.clone() {
-                entry.0.insert(env);
+            if let Some(p) = row.meta.project.clone() {
+                *counts.entry(p).or_default() += 1;
             }
-            entry.1 += 1;
         }
-        Ok(found
+
+        Ok(v.projects()?
             .into_iter()
-            .map(|(name, (environments, secret_count))| ProjectSummary {
-                name,
-                environments: environments.into_iter().collect(),
-                secret_count,
+            .map(|p| ProjectSummary {
+                secret_count: counts.get(&p.name).copied().unwrap_or(0),
+                id: p.id,
+                name: p.name,
+                description: p.description,
+                environments: p.environments,
             })
             .collect())
+    })
+}
+
+/// Create a project, with the default environments in it.
+#[tauri::command]
+pub fn create_project(
+    state: State<'_, AppState>,
+    name: String,
+    description: String,
+) -> CmdResult<ProjectSummary> {
+    state.touch();
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+        let p = v.create_project(&name, &description)?;
+        Ok(ProjectSummary {
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            environments: p.environments,
+            secret_count: 0,
+        })
+    })
+}
+
+/// Add an environment to a project.
+#[tauri::command]
+pub fn add_environment(
+    state: State<'_, AppState>,
+    project_id: String,
+    environment: String,
+) -> CmdResult<ProjectSummary> {
+    state.touch();
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+        let p = v.add_environment(&project_id, &environment)?;
+        let secret_count = v
+            .search("")?
+            .into_iter()
+            .filter(|row| row.meta.project.as_deref() == Some(p.name.as_str()))
+            .count() as u32;
+        Ok(ProjectSummary {
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            environments: p.environments,
+            secret_count,
+        })
+    })
+}
+
+/// Delete an empty project.
+#[tauri::command]
+pub fn delete_project(state: State<'_, AppState>, project_id: String) -> CmdResult<()> {
+    state.touch();
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+        v.delete_project(&project_id)?;
+        Ok(())
     })
 }
 

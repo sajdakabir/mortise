@@ -603,3 +603,79 @@ fn items_with_unparseable_urls_never_match() {
         );
     }
 }
+
+// --- projects ---
+
+#[test]
+fn a_project_can_exist_before_anything_is_in_it() {
+    let mut f = Fixture::new();
+    let p = f.vault.create_project("acme-api", "The API").unwrap();
+    assert_eq!(p.name, "acme-api");
+    assert_eq!(p.environments, ["dev", "staging", "prod"]);
+
+    let all = f.vault.projects().unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].description, "The API");
+}
+
+#[test]
+fn two_projects_cannot_share_a_name_however_it_is_cased() {
+    let mut f = Fixture::new();
+    f.vault.create_project("acme-api", "").unwrap();
+    assert!(f.vault.create_project("  ACME-API  ", "").is_err());
+    assert!(f.vault.create_project("", "").is_err());
+    assert_eq!(f.vault.projects().unwrap().len(), 1);
+}
+
+#[test]
+fn environments_can_be_added_but_not_duplicated() {
+    let mut f = Fixture::new();
+    let p = f.vault.create_project("acme-api", "").unwrap();
+    let p = f.vault.add_environment(&p.id, "preview").unwrap();
+    assert_eq!(p.environments, ["dev", "staging", "prod", "preview"]);
+    assert!(f.vault.add_environment(&p.id, "PREVIEW").is_err());
+}
+
+/// Deleting a container should never be a way to lose what is inside it.
+#[test]
+fn a_project_holding_secrets_will_not_be_deleted() {
+    let mut f = Fixture::new();
+    let p = f.vault.create_project("acme-api", "").unwrap();
+
+    let meta = ItemMeta {
+        title: "DATABASE_URL".into(),
+        project: Some("acme-api".into()),
+        environment: Some("prod".into()),
+        ..Default::default()
+    };
+    f.vault
+        .create_item(&meta, &ItemPayload::EnvSecret { value: "postgres://x".into() })
+        .unwrap();
+
+    assert!(f.vault.delete_project(&p.id).is_err());
+    assert_eq!(f.vault.projects().unwrap().len(), 1);
+}
+
+/// The name is the thing worth hiding: a file that says "acme-payroll" has
+/// already said something about its owner.
+#[test]
+fn a_project_name_is_not_readable_in_the_file() {
+    let mut f = Fixture::new();
+    f.vault.create_project("acme-payroll", "wages").unwrap();
+    f.relock();
+
+    let bytes = std::fs::read(&f.path).unwrap();
+    let haystack = String::from_utf8_lossy(&bytes);
+    assert!(!haystack.contains("acme-payroll"), "the project name is in the file");
+    assert!(!haystack.contains("wages"), "the description is in the file");
+}
+
+/// The project list is drawn before anyone types a password, so it has to
+/// survive locking the way search does.
+#[test]
+fn projects_are_still_listable_while_locked() {
+    let mut f = Fixture::new();
+    f.vault.create_project("acme-api", "").unwrap();
+    f.relock();
+    assert_eq!(f.vault.projects().unwrap()[0].name, "acme-api");
+}

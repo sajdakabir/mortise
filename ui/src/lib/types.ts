@@ -145,7 +145,9 @@ export interface SyncReport {
 
 /// One project and what is in it, as `projects` returns it.
 export interface ProjectSummary {
+  id: string;
   name: string;
+  description: string;
   environments: string[];
   secret_count: number;
 }

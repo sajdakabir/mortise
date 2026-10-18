@@ -15,6 +15,14 @@ pub enum Error {
     Locked,
 
     /// No item with that id.
+    /// The caller asked for something the vault will not do: a project with
+    /// no name, a duplicate, deleting one that still holds secrets.
+    ///
+    /// Separate from `Corrupt` because nothing is wrong with the file — the
+    /// request was wrong, and the message is written to be shown to a person.
+    #[error("{0}")]
+    Invalid(&'static str),
+
     #[error("item not found")]
     ItemNotFound,
 

@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -196,6 +196,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V3)?;
     conn.execute_batch(SCHEMA_V4)?;
     conn.execute_batch(SCHEMA_V5)?;
+    conn.execute_batch(SCHEMA_V6)?;
     Ok(())
 }
 
@@ -281,6 +282,25 @@ INSERT OR IGNORE INTO vault_sync (vault_id, cursor)
 
 DROP TABLE IF EXISTS vault_meta;
 "#;
+/// Added in v6: projects that exist before anything is in them.
+///
+/// Until now a project was only a label on an item, so one could not be
+/// created empty — and an empty project is exactly what you have between
+/// making it and pasting the first file into it.
+///
+/// The name and the environments are sealed under the account META key, the
+/// same treatment `search_cache` gets and for the same reason: they stay
+/// readable while the vault is locked, so the list draws without a password,
+/// but the file on disk does not say that this person works on `acme-payroll`.
+const SCHEMA_V6: &str = r#"
+CREATE TABLE project (
+    project_id    BLOB    PRIMARY KEY,
+    -- {name, description, environments[]} under META_KEY.
+    sealed        BLOB    NOT NULL,
+    created_at_ms INTEGER NOT NULL
+) STRICT;
+"#;
+
 
 /// The file's schema version, from whichever table holds it.
 ///
@@ -322,6 +342,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 5 {
         tx.execute_batch(SCHEMA_V5)?;
+    }
+    if found < 6 {
+        tx.execute_batch(SCHEMA_V6)?;
     }
     // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(
