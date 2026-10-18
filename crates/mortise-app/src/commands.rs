@@ -499,7 +499,7 @@ pub fn import_env_file(
     environment: String,
     path: String,
 ) -> CmdResult<EnvImportReport> {
-    let text = std::fs::read_to_string(&path)
+    let text = std::fs::read_to_string(readable_plain_file(&path)?)
         .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
     import_env(state, project, environment, text)
 }
@@ -610,7 +610,7 @@ pub fn import_csv(state: State<'_, AppState>, path: String) -> CmdResult<crate::
 
     state.touch();
 
-    let file = std::fs::File::open(&path)
+    let file = std::fs::File::open(readable_plain_file(&path)?)
         .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
     let (items, report) = import::parse(std::io::BufReader::new(file))?;
 
@@ -974,6 +974,29 @@ pub fn sync_status(state: State<'_, AppState>) -> CmdResult<SyncStatus> {
             cursor: v.sync_cursor()?,
         })
     })
+}
+
+/// Reject a path that is not a plain readable file.
+///
+/// Both import commands take a path from the webview and open it. The UI gets
+/// that path from a native picker, but the backend cannot see that, and the
+/// app is not sandboxed — so a compromised webview could name any file the
+/// user can read, have it parsed into the vault, and then read it back out
+/// with `search` and `reveal`. That is a file-read primitive reaching past
+/// the boundary this surface exists to define.
+///
+/// This does not close it — only the backend owning the picker would — but it
+/// refuses the shapes that are never a file the user chose: directories,
+/// devices, sockets, and symlinks, which are how a path ends up pointing
+/// somewhere other than where it reads.
+fn readable_plain_file(path: &str) -> Result<std::path::PathBuf, CmdError> {
+    let path = std::path::Path::new(path);
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(CmdError::bad_request("That is not a file."));
+    }
+    Ok(path.to_path_buf())
 }
 
 /// Whether the URL's *host* is this machine.

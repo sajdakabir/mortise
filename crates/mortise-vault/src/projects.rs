@@ -217,11 +217,20 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn unhex(s: &str) -> Result<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    // Bytes, not chars. Slicing `&s[i..i + 2]` on a multi-byte character
+    // panics on a char boundary, and the id reaches here straight from the
+    // webview — so a malformed one would take the process down rather than
+    // return an error.
+    let bytes = s.as_bytes();
+    if bytes.len() % 2 != 0 || !bytes.iter().all(u8::is_ascii_hexdigit) {
         return Err(Error::Invalid("malformed project id"));
     }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| Error::Invalid("malformed project id")))
+    bytes
+        .chunks_exact(2)
+        .map(|pair| {
+            let hi = (pair[0] as char).to_digit(16).unwrap_or(0) as u8;
+            let lo = (pair[1] as char).to_digit(16).unwrap_or(0) as u8;
+            Ok(hi << 4 | lo)
+        })
         .collect()
 }
