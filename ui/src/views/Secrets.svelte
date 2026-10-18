@@ -9,7 +9,13 @@
   import { ipc } from "../lib/ipc";
   import { errorMessage, type ProjectSummary, type EnvImportReport } from "../lib/types";
 
-  let { unlocked }: { unlocked: boolean } = $props();
+  import type { Snippet } from "svelte";
+
+  let {
+    unlocked,
+    switcher,
+    foot,
+  }: { unlocked: boolean; switcher: Snippet; foot: Snippet } = $props();
 
   let projects = $state<ProjectSummary[]>([]);
   let project = $state<string | null>(null);
@@ -164,12 +170,17 @@
 
 <div class="secrets">
   <aside class="rail">
+    <div class="railtop drag">
+      <div class="no-drag">{@render switcher()}</div>
+    </div>
+
     <div class="railhead spread">
       <span class="label">Projects</span>
       <button class="ghost tiny" disabled={!unlocked}
         onclick={() => { newName = ""; newDescription = ""; error = ""; creating = true; }}>
         + New</button>
     </div>
+    <div class="projects">
     {#if projects.length === 0}
       <p class="faint empty">No projects yet.</p>
     {:else}
@@ -180,6 +191,9 @@
         </button>
       {/each}
     {/if}
+    </div>
+
+    <div class="railfoot">{@render foot()}</div>
   </aside>
 
   <section class="body">
@@ -315,9 +329,21 @@
 {/if}
 
 <style>
-  .secrets { display: grid; grid-template-columns: 190px minmax(0, 1fr); height: 100%; min-height: 0; }
-  .rail { border-right: 1px solid var(--border); overflow-y: auto; padding: 0 var(--s2) var(--s2); }
-  .railhead { padding: var(--s3) var(--s2) var(--s2); }
+  .secrets { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100%; min-height: 0; }
+  /* One sidebar, not two: the switcher at the top, the projects it lists in
+     the middle, and the lock at the bottom where it is in the other
+     workspace too. */
+  .rail {
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+    padding: 0 var(--s2) 0;
+  }
+  /* Matches the password sidebar's top strip, which is what makes the window
+     draggable where there is no title bar. */
+  .railtop { padding: 38px var(--s1) 0; }
+  .railfoot { margin-top: auto; }
+  .railhead { padding: var(--s4) var(--s2) var(--s2); }
+  .projects { overflow-y: auto; min-height: 0; }
   .proj {
     display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
     width: 100%; text-align: left; background: transparent; border: 1px solid transparent;

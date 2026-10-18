@@ -188,9 +188,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="shell" class:narrow={mode === "secrets"}>
-  <aside>
-    <div class="topbar drag">
+{#snippet switcherUi()}
       <div class="no-drag switcher">
         <button class="trigger" aria-haspopup="menu" aria-expanded={menuOpen}
           onclick={() => (menuOpen = !menuOpen)}>
@@ -216,6 +214,47 @@
           </div>
         {/if}
       </div>
+{/snippet}
+
+{#snippet footUi()}
+    <div class="foot">
+      <div class="spread">
+        {#if status.unlocked}
+          <button class="ghost tiny" onclick={lock}>Lock</button>
+        {:else}
+          <button class="ghost tiny unlock" onclick={onUnlock}>Unlock</button>
+        {/if}
+        <button
+          class="ghost icon"
+          title="Settings"
+          aria-label="Settings"
+          onclick={() => (editing = "settings")}>
+          <!-- Teeth are shallow and chunky on a solid body. Deep teeth turn
+               spiky at 16px and read as a sun or a star; the body has to stay
+               dominant for the silhouette to say gear. Generated geometry, so
+               the spacing is even. -->
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              fill-rule="evenodd"
+              d="M7.62 2.89 L7.46 0.85 L12.54 0.85 L12.38 2.89 A7.5 7.5 0 0 1 13.35 3.29 L13.35 3.29 L14.68 1.73 L18.27 5.32 L16.71 6.65 A7.5 7.5 0 0 1 17.11 7.62 L17.11 7.62 L19.15 7.46 L19.15 12.54 L17.11 12.38 A7.5 7.5 0 0 1 16.71 13.35 L16.71 13.35 L18.27 14.68 L14.68 18.27 L13.35 16.71 A7.5 7.5 0 0 1 12.38 17.11 L12.38 17.11 L12.54 19.15 L7.46 19.15 L7.62 17.11 A7.5 7.5 0 0 1 6.65 16.71 L6.65 16.71 L5.32 18.27 L1.73 14.68 L3.29 13.35 A7.5 7.5 0 0 1 2.89 12.38 L2.89 12.38 L0.85 12.54 L0.85 7.46 L2.89 7.62 A7.5 7.5 0 0 1 3.29 6.65 L3.29 6.65 L1.73 5.32 L5.32 1.73 L6.65 3.29 A7.5 7.5 0 0 1 7.62 2.89 Z M10.0 6.7 A3.3 3.3 0 1 0 10.0 13.3 A3.3 3.3 0 1 0 10.0 6.7 Z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+{/snippet}
+
+<!-- The secrets workspace brings its own sidebar: its projects rail is the
+     only list it has, so the password list's sidebar sat beside it as a
+     second column with nothing in it. The switcher and the footer are
+     snippets, so one definition serves both layouts. -->
+{#if mode === "secrets" && editing !== "settings" && status.exists}
+  <Secrets unlocked={status.unlocked} switcher={switcherUi} foot={footUi} />
+{:else}
+<div class="shell">
+  <aside>
+    <div class="topbar drag">
+      {@render switcherUi()}
       {#if mode === "passwords"}
       <div class="no-drag searchwrap">
         <input
@@ -263,32 +302,7 @@
       {/if}
     </div>
     {/if}
-
-    <div class="foot">
-      <div class="spread">
-        {#if status.unlocked}
-          <button class="ghost tiny" onclick={lock}>Lock</button>
-        {:else}
-          <button class="ghost tiny unlock" onclick={onUnlock}>Unlock</button>
-        {/if}
-        <button
-          class="ghost icon"
-          title="Settings"
-          aria-label="Settings"
-          onclick={() => (editing = "settings")}>
-          <!-- Teeth are shallow and chunky on a solid body. Deep teeth turn
-               spiky at 16px and read as a sun or a star; the body has to stay
-               dominant for the silhouette to say gear. Generated geometry, so
-               the spacing is even. -->
-          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-            <path
-              fill="currentColor"
-              fill-rule="evenodd"
-              d="M7.62 2.89 L7.46 0.85 L12.54 0.85 L12.38 2.89 A7.5 7.5 0 0 1 13.35 3.29 L13.35 3.29 L14.68 1.73 L18.27 5.32 L16.71 6.65 A7.5 7.5 0 0 1 17.11 7.62 L17.11 7.62 L19.15 7.46 L19.15 12.54 L17.11 12.38 A7.5 7.5 0 0 1 16.71 13.35 L16.71 13.35 L18.27 14.68 L14.68 18.27 L13.35 16.71 A7.5 7.5 0 0 1 12.38 17.11 L12.38 17.11 L12.54 19.15 L7.46 19.15 L7.62 17.11 A7.5 7.5 0 0 1 6.65 16.71 L6.65 16.71 L5.32 18.27 L1.73 14.68 L3.29 13.35 A7.5 7.5 0 0 1 2.89 12.38 L2.89 12.38 L0.85 12.54 L0.85 7.46 L2.89 7.62 A7.5 7.5 0 0 1 3.29 6.65 L3.29 6.65 L1.73 5.32 L5.32 1.73 L6.65 3.29 A7.5 7.5 0 0 1 7.62 2.89 Z M10.0 6.7 A3.3 3.3 0 1 0 10.0 13.3 A3.3 3.3 0 1 0 10.0 6.7 Z" />
-          </svg>
-        </button>
-      </div>
-    </div>
+    {@render footUi()}
   </aside>
 
   <main>
@@ -297,8 +311,6 @@
         {status}
         onStatus={(s) => (status = s)}
         onClose={() => { editing = "none"; settingsRevision += 1; }} />
-    {:else if mode === "secrets"}
-      <Secrets unlocked={status.unlocked} />
     {:else if !status.unlocked}
       <div class="placeholder">
         <p class="locked-title">Vault is locked</p>
@@ -318,6 +330,7 @@
     {/if}
   </main>
 </div>
+{/if}
 
 <!-- Outside the shell so the dialog overlays the whole window rather than
      only the right-hand pane, and the list stays visible behind it. -->
@@ -332,10 +345,6 @@
 
 <style>
   .shell { height: 100%; display: grid; grid-template-columns: 272px 1fr; }
-  /* In the secrets workspace this column carries only the switcher and the
-     lock, and the projects rail inside the body does the navigating. At the
-     password width it is a stripe of empty. */
-  .shell.narrow { grid-template-columns: 148px 1fr; }
 
   aside {
     border-right: 1px solid var(--border);
