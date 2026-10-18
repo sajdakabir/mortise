@@ -56,6 +56,10 @@ pub struct ItemRow {
     pub urls: Vec<String>,
     /// Containing folder.
     pub folder: Option<String>,
+    /// Project, for the developer-secrets workspace.
+    pub project: Option<String>,
+    /// Environment within that project.
+    pub environment: Option<String>,
     /// Tags.
     pub tags: Vec<String>,
     /// Last modified, milliseconds since the Unix epoch.
@@ -71,6 +75,8 @@ impl From<ItemSummary> for ItemRow {
             username: s.meta.username,
             urls: s.meta.urls,
             folder: s.meta.folder,
+            project: s.meta.project,
+            environment: s.meta.environment,
             tags: s.meta.tags,
             updated_at_ms: s.updated_at_ms,
         }

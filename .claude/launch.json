@@ -1,11 +1,9 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "landing",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "web"],
-      "port": 4173
-    }
+    { "name": "landing", "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "web"], "port": 4173 },
+    { "name": "ui", "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "ui", "run", "dev", "--", "--port", "5174"], "port": 5174 }
   ]
 }

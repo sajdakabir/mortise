@@ -6,6 +6,7 @@
   import Avatar from "../lib/Avatar.svelte";
   import { ipc } from "../lib/ipc";
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
+  import Secrets from "./Secrets.svelte";
 
   let { status = $bindable(), dataRevision = 0, onStatus, onUnlock }: {
     status: VaultStatus;
@@ -17,6 +18,17 @@
     /// means it has to offer the way back itself.
     onUnlock: () => void;
   } = $props();
+
+  /// Which product is in view.
+  ///
+  /// Two workspaces rather than one list with a filter, because they are
+  /// navigated differently: a password is found by searching for it, a secret
+  /// by knowing its project and environment. Remembered, because whichever
+  /// someone opened last is almost always the one they want next.
+  let mode = $state<"passwords" | "secrets">(
+    (localStorage.getItem("mortise.mode") as "passwords" | "secrets") ?? "passwords",
+  );
+  $effect(() => { localStorage.setItem("mortise.mode", mode); });
 
   let query = $state("");
   let rows = $state<ItemRow[]>([]);
@@ -34,7 +46,7 @@
 
   async function refresh() {
     try {
-      rows = await ipc.search(query);
+      rows = (await ipc.search(query)).filter((r) => r.kind !== "env");
       if (selectedId && !rows.some((r) => r.id === selectedId)) selectedId = null;
       error = "";
     } catch (e) {
@@ -56,8 +68,9 @@
   /// only fire when the keystroke is not already going into a field, except
   /// ⌘F, ⌘N and Escape, which should work from anywhere.
   function onKeydown(event: KeyboardEvent) {
-    // Dialogs own the keyboard while they are up.
-    if (editing !== "none") return;
+    // Dialogs own the keyboard while they are up, and every shortcut below
+    // acts on the password list, which is not on screen in the other mode.
+    if (editing !== "none" || mode !== "passwords") return;
 
     const target = event.target as HTMLElement | null;
     const typing =
@@ -141,9 +154,16 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="shell">
+<div class="shell" class:narrow={mode === "secrets"}>
   <aside>
     <div class="topbar drag">
+      <div class="no-drag modes" role="tablist" aria-label="Workspace">
+        <button role="tab" aria-selected={mode === "passwords"} class="mode"
+          class:active={mode === "passwords"} onclick={() => (mode = "passwords")}>Passwords</button>
+        <button role="tab" aria-selected={mode === "secrets"} class="mode"
+          class:active={mode === "secrets"} onclick={() => (mode = "secrets")}>Secrets</button>
+      </div>
+      {#if mode === "passwords"}
       <div class="no-drag searchwrap">
         <input
           class="search"
@@ -154,8 +174,10 @@
           autocomplete="off" />
         {#if !query}<kbd class="hint">/</kbd>{/if}
       </div>
+      {/if}
     </div>
 
+    {#if mode === "passwords"}
     <div class="listhead spread">
       <span class="faint count">
         {rows.length}{query ? " found" : status.item_count === 1 ? " item" : " items"}
@@ -187,6 +209,7 @@
         {/each}
       {/if}
     </div>
+    {/if}
 
     <div class="foot">
       <div class="spread">
@@ -221,6 +244,8 @@
         {status}
         onStatus={(s) => (status = s)}
         onClose={() => { editing = "none"; settingsRevision += 1; }} />
+    {:else if mode === "secrets"}
+      <Secrets unlocked={status.unlocked} />
     {:else if !status.unlocked}
       <div class="placeholder">
         <p class="locked-title">Vault is locked</p>
@@ -254,6 +279,11 @@
 
 <style>
   .shell { height: 100%; display: grid; grid-template-columns: 272px 1fr; }
+  /* In the secrets workspace this column carries only the switcher and the
+     lock, and the projects rail inside the body does the navigating. At the
+     password width it is a stripe of empty. */
+  .shell.narrow { grid-template-columns: 148px 1fr; }
+  .shell.narrow .modes { flex-direction: column; }
   aside {
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
@@ -314,6 +344,22 @@
   .listhead { padding: var(--s2) var(--s3) var(--s1); flex-shrink: 0; }
   .count { font-size: 11px; font-variant-numeric: tabular-nums; }
   .tiny { font-size: 11px; padding: 3px 8px; }
+
+  /* The workspace switcher. Sits above search because it changes what search
+     would even be searching, and a control that reframes everything under it
+     belongs first. */
+  .modes { display: flex; gap: 2px; margin-bottom: var(--s2); }
+  .mode {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 11.5px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-faint);
+    border-radius: var(--radius-sm);
+  }
+  .mode:hover { color: var(--text-dim); background: var(--bg-hover); }
+  .mode.active { background: var(--bg-active); border-color: var(--border); color: var(--text); }
 
   .list { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s2); }
   .item {
