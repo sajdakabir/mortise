@@ -249,7 +249,7 @@
      second column with nothing in it. The switcher and the footer are
      snippets, so one definition serves both layouts. -->
 {#if mode === "secrets" && editing !== "settings" && status.exists}
-  <Secrets unlocked={status.unlocked} switcher={switcherUi} foot={footUi} />
+  <Secrets unlocked={status.unlocked} {onUnlock} switcher={switcherUi} foot={footUi} />
 {:else}
 <div class="shell">
   <aside>

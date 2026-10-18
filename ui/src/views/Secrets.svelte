@@ -16,7 +16,16 @@
     unlocked,
     switcher,
     foot,
-  }: { unlocked: boolean; switcher: Snippet; foot: Snippet } = $props();
+    onUnlock,
+  }: {
+    unlocked: boolean;
+    switcher: Snippet;
+    foot: Snippet;
+    /// Ask the shell for the unlock screen. Locking keeps project and key
+    /// names readable — the META key outlives it — so this view stays up and
+    /// has to offer the way back itself.
+    onUnlock: () => void;
+  } = $props();
 
   let projects = $state<ProjectSummary[]>([]);
   let project = $state<string | null>(null);
@@ -60,7 +69,6 @@
   const current = $derived(projects.find((p) => p.name === project) ?? null);
 
   async function load() {
-    if (!unlocked) { projects = []; return; }
     try {
       error = "";
       projects = await ipc.projects();
@@ -96,7 +104,11 @@
       .catch((err) => (error = errorMessage(err)));
   });
 
-  $effect(() => { if (unlocked) load(); });
+  $effect(() => { load(); });
+
+  /// Drop anything revealed the moment the vault locks. Keeping a decrypted
+  /// value on screen past the lock would make the lock a lie.
+  $effect(() => { if (!unlocked) shown = {}; });
 
   async function createProject() {
     if (busy) return;
@@ -269,6 +281,15 @@
   </aside>
 
   <section class="body">
+    {#if !unlocked}
+      <!-- Said here rather than left to the first failed save: someone can
+           paste forty lines into a sheet that was never going to write them,
+           and finding out at the end is the worst moment to learn it. -->
+      <div class="lockbar">
+        <span>Vault is locked. Names are readable; adding or revealing is not.</span>
+        <button class="ghost tiny" onclick={onUnlock}>Unlock</button>
+      </div>
+    {/if}
     {#if error && !creating && !pasting}<div class="error">{error}</div>{/if}
 
     {#if !current}
@@ -293,16 +314,16 @@
                 if (e.key === "Escape") { addingEnv = false; newEnv = ""; }
               }} />
           {:else}
-            <button class="env add" title="Add an environment"
+            <button class="env add" title="Add an environment" disabled={!unlocked}
               onclick={() => { addingEnv = true; newEnv = ""; }}>+</button>
           {/if}
         </div>
         <div class="row">
-          <button class="ghost tiny"
+          <button class="ghost tiny" disabled={!unlocked}
             onclick={() => { adding = true; newKey = ""; newValue = ""; }}>+ Secret</button>
-          <button class="ghost tiny" onclick={openPaste}>Paste .env</button>
-          <button class="ghost tiny" onclick={uploadEnv}>Upload</button>
-          <button class="ghost tiny" onclick={copyEnv} disabled={rows.length === 0}>
+          <button class="ghost tiny" disabled={!unlocked} onclick={openPaste}>Paste .env</button>
+          <button class="ghost tiny" disabled={!unlocked} onclick={uploadEnv}>Upload</button>
+          <button class="ghost tiny" onclick={copyEnv} disabled={!unlocked || rows.length === 0}>
             {copied ? "Copied" : "Copy as .env"}
           </button>
         </div>
@@ -315,9 +336,9 @@
         <div class="blank">
           <p class="faint">Nothing in <strong>{environment}</strong> yet.</p>
           <div class="row">
-            <button class="primary" onclick={openPaste}>Paste .env</button>
-            <button onclick={uploadEnv}>Upload a file</button>
-            <button onclick={() => { adding = true; newKey = ""; newValue = ""; }}>
+            <button class="primary" disabled={!unlocked} onclick={openPaste}>Paste .env</button>
+            <button disabled={!unlocked} onclick={uploadEnv}>Upload a file</button>
+            <button disabled={!unlocked} onclick={() => { adding = true; newKey = ""; newValue = ""; }}>
               Add one secret</button>
           </div>
         </div>
@@ -335,11 +356,11 @@
                 {:else}••••••••{/if}
               </span>
               <span class="acts">
-                <button class="ghost tiny"
+                <button class="ghost tiny" disabled={!unlocked}
                   onclick={() => { if (row.id in shown) { const n = { ...shown }; delete n[row.id]; shown = n; } else reveal(row.id); }}>
                   {row.id in shown ? "Hide" : "Reveal"}
                 </button>
-                <button class="ghost tiny" onclick={() => copyValue(row.id)}>
+                <button class="ghost tiny" disabled={!unlocked} onclick={() => copyValue(row.id)}>
                   {copiedId === row.id ? "Copied" : "Copy"}
                 </button>
               </span>
@@ -521,6 +542,13 @@
   .row.two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
   .row.end { justify-content: flex-end; margin-top: var(--s3); }
   .sheet textarea { min-height: 170px; font: 400 12px/1.6 var(--mono); }
+  .lockbar {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+    margin-bottom: var(--s4); padding: 8px var(--s3);
+    background: color-mix(in srgb, var(--warn) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+    border-radius: var(--radius); font-size: 12px; color: var(--text-dim);
+  }
   .report { font-size: 12px; color: var(--text-dim); margin: 0 0 var(--s2); }
   .hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 var(--s4); line-height: 1.6; }
   .env.add { padding: 5px 10px; color: var(--text-faint); }
