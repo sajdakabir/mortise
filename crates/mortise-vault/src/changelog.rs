@@ -619,11 +619,26 @@ impl Vault {
                     return Ok(());
                 }
                 let tx = self.conn().unchecked_transaction()?;
+                // A tombstone, not a bare UPDATE.
+                //
+                // An UPDATE matches nothing when this device has never seen
+                // the item, so no watermark was written — and `wins` treats a
+                // missing row as "incoming always wins". A later Upsert for
+                // the same id, which the relay chooses when to deliver, would
+                // then reinstate a secret the user deleted, live and
+                // decryptable. The row has to exist for the delete to be
+                // remembered; list, search and find_for_origin all filter
+                // deleted = 0, so it stays invisible.
                 tx.execute(
-                    "UPDATE item SET deleted = 1, sealed_meta = x'', sealed_item_key = x'',
+                    "INSERT INTO item
+                       (item_id, version, epoch, kind, sealed_meta, sealed_item_key,
+                        ciphertext, created_at_ms, updated_at_ms, deleted,
+                        lww_wall, lww_counter, lww_author)
+                     VALUES (?1, 0, 0, 0, x'', x'', x'', ?2, ?2, 1, ?3, ?4, ?5)
+                     ON CONFLICT (item_id) DO UPDATE SET
+                       deleted = 1, sealed_meta = x'', sealed_item_key = x'',
                        ciphertext = x'', updated_at_ms = ?2,
-                       lww_wall = ?3, lww_counter = ?4, lww_author = ?5
-                     WHERE item_id = ?1",
+                       lww_wall = ?3, lww_counter = ?4, lww_author = ?5",
                     params![
                         item_id.as_slice(),
                         *at_ms as i64,

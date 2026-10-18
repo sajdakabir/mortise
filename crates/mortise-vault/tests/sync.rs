@@ -425,3 +425,36 @@ fn hlc_ordering_is_total_across_devices() {
     assert!(a < b);
     assert!(Hlc::new(9) < a);
 }
+
+/// A delete that arrives before the item it deletes must stay deleted.
+///
+/// The relay chooses what each pull contains, so it can serve the delete on
+/// its own and the upsert on a later page. `deletions_propagate` only covers
+/// the case where the receiving device already holds the item.
+#[test]
+fn a_delete_that_arrives_first_is_not_undone_by_the_item() {
+    let mut p = Pair::new();
+    let id = p
+        .a
+        .create_item(&item("Leaked", "x").0, &item("Leaked", "x").1)
+        .unwrap();
+    p.a.delete_item(id).unwrap();
+
+    // Both changes exist on A. Deliver them to B in the order a hostile relay
+    // would choose: the delete alone, then the upsert.
+    let changes = p.a.unpushed_changes(1000).unwrap();
+    assert!(changes.len() >= 2, "expected an upsert and a delete");
+    let (first, rest) = changes.split_at(1);
+
+    p.b.ingest(rest).unwrap();
+    p.b.apply_pending().unwrap();
+    p.b.ingest(first).unwrap();
+    p.b.apply_pending().unwrap();
+
+    assert_eq!(
+        p.b.item_count().unwrap(),
+        0,
+        "a deleted secret came back when its upsert arrived after the delete"
+    );
+    assert!(matches!(p.b.reveal(id), Err(Error::ItemNotFound)));
+}
