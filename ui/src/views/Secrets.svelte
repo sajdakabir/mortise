@@ -147,10 +147,15 @@
     }
   }
 
+  /// Reopen onto whatever was being written.
+  ///
+  /// The project and environment follow the current selection, since that is
+  /// what was clicked to get here, but the text is left alone: it is the one
+  /// thing in the sheet that took effort, and it is cleared when it has been
+  /// saved rather than when the sheet is dismissed.
   function openPaste() {
     pasteProject = project ?? "";
     pasteEnv = environment ?? "";
-    pasteText = "";
     report = null;
     error = "";
     pasting = true;
@@ -261,7 +266,7 @@
     <div class="railhead spread">
       <span class="label">Projects</span>
       <button class="ghost tiny" disabled={!unlocked}
-        onclick={() => { newName = ""; newDescription = ""; error = ""; creating = true; }}>
+        onclick={() => { error = ""; creating = true; }}>
         + New</button>
     </div>
     <div class="projects">
@@ -296,7 +301,7 @@
       <div class="nothing">
         <p class="faint">No projects yet. One per codebase, with its own environments.</p>
         <button class="primary" disabled={!unlocked}
-          onclick={() => { newName = ""; newDescription = ""; error = ""; creating = true; }}>
+          onclick={() => { error = ""; creating = true; }}>
           New project</button>
       </div>
     {:else}
@@ -386,7 +391,7 @@
 </div>
 
 {#if creating}
-  <div class="scrim" role="presentation"></div>
+  <div class="scrim" role="presentation" onclick={() => (creating = false)}></div>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="sheet" role="dialog" aria-label="New project" tabindex="-1"
     onkeydown={(e) => { if (e.key === "Escape") creating = false; }}>
@@ -420,10 +425,10 @@
 {/if}
 
 {#if pasting}
-  <!-- Closing on a click outside would throw away a file someone has just
-       pasted, which is the one thing this sheet holds. It closes from the
-       button or Escape, both of which are deliberate. -->
-  <div class="scrim" role="presentation"></div>
+  <!-- Closes on a click outside, and keeps what was typed. Dismissing a
+       sheet and destroying its contents are two different things, and only
+       the first is what a click out of the way asks for. -->
+  <div class="scrim" role="presentation" onclick={() => (pasting = false)}></div>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="sheet" role="dialog" aria-label="Paste a .env file"
     tabindex="-1" onkeydown={onSheetKeydown}>
