@@ -48,6 +48,10 @@ pub struct AppState {
     inner: Mutex<Inner>,
     /// Name of a browser waiting to be approved, if any.
     pending_association: Mutex<Option<String>>,
+    /// Token the pending request presented, so an approval can be tied to it.
+    pending_token: Mutex<Option<String>>,
+    /// Token the approved association was granted against.
+    approved_token: Mutex<Option<String>>,
     /// An approved association the extension has not collected yet.
     ///
     /// Held in memory only. If the app restarts before the extension picks it
@@ -74,6 +78,8 @@ impl AppState {
                 idle_timeout: DEFAULT_IDLE_TIMEOUT,
             }),
             pending_association: Mutex::new(None),
+            pending_token: Mutex::new(None),
+            approved_token: Mutex::new(None),
             approved_association: Mutex::new(None),
             pending_capture: Mutex::new(None),
             open_error: Mutex::new(None),
@@ -115,6 +121,18 @@ impl AppState {
         }
     }
 
+    /// Remember which request token the pending approval belongs to.
+    pub fn set_pending_token(&self, token: String) {
+        if let Ok(mut t) = self.pending_token.lock() {
+            *t = Some(token);
+        }
+    }
+
+    /// The token the pending request presented.
+    pub fn pending_token(&self) -> Option<String> {
+        self.pending_token.lock().ok()?.clone()
+    }
+
     /// The browser currently asking to pair, if any.
     pub fn pending_association(&self) -> Option<String> {
         self.pending_association.lock().ok()?.clone()
@@ -127,8 +145,13 @@ impl AppState {
         }
     }
 
-    /// Hand an approved association to the next `associate` call.
+    /// Hand an approved association to the client that asked for it.
     pub fn set_approved_association(&self, association: Association) {
+        if let (Ok(mut approved), Ok(pending)) =
+            (self.approved_token.lock(), self.pending_token.lock())
+        {
+            *approved = pending.clone();
+        }
         if let Ok(mut approved) = self.approved_association.lock() {
             *approved = Some(association);
         }
@@ -136,8 +159,26 @@ impl AppState {
     }
 
     /// Collect an approved association. Returns it at most once.
-    pub fn take_approved_association(&self) -> Option<Association> {
-        self.approved_association.lock().ok()?.take()
+    /// Release the approved association, but only to the client it was
+    /// approved for.
+    ///
+    /// The token is what ties an approval to a requester. Without it the
+    /// approved key sits in a process-wide slot that any local process can
+    /// collect by polling `associate` — which turns "a human clicked approve"
+    /// into "a human clicked approve for somebody".
+    pub fn take_approved_association(&self, token: Option<&str>) -> Option<Association> {
+        let expected = self.approved_token.lock().ok()?.clone()?;
+        let presented = token?;
+        if !bool::from(
+            subtle::ConstantTimeEq::ct_eq(presented.as_bytes(), expected.as_bytes()),
+        ) {
+            return None;
+        }
+        let taken = self.approved_association.lock().ok()?.take();
+        if taken.is_some() {
+            *self.approved_token.lock().ok()? = None;
+        }
+        taken
     }
 
     /// Where the vault file lives.

@@ -74,15 +74,27 @@ const handlers = {
   },
 
   async associate() {
+    // The app issues a token with its first "needs approval" reply and
+    // releases the key only to whoever comes back with it. Holding it across
+    // polls is what makes the user's click approve *this* browser rather than
+    // whichever process asks next.
+    const { pairingToken } = await chrome.storage.local.get("pairingToken");
     const response = await sendNative({
       type: "associate",
       client_name: browserName(),
+      request_token: pairingToken ?? null,
     });
+
+    if (response?.type === "approval_required" && response.request_token) {
+      await chrome.storage.local.set({ pairingToken: response.request_token });
+    }
     if (response?.type === "associated") {
       await chrome.storage.local.set({
         associationId: response.id,
         associationKey: response.key,
       });
+      // Single use: a spent token should not sit in storage.
+      await chrome.storage.local.remove("pairingToken");
     }
     return response;
   },
@@ -102,7 +114,7 @@ const handlers = {
   },
 
   async unpair() {
-    await chrome.storage.local.remove(["associationId", "associationKey"]);
+    await chrome.storage.local.remove(["associationId", "associationKey", "pairingToken"]);
     return { type: "ok" };
   },
 

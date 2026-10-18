@@ -134,6 +134,7 @@ fn unprovable_requests_have_no_payload() {
     assert!(proof_payload(&Request::Status).is_none());
     assert!(
         proof_payload(&Request::Associate {
+            request_token: None,
             client_name: "Chrome".into()
         })
         .is_none()
