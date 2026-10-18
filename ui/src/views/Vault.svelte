@@ -30,6 +30,36 @@
   );
   $effect(() => { localStorage.setItem("mortise.mode", mode); });
 
+  /// The workspace menu.
+  ///
+  /// A menu rather than a row of tabs: tabs spend horizontal space in
+  /// proportion to how many there are, and this list is going to grow. A
+  /// trigger that names the current workspace costs the same whether there
+  /// are two behind it or six.
+  let menuOpen = $state(false);
+  let projectCount = $state(0);
+
+  $effect(() => {
+    // Named so the count beside Secrets is the number of projects, not of
+    // secrets: it is the thing the rail lists.
+    dataRevision;
+    if (!status.searchable) { projectCount = 0; return; }
+    ipc.projects().then((p) => (projectCount = p.length)).catch(() => (projectCount = 0));
+  });
+
+  const WORKSPACES = [
+    { id: "passwords" as const, label: "Passwords" },
+    { id: "secrets" as const, label: "Secrets" },
+  ];
+  const workspaceLabel = $derived(
+    WORKSPACES.find((w) => w.id === mode)?.label ?? "Passwords",
+  );
+
+  function chooseWorkspace(next: "passwords" | "secrets") {
+    mode = next;
+    menuOpen = false;
+  }
+
   let query = $state("");
   let rows = $state<ItemRow[]>([]);
   let selectedId = $state<string | null>(null);
@@ -70,6 +100,10 @@
   function onKeydown(event: KeyboardEvent) {
     // Dialogs own the keyboard while they are up, and every shortcut below
     // acts on the password list, which is not on screen in the other mode.
+    if (menuOpen && event.key === "Escape") {
+      menuOpen = false;
+      return;
+    }
     if (editing !== "none" || mode !== "passwords") return;
 
     const target = event.target as HTMLElement | null;
@@ -157,11 +191,30 @@
 <div class="shell" class:narrow={mode === "secrets"}>
   <aside>
     <div class="topbar drag">
-      <div class="no-drag modes" role="tablist" aria-label="Workspace">
-        <button role="tab" aria-selected={mode === "passwords"} class="mode"
-          class:active={mode === "passwords"} onclick={() => (mode = "passwords")}>Passwords</button>
-        <button role="tab" aria-selected={mode === "secrets"} class="mode"
-          class:active={mode === "secrets"} onclick={() => (mode = "secrets")}>Secrets</button>
+      <div class="no-drag switcher">
+        <button class="trigger" aria-haspopup="menu" aria-expanded={menuOpen}
+          onclick={() => (menuOpen = !menuOpen)}>
+          <span class="t">{workspaceLabel}</span>
+          <span class="chev" aria-hidden="true">⌄</span>
+        </button>
+
+        {#if menuOpen}
+          <!-- A transparent catcher rather than a window listener: it closes
+               on the click that opens something else, in one place, and it
+               cannot fight the trigger's own toggle. -->
+          <div class="catch" role="presentation" onclick={() => (menuOpen = false)}></div>
+          <div class="menu" role="menu" aria-label="Workspace">
+            <p class="menulabel label">Products</p>
+            {#each WORKSPACES as w (w.id)}
+              <button role="menuitem" class="menuitem" class:on={w.id === mode}
+                onclick={() => chooseWorkspace(w.id)}>
+                <span class="tick" aria-hidden="true">{w.id === mode ? "✓" : ""}</span>
+                <span class="t">{w.label}</span>
+                <span class="n faint">{w.id === "passwords" ? rows.length : projectCount}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
       {#if mode === "passwords"}
       <div class="no-drag searchwrap">
@@ -283,7 +336,7 @@
      lock, and the projects rail inside the body does the navigating. At the
      password width it is a stripe of empty. */
   .shell.narrow { grid-template-columns: 148px 1fr; }
-  .shell.narrow .modes { flex-direction: column; }
+
   aside {
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
@@ -348,18 +401,36 @@
   /* The workspace switcher. Sits above search because it changes what search
      would even be searching, and a control that reframes everything under it
      belongs first. */
-  .modes { display: flex; gap: 2px; margin-bottom: var(--s2); }
-  .mode {
-    flex: 1;
-    padding: 5px 8px;
-    font-size: 11.5px;
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--text-faint);
-    border-radius: var(--radius-sm);
+  .switcher { position: relative; margin-bottom: var(--s2); }
+  .trigger {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
+    width: 100%; padding: 6px 10px; font-size: 12.5px;
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius);
   }
-  .mode:hover { color: var(--text-dim); background: var(--bg-hover); }
-  .mode.active { background: var(--bg-active); border-color: var(--border); color: var(--text); }
+  .trigger:hover { background: var(--bg-hover); }
+  .trigger .chev { color: var(--text-faint); font-size: 12px; line-height: 1; }
+
+  /* Covers the window beneath the menu so the next click anywhere dismisses
+     it, without a global listener racing the trigger's own toggle. */
+  .catch { position: fixed; inset: 0; z-index: 10; }
+
+  .menu {
+    position: absolute; z-index: 11; top: calc(100% + 4px); left: 0;
+    min-width: 212px;
+    background: var(--bg-raised); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); box-shadow: var(--shadow-2); padding: var(--s1);
+  }
+  .menulabel { display: block; padding: 6px 9px 4px; }
+  .menuitem {
+    display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: var(--s2);
+    width: 100%; text-align: left; padding: 6px 9px; font-size: 12.5px;
+    background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--text-dim);
+  }
+  .menuitem:hover { background: var(--bg-hover); color: var(--text); }
+  .menuitem.on { color: var(--text); }
+  .menuitem .tick { color: var(--text); font-size: 11px; }
+  .menuitem .n { font-variant-numeric: tabular-nums; font-size: 11px; }
 
   .list { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s2); }
   .item {
