@@ -74,15 +74,27 @@ const handlers = {
   },
 
   async associate() {
+    // The app issues a token with its first "needs approval" reply and
+    // releases the key only to whoever comes back with it. Holding it across
+    // polls is what makes the user's click approve *this* browser rather than
+    // whichever process asks next.
+    const { pairingToken } = await chrome.storage.local.get("pairingToken");
     const response = await sendNative({
       type: "associate",
       client_name: browserName(),
+      request_token: pairingToken ?? null,
     });
+
+    if (response?.type === "approval_required" && response.request_token) {
+      await chrome.storage.local.set({ pairingToken: response.request_token });
+    }
     if (response?.type === "associated") {
       await chrome.storage.local.set({
         associationId: response.id,
         associationKey: response.key,
       });
+      // Single use: a spent token should not sit in storage.
+      await chrome.storage.local.remove("pairingToken");
     }
     return response;
   },
@@ -102,7 +114,7 @@ const handlers = {
   },
 
   async unpair() {
-    await chrome.storage.local.remove(["associationId", "associationKey"]);
+    await chrome.storage.local.remove(["associationId", "associationKey", "pairingToken"]);
     return { type: "ok" };
   },
 
@@ -136,7 +148,7 @@ const handlers = {
    * which was the whole problem with an invoke-only extension.
    */
   async pageHasLogin(_message, sender) {
-    const origin = originOf(sender?.tab);
+    const origin = senderOrigin(sender);
     if (!origin) return { type: "logins", items: [] };
 
     const response = await sendSigned({ type: "logins", origin });
@@ -156,17 +168,20 @@ const handlers = {
   /**
    * A login the content script saw submitted.
    *
-   * `sender.tab.url` is the origin, not anything the script reported. The
-   * content script runs inside the page, so treating its word as authoritative
-   * would hand origin control to whatever is on that page — the exact mistake
-   * everything else here is shaped to avoid.
+   * The origin is the *frame's*, from `sender`, not anything the script
+   * reported. The content script runs inside the page, so treating its word as
+   * authoritative would hand origin control to whatever is on that page — the
+   * exact mistake everything else here is shaped to avoid. It is the frame's
+   * rather than the tab's because a subframe is a different site, and
+   * attributing its message to the embedding page was that same mistake by
+   * another route.
    *
    * The app decides whether to prompt and the user decides whether to save.
    * Nothing is written to the vault by this path alone.
    */
   async capture({ username, password }, sender) {
     if (!password) return { type: "ok" };
-    const origin = originOf(sender?.tab);
+    const origin = senderOrigin(sender);
     if (!origin) return { type: "ok" };
 
     const response = await sendSigned({
@@ -193,20 +208,26 @@ const handlers = {
   },
 
   async fill({ itemId }, sender) {
-    // The sender's tab when a page asked, the active one when the popup did.
+    // Two callers with different notions of "here". A content script speaks
+    // for its own frame; the popup speaks for the active tab's main frame.
+    // The credential has to go back to whichever one was authorised, so the
+    // origin and the injection target are decided together.
+    const fromPage = sender?.tab != null;
     const tab = sender?.tab ?? (await activeTab());
-    const origin = originOf(tab);
-    if (!origin) {
+    const frameId = fromPage ? (sender.frameId ?? 0) : 0;
+    const origin = fromPage ? senderOrigin(sender) : originOf(tab);
+    if (!origin || tab?.id == null) {
       return { type: "error", code: "bad_origin", message: "This page cannot be filled." };
     }
 
     const response = await sendSigned({ type: "credential", item_id: itemId, origin });
     if (response?.type !== "credential") return response;
 
-    // Inject only now, and only into this tab. Nothing of ours runs on any
-    // page until the user has chosen a credential for it.
+    // Inject only now, and only into the frame the origin came from. Filling
+    // the main frame on a subframe's request would put the credential
+    // somewhere the user never authorised.
     const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: false },
+      target: { tabId: tab.id, frameIds: [frameId] },
       func: fillForm,
       args: [response.username ?? "", response.password],
     });
@@ -248,6 +269,35 @@ async function activeOrigin() {
 }
 
 /** The tab's origin, or null for pages that must never be filled. */
+/**
+ * The origin of the frame a content script message came from.
+ *
+ * `sender.tab.url` is the *tab's* URL, which is the top-level document.
+ * Content scripts run in every frame, so attributing a subframe's message to
+ * the tab would let anything embedded on a page — an ad, a widget, any
+ * third-party iframe — speak with the embedding site's authority and be
+ * answered with that site's credentials.
+ *
+ * `sender.origin` is the frame's own origin and is exactly the right value;
+ * `sender.url` is the frame's URL and covers the older browsers that predate
+ * it. Neither is reported by the page.
+ */
+function senderOrigin(sender) {
+  if (sender?.origin) {
+    return sender.origin.startsWith("https://") || sender.origin.startsWith("http://")
+      ? sender.origin
+      : null;
+  }
+  if (!sender?.url) return null;
+  try {
+    const url = new URL(sender.url);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 function originOf(tab) {
   if (!tab?.url) return null;
   try {

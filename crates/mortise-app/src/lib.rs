@@ -99,7 +99,7 @@ pub fn run() {
             commands::delete_project,
             commands::import_env,
             commands::import_env_file,
-            commands::export_env,
+            commands::copy_env,
             commands::delete_item,
             commands::generate_password,
             commands::password_entropy,

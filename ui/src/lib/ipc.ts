@@ -15,6 +15,7 @@ import type {
   NativeHostStatus, PairedBrowser, SyncReport, SyncStatus, VaultStatus,
   ProjectSummary,
   EnvImportReport,
+  EnvCopyReport,
 } from "./types";
 
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -74,8 +75,8 @@ export const ipc = {
     call<EnvImportReport>("import_env", { project, environment, text }),
   importEnvFile: (project: string, environment: string, path: string) =>
     call<EnvImportReport>("import_env_file", { project, environment, path }),
-  exportEnv: (project: string, environment: string) =>
-    call<string>("export_env", { project, environment }),
+  copyEnv: (project: string, environment: string) =>
+    call<EnvCopyReport>("copy_env", { project, environment }),
 };
 
 /** Fires when a browser asks to pair. The payload is the browser's name. */
@@ -330,14 +331,13 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       }
       return as({ added, updated, unchanged: 0, skipped: 0, unreadable: 0, duplicates: [] });
     }
-    case "export_env":
-      return as(
-        mockState.rows
-          .filter((r) => r.kind === "env" && r.project === args.project && r.environment === args.environment)
-          .map((r) => `${r.title}=mock-value`)
-          .sort()
-          .join("\n") + "\n",
-      );
+    case "copy_env": {
+      const n = mockState.rows.filter(
+        (r) => r.kind === "env" && r.project === args.project && r.environment === args.environment,
+      ).length;
+      if (n === 0) throw { code: "bad_request", message: "No secrets in that environment." };
+      return as({ copied: n, clears_in_secs: 30 });
+    }
     default:
       return as(undefined);
   }

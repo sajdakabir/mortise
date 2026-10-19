@@ -90,7 +90,10 @@ fn handle(app: &AppHandle, request: Request) -> Response {
             }
         }
 
-        Request::Associate { client_name } => associate(app, client_name),
+        Request::Associate {
+            client_name,
+            request_token,
+        } => associate(app, client_name, request_token.as_deref()),
 
         // Everything below needs a valid proof from a paired browser.
         Request::Logins { origin, .. } => match associations::verify(&request) {
@@ -119,28 +122,52 @@ fn handle(app: &AppHandle, request: Request) -> Response {
 
 /// Pairing requires a human to approve in the app window.
 ///
-/// A client cannot pair itself. The first call records who is asking and
-/// returns `approval_required`; once someone clicks approve, the next call
-/// collects the key. That round trip is deliberate — it is the only thing
-/// standing between a rogue local process and the vault.
-fn associate(app: &AppHandle, client_name: &str) -> Response {
+/// A client cannot pair itself. The first call records who is asking, mints a
+/// request token and returns it with `approval_required`; once someone clicks
+/// approve, the client that holds that token collects the key. That round
+/// trip is the only thing standing between a rogue local process and the
+/// vault, and it only works because the approval is bound to the requester —
+/// a bare "approved" slot is collected by whoever polls first, which is the
+/// attacker, because the real browser only re-asks when the user clicks.
+fn associate(app: &AppHandle, client_name: &str, request_token: Option<&str>) -> Response {
     let state = app.state::<AppState>();
 
-    if let Some(association) = state.take_approved_association() {
+    // Only the client the approval was granted to can collect it. Without
+    // this the approved key sat in a process-wide slot, and any local process
+    // polling `associate` collected it the moment the user clicked approve —
+    // for its prompt or for a genuine one. Approval has to approve a
+    // requester, not merely an act of approving.
+    if let Some(association) = state.take_approved_association(request_token) {
         return Response::Associated {
             id: association.id,
             key: association.key,
         };
     }
 
+    // A client already holding a token is polling; do not re-raise the
+    // prompt or re-issue a token, or every poll would reset the request the
+    // user is looking at.
+    if let Some(token) = request_token
+        && state.pending_token().as_deref() == Some(token)
+    {
+        return Response::ApprovalRequired {
+            request_token: token.to_string(),
+        };
+    }
+
+    let Ok(token) = mortise_crypto::rand::bytes::<16>() else {
+        return Response::error("internal", "Could not start pairing.");
+    };
+    let token = token.iter().map(|b| format!("{b:02x}")).collect::<String>();
+
     let name = sanitize_client_name(client_name);
     state.set_pending_association(name.clone());
+    state.set_pending_token(token.clone());
     let _ = app.emit("browser-association-requested", name);
 
-    Response::error(
-        "approval_required",
-        "Approve this browser in the Mortise window.",
-    )
+    Response::ApprovalRequired {
+        request_token: token,
+    }
 }
 
 fn logins(app: &AppHandle, origin: &str) -> Response {

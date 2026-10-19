@@ -34,6 +34,12 @@ pub struct SyncOutcome {
     pub more: bool,
 }
 
+/// How far one pull may move the cursor.
+///
+/// The relay's own page limit, so honest syncing is never slowed, and a
+/// relay that lies about the cursor gains one page rather than the account.
+const MAX_CURSOR_ADVANCE: u64 = 500;
+
 /// Drives sync for one vault against one relay.
 pub struct Syncer<T: Transport> {
     transport: T,
@@ -204,14 +210,35 @@ impl<T: Transport> Syncer<T> {
                 .collect();
             outcome.rejected += (parsed.changes.len() - changes.len()) as u32;
 
+            let rejected_before = outcome.rejected;
             let report = vault.ingest(&changes)?;
             outcome.pulled += report.accepted;
             outcome.rejected += report.rejected;
 
-            vault.set_sync_cursor(parsed.cursor)?;
+            // The cursor is ours to advance, not the relay's to set.
+            //
+            // It used to be stored as whatever the relay sent, through
+            // MAX(cursor, ?) — a one-way ratchet the relay controlled. One
+            // reply carrying i64::MAX pinned the device forever: every later
+            // pull asked for rows after that, matched nothing, and reported a
+            // healthy sync with nothing new. It survived the user moving to an
+            // honest relay, because the poisoned value lives in the client.
+            //
+            // Clamped to one page beyond where we were, which is the fastest
+            // honest progress possible, so a lying cursor costs at most one
+            // round trip instead of the account.
+            //
+            // Held back entirely when anything in the page was refused, so an
+            // orphaned or not-yet-trusted change is re-pulled rather than
+            // skipped past and lost.
+            let refused = report.rejected > 0 || outcome.rejected > rejected_before;
+            if !refused {
+                let ceiling = cursor.saturating_add(MAX_CURSOR_ADVANCE);
+                vault.set_sync_cursor(parsed.cursor.min(ceiling))?;
+            }
             outcome.more = parsed.more;
 
-            if !parsed.more {
+            if !parsed.more || refused {
                 break;
             }
         }

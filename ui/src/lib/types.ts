@@ -161,3 +161,9 @@ export interface EnvImportReport {
   unreadable: number;
   duplicates: string[];
 }
+
+/// What a bulk clipboard copy did. Counts only — the text stays in Rust.
+export interface EnvCopyReport {
+  copied: number;
+  clears_in_secs: number;
+}

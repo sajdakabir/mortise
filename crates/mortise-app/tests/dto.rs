@@ -95,3 +95,38 @@ fn populated_metadata_is_preserved() {
     assert_eq!(meta.folder.as_deref(), Some("Work"));
     assert_eq!(meta.tags.len(), 2);
 }
+
+/// The loopback exemption must look at the host, not anywhere in the string.
+///
+/// `contains` accepted every URL in the rejected list below, each of which
+/// would have carried the whole sync stream in plaintext to someone else's
+/// server while appearing to have passed a check.
+#[test]
+fn only_a_real_loopback_host_may_use_http() {
+    for url in [
+        "http://127.0.0.1:8787",
+        "http://localhost:8787/v1",
+        "http://LOCALHOST:8787",
+        "http://[::1]:8787",
+    ] {
+        assert!(
+            mortise_app_lib::commands::is_loopback_host(url),
+            "{url} should be allowed over http"
+        );
+    }
+
+    for url in [
+        "http://relay.localhost.evil.example/",
+        "http://evil.example/localhost",
+        "http://evil.example/?r=localhost",
+        "http://evil.example/#127.0.0.1",
+        "http://127.0.0.1@evil.example/",
+        "http://localhost.evil.example:8787",
+        "http://evil.example",
+    ] {
+        assert!(
+            !mortise_app_lib::commands::is_loopback_host(url),
+            "{url} must not be treated as this machine"
+        );
+    }
+}

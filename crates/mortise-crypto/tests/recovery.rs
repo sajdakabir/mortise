@@ -30,7 +30,7 @@ fn round_trips_for_random_keys() {
 fn encoding_is_stable() {
     // Pins the format. Changing it strands every kit already printed.
     assert_eq!(
-        recovery::encode(&key()),
+        recovery::encode(&key()).as_str(),
         "TP1-AAISE-M2EKV-THPCE-ZVK54-ZXPO7-4ASGR-LHRGV-43376-3S5JQ-5SUGI-IIJCY"
     );
 }
@@ -74,8 +74,8 @@ fn decoding_tolerates_how_people_actually_type() {
         kit.to_lowercase(),
         kit.replace('-', ""),
         kit.replace('-', " "),
-        format!("  {kit}  "),
-        format!("{kit}\n"),
+        format!("  {}  ", &*kit),
+        format!("{}\n", &*kit),
         body.to_string(),
         body.replace('-', ""),
         kit.replace('-', "--"),

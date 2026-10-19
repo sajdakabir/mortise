@@ -679,3 +679,15 @@ fn projects_are_still_listable_while_locked() {
     f.relock();
     assert_eq!(f.vault.projects().unwrap()[0].name, "acme-api");
 }
+
+/// A project id comes from the webview, so a malformed one must be an error
+/// rather than a panic. Slicing by byte index on a multi-byte character used
+/// to take the process down.
+#[test]
+fn a_malformed_project_id_is_refused_not_fatal() {
+    let mut f = Fixture::new();
+    for bad in ["é", "zz", "abc", "", "🙂🙂", "00ff00ffzz"] {
+        assert!(f.vault.add_environment(bad, "dev").is_err(), "{bad:?}");
+        assert!(f.vault.delete_project(bad).is_err(), "{bad:?}");
+    }
+}

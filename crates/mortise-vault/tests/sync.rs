@@ -425,3 +425,44 @@ fn hlc_ordering_is_total_across_devices() {
     assert!(a < b);
     assert!(Hlc::new(9) < a);
 }
+
+/// A change whose parent is missing is refused, not applied around.
+///
+/// The relay chooses what each pull contains, so it can withhold one change
+/// and serve its descendants. Accepting those leaves a hole nothing notices:
+/// here, a delete applied without its upsert used to leave no tombstone, and
+/// the upsert then reinstated a secret the user had deleted.
+///
+/// Rejecting keeps the sync cursor behind the gap, so the withheld change is
+/// re-pulled rather than lost — the second delivery below is that retry.
+#[test]
+fn a_change_whose_parent_is_missing_is_rejected_until_it_arrives() {
+    let mut p = Pair::new();
+    let id = p
+        .a
+        .create_item(&item("Leaked", "x").0, &item("Leaked", "x").1)
+        .unwrap();
+    p.a.delete_item(id).unwrap();
+
+    let changes = p.a.unpushed_changes(1000).unwrap();
+    assert!(changes.len() >= 2, "expected an upsert and a delete");
+    let (upsert, delete) = changes.split_at(1);
+
+    // The relay serves the delete alone, withholding the upsert it descends
+    // from. It must not be applied.
+    let report = p.b.ingest(delete).unwrap();
+    assert_eq!(report.rejected, 1, "an orphaned change was accepted");
+    p.b.apply_pending().unwrap();
+
+    // The withheld change arrives.
+    p.b.ingest(upsert).unwrap();
+    p.b.apply_pending().unwrap();
+
+    // And the delete, re-pulled because the cursor never passed it.
+    let report = p.b.ingest(delete).unwrap();
+    assert_eq!(report.rejected, 0, "the delete should apply once its parent is here");
+    p.b.apply_pending().unwrap();
+
+    assert_eq!(p.b.item_count().unwrap(), 0, "a deleted secret came back");
+    assert!(matches!(p.b.reveal(id), Err(Error::ItemNotFound)));
+}

@@ -96,6 +96,18 @@ VK@n   = 256-bit random             n = key epoch, incremented on every revocati
 per member device d:
   wrapped_VK[d] = HPKE_Seal(pk_kex(d), VK@n, info = "truepass/v1/vaultkey")
 
+  > **Known gap, v1.** This is HPKE Base mode: it gives confidentiality to
+  > the recipient and no sender authentication. A wrapped key that opens
+  > proves only that somebody knew `pk_kex(d)`, which is public. Combined
+  > with §6's rotation — whose signed ACL entry commits to an epoch number
+  > and not to the key — anyone able to write where a device reads its
+  > wrapped keys can substitute a vault key of their choosing. That includes
+  > a hostile relay and a member revoked after they synced the ACL, which
+  > means revocation does not currently give the forward secrecy §6 claims.
+  > The fix is Auth mode with the sender required to be an admin at that
+  > epoch, or a key commitment inside the signed RotateKey; both change the
+  > wrapped-key format and need a version bump.
+
 IK     = 256-bit random, per item version
 sealed_IK  = XChaCha20P1305(key = VK@n, nonce = random_24B, pt = IK)
 ciphertext = XChaCha20P1305(key = IK, nonce = random_24B,

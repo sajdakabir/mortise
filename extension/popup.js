@@ -124,11 +124,16 @@ async function pair() {
     return;
   }
 
+  // Needing approval is its own reply now, not an error, because it carries
+  // the token this browser must come back with.
+  const waiting = response?.type === "approval_required";
   app.replaceChildren(
     notice(
-      response?.code === "approval_required" ? "warn" : "bad",
-      response?.code === "approval_required" ? "Not approved yet" : "Pairing failed",
-      response?.message ?? "Could not pair with Mortise.",
+      waiting ? "warn" : "bad",
+      waiting ? "Not approved yet" : "Pairing failed",
+      waiting
+        ? "Approve this browser in the Mortise window, then come back."
+        : (response?.message ?? "Could not pair with Mortise."),
       button("Check again", pair, true),
     ),
   );

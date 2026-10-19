@@ -98,7 +98,12 @@ pub fn create_vault(state: State<'_, AppState>, master_password: String) -> CmdR
     state.install(vault);
     state.touch();
 
-    Ok(NewVault { recovery_kit: kit })
+    // The one place the account key leaves Rust, and the reason the vault
+    // exists: the user has to be able to write it down. Everything upstream
+    // keeps it in Zeroizing; this copy is deliberate and documented in dto.rs.
+    Ok(NewVault {
+        recovery_kit: kit.to_string(),
+    })
 }
 
 /// Unlock with the master password.
@@ -494,22 +499,35 @@ pub fn import_env_file(
     environment: String,
     path: String,
 ) -> CmdResult<EnvImportReport> {
-    let text = std::fs::read_to_string(&path)
+    let text = std::fs::read_to_string(readable_plain_file(&path)?)
         .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
     import_env(state, project, environment, text)
 }
 
-/// A project's environment as `.env` text.
+/// Copy a project's environment to the clipboard as `.env` text.
+///
+/// The text never crosses the IPC boundary. An earlier version returned it to
+/// the webview, which made it the bulk variant the surface rules at the top of
+/// this file say does not exist: two calls enumerated every project and
+/// environment, and one call per environment dumped every secret in it, with
+/// no id and no per-item action. The webview then wrote it to the clipboard
+/// itself, so unlike every other copy here nothing ever cleared it.
+///
+/// Rust reads, formats, writes and schedules the same verified clear as
+/// [`copy_secret`], and the webview learns only how many variables went and
+/// how long it has.
 #[tauri::command]
-pub fn export_env(
+pub fn copy_env(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     project: String,
     environment: String,
-) -> CmdResult<String> {
+) -> CmdResult<EnvCopyReport> {
     use mortise_vault::envfile;
+    use tauri_plugin_clipboard_manager::ClipboardExt;
 
     state.touch();
-    state.with_vault(|vault| {
+    let text = state.with_vault(|vault| -> CmdResult<Zeroizing<String>> {
         let v = vault.ok_or_else(|| state.no_vault_error())?;
 
         let mut rows: Vec<_> = v
@@ -521,13 +539,13 @@ pub fn export_env(
                     && row.meta.environment.as_deref() == Some(environment.as_str())
             })
             .collect();
-        // Alphabetical, so the file is diffable against the last time someone
-        // exported it rather than ordered by whenever each was created.
+        // Alphabetical, so the file diffs against the last export rather than
+        // against the order things happened to be created in.
         rows.sort_by(|a, b| a.meta.title.cmp(&b.meta.title));
 
         let mut vars = Vec::new();
         for row in rows {
-            // Bound, then matched by reference: ItemPayload is ZeroizeOnDrop,
+            // Bound then matched by reference: ItemPayload is ZeroizeOnDrop,
             // so a field cannot be moved out of a temporary.
             let payload = v.reveal(row.id)?;
             if let mortise_vault::ItemPayload::EnvSecret { value } = &payload {
@@ -540,8 +558,43 @@ pub fn export_env(
         if vars.is_empty() {
             return Err(CmdError::bad_request("No secrets in that environment."));
         }
-        Ok(envfile::format(&vars))
+        Ok(Zeroizing::new(envfile::format(&vars)))
+    })?;
+
+    let count = text.lines().filter(|l| !l.trim().is_empty()).count() as u32;
+
+    app.clipboard().write_text(text.as_str()).map_err(|e| {
+        eprintln!("mortise: clipboard write failed: {e}");
+        CmdError::bad_request("Could not write to the clipboard.")
+    })?;
+
+    let expected = Zeroizing::new(text.as_str().to_owned());
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(CLIPBOARD_CLEAR_AFTER);
+        if handle
+            .clipboard()
+            .read_text()
+            .map(Zeroizing::new)
+            .is_ok_and(|current| *current == *expected)
+        {
+            let _ = handle.clipboard().write_text(String::new());
+        }
+    });
+
+    Ok(EnvCopyReport {
+        copied: count,
+        clears_in_secs: CLIPBOARD_CLEAR_AFTER.as_secs(),
     })
+}
+
+/// What a bulk copy did. Counts only — never the text.
+#[derive(serde::Serialize)]
+pub struct EnvCopyReport {
+    /// Variables placed on the clipboard.
+    pub copied: u32,
+    /// Seconds until the clipboard is cleared.
+    pub clears_in_secs: u64,
 }
 
 /// Import a CSV export from another password manager.
@@ -557,7 +610,7 @@ pub fn import_csv(state: State<'_, AppState>, path: String) -> CmdResult<crate::
 
     state.touch();
 
-    let file = std::fs::File::open(&path)
+    let file = std::fs::File::open(readable_plain_file(&path)?)
         .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
     let (items, report) = import::parse(std::io::BufReader::new(file))?;
 
@@ -692,14 +745,19 @@ pub fn copy_secret(
 
     // Clear only if the clipboard still holds what we put there. Overwriting
     // whatever the user copied in the meantime would be its own small disaster.
-    let expected = value.to_string();
+    // Zeroizing, not a bare String: `value` derefs to String, so `to_string`
+    // would allocate an unprotected copy of the password that lives for the
+    // whole clear window and is freed without being wiped.
+    let expected = Zeroizing::new(value.as_str().to_owned());
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(CLIPBOARD_CLEAR_AFTER);
         if handle
             .clipboard()
             .read_text()
-            .is_ok_and(|current| current == expected)
+            // The clipboard read is itself the secret; wipe it too.
+            .map(Zeroizing::new)
+            .is_ok_and(|current| *current == *expected)
         {
             let _ = handle.clipboard().write_text(String::new());
         }
@@ -918,6 +976,60 @@ pub fn sync_status(state: State<'_, AppState>) -> CmdResult<SyncStatus> {
     })
 }
 
+/// Reject a path that is not a plain readable file.
+///
+/// Both import commands take a path from the webview and open it. The UI gets
+/// that path from a native picker, but the backend cannot see that, and the
+/// app is not sandboxed — so a compromised webview could name any file the
+/// user can read, have it parsed into the vault, and then read it back out
+/// with `search` and `reveal`. That is a file-read primitive reaching past
+/// the boundary this surface exists to define.
+///
+/// This does not close it — only the backend owning the picker would — but it
+/// refuses the shapes that are never a file the user chose: directories,
+/// devices, sockets, and symlinks, which are how a path ends up pointing
+/// somewhere other than where it reads.
+fn readable_plain_file(path: &str) -> Result<std::path::PathBuf, CmdError> {
+    let path = std::path::Path::new(path);
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|_| CmdError::bad_request("That file could not be opened."))?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(CmdError::bad_request("That is not a file."));
+    }
+    Ok(path.to_path_buf())
+}
+
+/// Whether the URL's *host* is this machine.
+///
+/// Hand-parsed rather than pulling in a URL crate for one check: take what
+/// sits between the scheme and the first `/`, `?` or `#`, drop any userinfo
+/// before the last `@` so `http://127.0.0.1@evil.example` is read as
+/// `evil.example`, then drop the port.
+pub fn is_loopback_host(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    let host_port = match authority.rsplit_once('@') {
+        Some((_, after)) => after,
+        None => authority,
+    };
+    let host = if let Some(end) = host_port.strip_prefix('[').and_then(|r| r.find(']')) {
+        // IPv6 literal: the brackets are part of the host, the port is after.
+        &host_port[..end + 2]
+    } else {
+        host_port.split(':').next().unwrap_or_default()
+    };
+
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "[::1]"
+    )
+}
+
 /// Point this vault at a relay, or clear it to turn sync off.
 ///
 /// Clearing leaves the change log intact — sync stops, nothing is lost, and
@@ -934,9 +1046,14 @@ pub fn set_relay(state: State<'_, AppState>, url: Option<String>) -> CmdResult<S
         }
         // http is allowed for a relay on this machine during development, but
         // anywhere else it would put device keys and sync timing in the clear.
-        if u.starts_with("http://")
-            && !(u.contains("127.0.0.1") || u.contains("localhost") || u.contains("[::1]"))
-        {
+        //
+        // Matched against the host, not anywhere in the string. `contains`
+        // accepted http://relay.localhost.evil.example/, http://evil.example/
+        // ?r=localhost and http://evil.example/#127.0.0.1 — a URL a support
+        // page or a relay operator could hand someone, which then carried the
+        // whole sync stream in plaintext while looking like it had been
+        // checked.
+        if u.starts_with("http://") && !is_loopback_host(u) {
             return Err(CmdError::bad_request(
                 "Use https:// for a relay that is not on this machine.",
             ));

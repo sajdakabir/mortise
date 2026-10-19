@@ -35,6 +35,14 @@ pub enum Request {
     Associate {
         /// Browser name, shown in the approval prompt.
         client_name: String,
+        /// Token from this client's previous `approval_required` reply.
+        ///
+        /// Absent on the first ask. Present on every poll after it, and the
+        /// approved key is released only to the client that presents the
+        /// token the approval was granted against — otherwise approving a
+        /// pairing would mint a key for whoever asked next, which is anyone.
+        #[serde(default)]
+        request_token: Option<String>,
     },
 
     /// Credentials that may be offered on `origin`. Metadata only.
@@ -89,6 +97,11 @@ pub enum Response {
         associated: bool,
         /// Whether secrets are currently available.
         unlocked: bool,
+    },
+    /// Pairing needs a human, and this is the token to come back with.
+    ApprovalRequired {
+        /// Opaque, single-use, bound to this request.
+        request_token: String,
     },
     /// Pairing succeeded.
     Associated {
