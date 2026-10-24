@@ -8,8 +8,8 @@ use tower::ServiceExt;
 use mortise_crypto::identity::Device;
 use mortise_relay::auth::{hex, sign};
 use mortise_relay::protocol::{
-    AddDevice, ClaimVault, HEADER_DEVICE, HEADER_SIGNATURE, HEADER_TIMESTAMP, PushRequest,
-    WireChange,
+    AclPushRequest, AddDevice, ClaimVault, KeyPushRequest, PushRequest, WireAclEntry, WireChange,
+    WireWrappedKey, HEADER_DEVICE, HEADER_SIGNATURE, HEADER_TIMESTAMP,
 };
 use mortise_relay::server::router;
 use mortise_relay::store::Store;
@@ -381,5 +381,174 @@ async fn a_stranger_cannot_add_a_device() {
     .unwrap();
 
     let (status, _) = send(&store, stranger.request("POST", &path, &body)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// --- acl and keys ---
+
+fn acl_entry(seq: u64) -> WireAclEntry {
+    WireAclEntry {
+        seq,
+        id: format!("{seq:064x}"),
+        prev: "00".repeat(32),
+        op_kind: 1,
+        op_body: "cc".repeat(32),
+        author: "aa".repeat(8),
+        issued_at_ms: 1_759_000_000_000,
+        signature: "dd".repeat(32),
+    }
+}
+
+async fn push_acl(
+    store: &Store,
+    client: &Client,
+    entries: Vec<WireAclEntry>,
+) -> (StatusCode, Value) {
+    let body = serde_json::to_vec(&AclPushRequest { entries }).unwrap();
+    let path = format!("/v1/vaults/{VAULT}/acl");
+    send(store, client.request("POST", &path, &body)).await
+}
+
+#[tokio::test]
+async fn acl_entries_round_trip() {
+    let (store, client) = claimed().await;
+
+    let (status, body) = push_acl(&store, &client, vec![acl_entry(1), acl_entry(2)]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["accepted"], 2);
+
+    let path = format!("/v1/vaults/{VAULT}/acl?after=0");
+    let (status, body) = send(&store, client.request("GET", &path, b"")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(body["entries"][0]["seq"], 1);
+    assert_eq!(body["more"], false);
+}
+
+/// First writer wins. Two devices that both think they are issuing the same
+/// sequence number is a fork the relay cannot adjudicate — it cannot read the
+/// entries — so the stored log keeps what it has and the loser re-issues.
+#[tokio::test]
+async fn an_entry_cannot_overwrite_one_already_stored() {
+    let (store, client) = claimed().await;
+    push_acl(&store, &client, vec![acl_entry(1)]).await;
+
+    let mut rival = acl_entry(1);
+    rival.id = "ff".repeat(32);
+    let (_, body) = push_acl(&store, &client, vec![rival]).await;
+    assert_eq!(body["duplicates"], 1);
+    assert_eq!(body["accepted"], 0);
+
+    let path = format!("/v1/vaults/{VAULT}/acl?after=0");
+    let (_, body) = send(&store, client.request("GET", &path, b"")).await;
+    assert_eq!(
+        body["entries"][0]["id"], "0000000000000000000000000000000000000000000000000000000000000001",
+        "a stored acl entry was replaced"
+    );
+}
+
+#[tokio::test]
+async fn pulling_acl_from_a_cursor_skips_what_was_seen() {
+    let (store, client) = claimed().await;
+    push_acl(&store, &client, vec![acl_entry(1), acl_entry(2), acl_entry(3)]).await;
+
+    let path = format!("/v1/vaults/{VAULT}/acl?after=2");
+    let (_, body) = send(&store, client.request("GET", &path, b"")).await;
+    let entries = body["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["seq"], 3);
+}
+
+/// A device gets the keys sealed to it and nothing else. They would be useless
+/// to anyone else, but the relay should not be able to enumerate who has
+/// collected what either.
+#[tokio::test]
+async fn a_device_pulls_only_the_keys_sealed_to_it() {
+    let (store, mine) = claimed().await;
+    let theirs = Client::new();
+
+    let body = serde_json::to_vec(&AddDevice {
+        device_id: theirs.device_id(),
+        device_signing_key: theirs.signing_key(),
+    })
+    .unwrap();
+    let path = format!("/v1/vaults/{VAULT}/devices");
+    let (status, _) = send(&store, mine.request("POST", &path, &body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let keys = vec![
+        WireWrappedKey {
+            recipient: mine.device_id(),
+            sender: mine.device_id(),
+            epoch: 1,
+            blob: "bWluZQ==".into(),
+        },
+        WireWrappedKey {
+            recipient: theirs.device_id(),
+            sender: mine.device_id(),
+            epoch: 1,
+            blob: "dGhlaXJz".into(),
+        },
+    ];
+    let body = serde_json::to_vec(&KeyPushRequest { keys }).unwrap();
+    let path = format!("/v1/vaults/{VAULT}/keys");
+    let (status, body) = send(&store, mine.request("POST", &path, &body)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["accepted"], 2);
+
+    let path = format!("/v1/vaults/{VAULT}/keys");
+    let (_, body) = send(&store, theirs.request("GET", &path, b"")).await;
+    let keys = body["keys"].as_array().unwrap();
+    assert_eq!(keys.len(), 1, "a device was handed someone else's keys");
+    assert_eq!(keys[0]["blob"], "dGhlaXJz");
+}
+
+/// Overwriting a key a recipient has not collected yet would let a member
+/// swap in one of their own choosing.
+#[tokio::test]
+async fn a_stored_key_is_not_replaced_by_a_later_push() {
+    let (store, client) = claimed().await;
+    let path = format!("/v1/vaults/{VAULT}/keys");
+
+    let first = WireWrappedKey {
+        recipient: client.device_id(),
+        sender: client.device_id(),
+        epoch: 4,
+        blob: "Zmlyc3Q=".into(),
+    };
+    let body = serde_json::to_vec(&KeyPushRequest {
+        keys: vec![first.clone()],
+    })
+    .unwrap();
+    send(&store, client.request("POST", &path, &body)).await;
+
+    let body = serde_json::to_vec(&KeyPushRequest {
+        keys: vec![WireWrappedKey {
+            blob: "c2Vjb25k".into(),
+            ..first
+        }],
+    })
+    .unwrap();
+    let (_, body) = send(&store, client.request("POST", &path, &body)).await;
+    assert_eq!(body["duplicates"], 1);
+
+    let (_, body) = send(&store, client.request("GET", &path, b"")).await;
+    assert_eq!(body["keys"][0]["blob"], "Zmlyc3Q=");
+}
+
+#[tokio::test]
+async fn an_outsider_cannot_read_or_write_the_acl() {
+    let (store, _) = claimed().await;
+    let outsider = Client::new();
+
+    let (status, _) = push_acl(&store, &outsider, vec![acl_entry(1)]).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let path = format!("/v1/vaults/{VAULT}/acl?after=0");
+    let (status, _) = send(&store, outsider.request("GET", &path, b"")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let path = format!("/v1/vaults/{VAULT}/keys");
+    let (status, _) = send(&store, outsider.request("GET", &path, b"")).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

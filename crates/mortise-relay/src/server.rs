@@ -1,6 +1,6 @@
 //! HTTP surface.
 //!
-//! Four endpoints, all but one authenticated by device signature:
+//! All but one endpoint is authenticated by device signature:
 //!
 //! | Route | Purpose |
 //! |---|---|
@@ -8,6 +8,15 @@
 //! | `POST /v1/vaults/{id}/devices` | authorize another device |
 //! | `POST /v1/vaults/{id}/changes` | push |
 //! | `GET  /v1/vaults/{id}/changes` | pull |
+//! | `POST /v1/vaults/{id}/acl` | push ACL entries |
+//! | `GET  /v1/vaults/{id}/acl` | pull ACL entries |
+//! | `POST /v1/vaults/{id}/keys` | push vault keys sealed to other devices |
+//! | `GET  /v1/vaults/{id}/keys` | pull the keys sealed to the caller |
+//!
+//! The last four carry membership and the keys that enforce it, and the relay
+//! can read none of it. It cannot tell an owner from a viewer, because roles
+//! live in the encrypted entries, so it only checks that *some* device of this
+//! vault is calling. Authority is decided by clients when they replay the log.
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
@@ -19,8 +28,9 @@ use serde::Deserialize;
 
 use crate::auth::{self, SignedRequest};
 use crate::protocol::{
-    AddDevice, ClaimVault, ErrorBody, HEADER_DEVICE, HEADER_SIGNATURE, HEADER_TIMESTAMP,
-    PullResponse, PushRequest, PushResponse,
+    AclPullResponse, AclPushRequest, AddDevice, ClaimVault, ErrorBody, KeyPullResponse,
+    KeyPushRequest, PullResponse, PushRequest, PushResponse, StoreCounts, HEADER_DEVICE,
+    HEADER_SIGNATURE, HEADER_TIMESTAMP,
 };
 use crate::store::Store;
 
@@ -36,6 +46,19 @@ pub const PULL_LIMIT: u32 = 500;
 /// Most changes accepted in a single push.
 pub const PUSH_LIMIT: usize = 500;
 
+/// Most ACL entries returned by a single pull, and accepted in a single push.
+///
+/// Smaller than the change limits because an ACL log grows with membership
+/// edits rather than with use: a vault whose ACL runs past a few hundred
+/// entries is remarkable, and a client that needs a second page gets one.
+pub const ACL_LIMIT: u32 = 200;
+
+/// Most wrapped keys accepted in a single push.
+///
+/// One per remaining member device per rotation, so this is a bound on team
+/// size rather than on activity.
+pub const KEY_PUSH_LIMIT: usize = 200;
+
 /// Build the router.
 pub fn router(store: Store) -> Router {
     Router::new()
@@ -43,6 +66,8 @@ pub fn router(store: Store) -> Router {
         .route("/v1/vaults", post(claim))
         .route("/v1/vaults/{vault_id}/devices", post(add_device))
         .route("/v1/vaults/{vault_id}/changes", post(push).get(pull))
+        .route("/v1/vaults/{vault_id}/acl", post(push_acl).get(pull_acl))
+        .route("/v1/vaults/{vault_id}/keys", post(push_keys).get(pull_keys))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY))
         .with_state(store)
 }
@@ -282,6 +307,126 @@ async fn pull(
             more,
         })
         .into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn push_acl(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/acl");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "POST", &path, &body) {
+        return *response;
+    }
+
+    let Ok(payload) = serde_json::from_slice::<AclPushRequest>(&body) else {
+        return fail(StatusCode::BAD_REQUEST, "bad_request", "Malformed body.");
+    };
+    if payload.entries.len() > ACL_LIMIT as usize {
+        return fail(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_many_entries",
+            "Send at most 200 acl entries per request.",
+        );
+    }
+
+    match store.push_acl(&vault_id, &payload.entries, now_ms()) {
+        Ok(report) => Json(StoreCounts {
+            accepted: report.accepted,
+            duplicates: report.duplicates,
+        })
+        .into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn pull_acl(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    Query(params): Query<PullParams>,
+    headers: HeaderMap,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/acl?after={}", params.after);
+    if let Err(response) = authorize(&store, &vault_id, &headers, "GET", &path, b"") {
+        return *response;
+    }
+
+    match store.pull_acl(&vault_id, params.after, ACL_LIMIT) {
+        Ok((entries, more)) => Json(AclPullResponse { entries, more }).into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn push_keys(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/keys");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "POST", &path, &body) {
+        return *response;
+    }
+
+    let Ok(payload) = serde_json::from_slice::<KeyPushRequest>(&body) else {
+        return fail(StatusCode::BAD_REQUEST, "bad_request", "Malformed body.");
+    };
+    if payload.keys.len() > KEY_PUSH_LIMIT {
+        return fail(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_many_keys",
+            "Send at most 200 wrapped keys per request.",
+        );
+    }
+
+    match store.push_keys(&vault_id, &payload.keys, now_ms()) {
+        Ok(report) => Json(StoreCounts {
+            accepted: report.accepted,
+            duplicates: report.duplicates,
+        })
+        .into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+/// Hand back the keys sealed to the calling device.
+///
+/// The recipient is the authenticated device id, not a parameter, so one member
+/// cannot ask for another's copies. They would be useless to them — each is
+/// sealed to a device key they do not hold — but there is no reason to let the
+/// relay or a member enumerate who has collected what.
+async fn pull_keys(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/keys");
+    let device = match authorize(&store, &vault_id, &headers, "GET", &path, b"") {
+        Ok(device) => device,
+        Err(response) => return *response,
+    };
+
+    match store.keys_for(&vault_id, &device) {
+        Ok(keys) => Json(KeyPullResponse { keys }).into_response(),
         Err(_) => fail(
             StatusCode::INTERNAL_SERVER_ERROR,
             "storage",

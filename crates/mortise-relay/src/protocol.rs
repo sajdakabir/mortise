@@ -124,6 +124,90 @@ pub struct PullResponse {
     pub more: bool,
 }
 
+/// One ACL entry as it travels to and from the relay.
+///
+/// The relay cannot read the operation and cannot tell an owner from a viewer
+/// — roles live inside `op_body`, which is only meaningful to a client that
+/// has replayed the log. It stores these verbatim and hands them back in
+/// order. Everything that matters is checked on the client: the signature, the
+/// author's role at that point in the log, and the `prev` chain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WireAclEntry {
+    /// Position in the log. Unique per vault, and the relay's cursor.
+    pub seq: u64,
+    /// Hex entry id.
+    pub id: String,
+    /// Hex id of the previous entry.
+    pub prev: String,
+    /// Operation discriminant.
+    pub op_kind: u8,
+    /// Hex operation body.
+    pub op_body: String,
+    /// Hex device id of the issuing device.
+    pub author: String,
+    /// Issue time, in unix milliseconds.
+    pub issued_at_ms: u64,
+    /// Hex Ed25519 signature over the entry.
+    pub signature: String,
+}
+
+/// A vault key sealed to one device, in transit.
+///
+/// `sender` is a device id rather than a key: the recipient resolves the
+/// sealing device's X25519 key from its own replayed ACL log and checks that
+/// the device held an admin role, so a relay cannot nominate the sender by
+/// putting a key of its choosing in the payload.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WireWrappedKey {
+    /// Hex device id this key is sealed to.
+    pub recipient: String,
+    /// Hex device id of the device that sealed it.
+    pub sender: String,
+    /// Key epoch.
+    pub epoch: u32,
+    /// Base64 sealed key. Opaque.
+    pub blob: String,
+}
+
+/// Request body for an ACL push.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AclPushRequest {
+    /// Entries to store.
+    pub entries: Vec<WireAclEntry>,
+}
+
+/// Response to an ACL pull.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AclPullResponse {
+    /// Entries after the requested sequence number, in order.
+    pub entries: Vec<WireAclEntry>,
+    /// Whether more remain beyond this page.
+    pub more: bool,
+}
+
+/// Request body for a wrapped-key push.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyPushRequest {
+    /// Keys to store, each addressed to one device.
+    pub keys: Vec<WireWrappedKey>,
+}
+
+/// Response to a wrapped-key pull.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyPullResponse {
+    /// Keys addressed to the calling device.
+    pub keys: Vec<WireWrappedKey>,
+}
+
+/// What a push of ACL entries or keys did.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreCounts {
+    /// Newly stored.
+    pub accepted: u32,
+    /// Already present, and left alone.
+    pub duplicates: u32,
+}
+
 /// An error from the relay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorBody {
