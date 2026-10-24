@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -197,6 +197,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V4)?;
     conn.execute_batch(SCHEMA_V5)?;
     conn.execute_batch(SCHEMA_V6)?;
+    conn.execute_batch(SCHEMA_V7)?;
     Ok(())
 }
 
@@ -302,6 +303,21 @@ CREATE TABLE project (
 "#;
 
 
+/// Added in v7: which HPKE mode a stored vault key was sealed with.
+///
+/// `1` is Base mode, which authenticates no sender; `2` is Auth mode. Rows
+/// that already exist default to 1 because that is genuinely what sealed them,
+/// and the first unlock opens them on the legacy path and re-seals them as 2.
+///
+/// The mode is recorded rather than discovered by trying both. A reader that
+/// fell back to Base mode whenever the Auth open failed would accept a key
+/// sealed by anybody holding the device's public key — which the ACL log
+/// publishes to every member — and that is precisely what Auth mode exists to
+/// stop. One stored answer, one code path.
+const SCHEMA_V7: &str = r#"
+ALTER TABLE vault_key ADD COLUMN wrap_mode INTEGER NOT NULL DEFAULT 1;
+"#;
+
 /// The file's schema version, from whichever table holds it.
 ///
 /// v5 moved it out of `vault_meta` and into `account`. Both have to be
@@ -345,6 +361,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 6 {
         tx.execute_batch(SCHEMA_V6)?;
+    }
+    if found < 7 {
+        tx.execute_batch(SCHEMA_V7)?;
     }
     // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(
@@ -479,6 +498,23 @@ mod migration_tests {
             .query_row("SELECT vault_id FROM item", [], |r| r.get(0))
             .unwrap();
         assert_eq!(item_vault, vault_id, "the item was orphaned from its vault");
+    }
+
+    /// v7 records which HPKE mode sealed each vault key. Rows that predate it
+    /// must come out marked Base, because that is what actually sealed them —
+    /// marking them Auth would make the first unlock try the wrong mode and
+    /// refuse to open a vault that is perfectly intact.
+    #[test]
+    fn v4_rows_are_marked_as_base_mode_wraps() {
+        let conn = v4_with_data();
+        migrate(&conn).unwrap();
+
+        let mode: u8 = conn
+            .query_row("SELECT wrap_mode FROM vault_key WHERE epoch = 7", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(mode, 1, "a pre-v7 key was not marked as Base mode");
     }
 
     #[test]

@@ -4,6 +4,48 @@
 //! sealing it to each member device's X25519 public key with HPKE, so the key
 //! itself never transits in the clear and the relay never sees it.
 //!
+//! ## Why Auth mode, and not Base
+//!
+//! HPKE Base mode proves only that *somebody who knew the recipient's public
+//! key* produced the blob — and those keys are public by construction, listed
+//! in the ACL log every member replays. A relay, or a member removed after
+//! they had synced the ACL, could therefore seal a vault key of their own
+//! choosing to a member and have it accepted: the AAD binds the vault and the
+//! epoch, both of which the attacker knows, and `WrappedVaultKey` carries no
+//! signature.
+//!
+//! Auth mode mixes the *sender's* static X25519 key into the key schedule, so
+//! opening one requires naming the sender in advance and succeeds only if that
+//! device really sealed it. Callers take the sender's key from the signed ACL
+//! log, which makes "this key came from an admin" checkable rather than
+//! assumed.
+//!
+//! Blobs written before this change were sealed in Base mode and are opened by
+//! [`VaultKey::unwrap_legacy_base`], which exists only so an existing vault can
+//! be migrated on unlock. Nothing writes Base mode any more, and a wrapped key
+//! that arrives over sync is *never* opened with it — accepting an
+//! unauthenticated blob from the network is the whole vulnerability.
+//!
+//! ## Why Auth mode, and not Base
+//!
+//! HPKE Base mode proves only that *somebody who knew the recipient's public
+//! key* produced the blob — and those keys are public by construction, listed
+//! in the ACL log every member replays. A relay, or a member removed after
+//! they had synced the ACL, could therefore seal a vault key of their own
+//! choosing to a remaining member and have it accepted: `WrappedVaultKey` is
+//! unsigned and the AAD binds only the vault and the epoch, both of which the
+//! attacker knows.
+//!
+//! Auth mode mixes the *sender's* static X25519 key into the key schedule, so
+//! opening a blob means naming the sender in advance and succeeds only if that
+//! device really sealed it. Callers take the sender's key from the signed ACL
+//! log, which turns "this key came from an admin" into something checkable.
+//!
+//! Keys written before this existed are Base mode and are read by
+//! [`VaultKey::unwrap_legacy_base`], which is there so an existing vault
+//! migrates on unlock. Nothing writes Base mode now, and a wrapped key that
+//! arrives over sync is never opened with it.
+//!
 //! Every vault key belongs to an **epoch**. Revoking a member increments the
 //! epoch and generates a fresh key (spec §6). The epoch is bound into both the
 //! HPKE `aad` and the item AAD, so a wrapped key from one epoch cannot be
@@ -107,31 +149,71 @@ impl VaultKey {
         &self.key
     }
 
-    /// Seal this vault key to a member device.
-    pub fn wrap_for(&self, recipient: &DevicePublic, vault: VaultId) -> Result<WrappedVaultKey> {
+    /// Seal this vault key to a member device, authenticated as `sender`.
+    ///
+    /// The recipient opens it with `sender`'s public key, so a blob sealed by
+    /// anyone else — including a relay holding every public key the ACL lists
+    /// — fails to open rather than yielding a key of the attacker's choosing.
+    ///
+    /// A device sealing to itself passes its own key as both. Self-wraps are
+    /// then authenticated on the same path as everything else, leaving no
+    /// second code path that accepts an unauthenticated blob.
+    pub fn wrap_for(
+        &self,
+        sender: &Device,
+        recipient: &DevicePublic,
+        vault: VaultId,
+    ) -> Result<WrappedVaultKey> {
         let aad = wrap_aad(vault, self.epoch);
-        // NOTE: Base mode carries no sender identity.
-        //
-        // A successful `unwrap_for` therefore proves only that somebody who
-        // knew the recipient's public key produced this blob — not that an
-        // admin did, and not that the key inside is the one the vault agreed
-        // on. Nothing else closes that: `WrappedVaultKey` is unsigned, the
-        // AAD binds only vault and epoch (both attacker-chosen when the
-        // attacker is minting), and the signed `AclOp::RotateKey` commits to
-        // a counter rather than to key material.
-        //
-        // So a party who can write where a device reads its wrapped keys — a
-        // hostile relay, or a revoked member who already synced the ACL and
-        // holds every remaining device's public key — can substitute a vault
-        // key of their choosing and have it accepted, defeating the forward
-        // secrecy revocation is supposed to give.
-        //
-        // Fixing it means HPKE Auth mode here and in `unwrap_for`, with the
-        // authenticated sender required to be an admin at that epoch, or a
-        // BLAKE3 commitment to the key inside the signed RotateKey entry.
-        // Either changes the wrapped-key format, so it is a versioned change
-        // and an amendment to crypto-spec §3 and §6 — which specify this
-        // construction and are themselves unsound here.
+        let (encapped, ciphertext) = hpke::single_shot_seal::<HpkeAead, HpkeKdf, Kem>(
+            &OpModeS::Auth((sender.kex_private().clone(), sender.public().kex_public()?)),
+            &recipient.kex_public()?,
+            HPKE_INFO,
+            self.key.expose(),
+            &aad,
+        )
+        .map_err(|_| Error::Encrypt)?;
+
+        Ok(WrappedVaultKey {
+            epoch: self.epoch,
+            encapped: encapped.to_bytes().to_vec(),
+            ciphertext,
+        })
+    }
+
+    /// Recover a vault key sealed to this device by `sender`.
+    ///
+    /// `sender` is the authentication: it must be the device that actually
+    /// sealed this blob. Callers take it from the signed ACL log rather than
+    /// from whatever delivered the blob, or the check proves nothing.
+    pub fn unwrap_for(
+        recipient: &Device,
+        sender: &DevicePublic,
+        wrapped: &WrappedVaultKey,
+        vault: VaultId,
+    ) -> Result<Self> {
+        Self::open(
+            recipient,
+            OpModeR::Auth(sender.kex_public()?),
+            wrapped,
+            vault,
+        )
+    }
+
+    /// Seal in HPKE **Base** mode, the format this crate no longer writes.
+    ///
+    /// Exists so the migration off Base mode can be tested with a blob that is
+    /// genuinely in the old format, rather than one a test pretended was. It is
+    /// behind a feature the application never enables, so there is no way to
+    /// reach it from a shipped build — the property that matters is structural
+    /// here, not a naming convention.
+    #[cfg(any(test, feature = "legacy-base-wrap"))]
+    pub fn wrap_base_legacy(
+        &self,
+        recipient: &DevicePublic,
+        vault: VaultId,
+    ) -> Result<WrappedVaultKey> {
+        let aad = wrap_aad(vault, self.epoch);
         let (encapped, ciphertext) = hpke::single_shot_seal::<HpkeAead, HpkeKdf, Kem>(
             &OpModeS::Base,
             &recipient.kex_public()?,
@@ -148,15 +230,34 @@ impl VaultKey {
         })
     }
 
-    /// Recover a vault key sealed to this device.
-    pub fn unwrap_for(device: &Device, wrapped: &WrappedVaultKey, vault: VaultId) -> Result<Self> {
+    /// Open a vault key sealed in HPKE **Base** mode, which authenticates
+    /// nobody.
+    ///
+    /// Only for migrating keys a device sealed to *itself* before Auth mode
+    /// existed. Never call it on a blob that arrived over the network: Base
+    /// mode is precisely the gap Auth mode closes, and a caller that falls
+    /// back to this when `unwrap_for` fails has reopened it in full.
+    pub fn unwrap_legacy_base(
+        recipient: &Device,
+        wrapped: &WrappedVaultKey,
+        vault: VaultId,
+    ) -> Result<Self> {
+        Self::open(recipient, OpModeR::Base, wrapped, vault)
+    }
+
+    fn open(
+        recipient: &Device,
+        mode: OpModeR<'_, Kem>,
+        wrapped: &WrappedVaultKey,
+        vault: VaultId,
+    ) -> Result<Self> {
         let encapped = <Kem as KemTrait>::EncappedKey::from_bytes(&wrapped.encapped)
             .map_err(|_| Error::Decrypt)?;
         let aad = wrap_aad(vault, wrapped.epoch);
 
         let plaintext = hpke::single_shot_open::<HpkeAead, HpkeKdf, Kem>(
-            &OpModeR::Base,
-            device.kex_private(),
+            &mode,
+            recipient.kex_private(),
             &encapped,
             HPKE_INFO,
             &wrapped.ciphertext,
@@ -228,4 +329,43 @@ fn wrap_aad(vault: VaultId, epoch: Epoch) -> [u8; VAULT_ID_LEN + 4] {
     aad[..VAULT_ID_LEN].copy_from_slice(vault.as_bytes());
     aad[VAULT_ID_LEN..].copy_from_slice(&epoch.0.to_be_bytes());
     aad
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity::Device;
+
+    /// The vulnerability, directly.
+    ///
+    /// Base mode needs only the recipient's public key, which the ACL log
+    /// publishes to every member. Before Auth mode this blob opened cleanly and
+    /// the recipient adopted a key the attacker chose. `unwrap_for` must refuse
+    /// it whoever is named as sender — there is no sender to name, which is the
+    /// entire problem.
+    #[test]
+    fn a_base_mode_blob_is_refused_by_the_authenticated_path() {
+        let vault = VaultId::generate().unwrap();
+        let attacker = Device::generate().unwrap();
+        let member = Device::generate().unwrap();
+        let vk = VaultKey::generate().unwrap();
+
+        let legacy = vk.wrap_base_legacy(member.public(), vault).unwrap();
+
+        // Naming the attacker does not help: Base mode committed to no sender.
+        assert_eq!(
+            VaultKey::unwrap_for(&member, attacker.public(), &legacy, vault).unwrap_err(),
+            Error::Decrypt
+        );
+        // Nor does naming the recipient itself.
+        assert_eq!(
+            VaultKey::unwrap_for(&member, member.public(), &legacy, vault).unwrap_err(),
+            Error::Decrypt
+        );
+        // The legacy path still opens it, which is what migration relies on.
+        assert_eq!(
+            VaultKey::unwrap_legacy_base(&member, &legacy, vault).unwrap(),
+            vk
+        );
+    }
 }

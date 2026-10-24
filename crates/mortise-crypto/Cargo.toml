@@ -26,3 +26,8 @@ zeroize = { version = "1.9.0", features = ["derive"] }
 [dev-dependencies]
 hex = "0.4.3"
 proptest = "1.11.0"
+
+[features]
+# Lets tests seal a vault key the old way, so the migration off HPKE Base
+# mode is exercised against a real legacy blob. Never enabled by the app.
+legacy-base-wrap = []

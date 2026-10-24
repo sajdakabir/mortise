@@ -94,19 +94,10 @@ without re-keying the identity or forcing every other device to re-enroll.
 ```
 VK@n   = 256-bit random             n = key epoch, incremented on every revocation
 per member device d:
-  wrapped_VK[d] = HPKE_Seal(pk_kex(d), VK@n, info = "truepass/v1/vaultkey")
-
-  > **Known gap, v1.** This is HPKE Base mode: it gives confidentiality to
-  > the recipient and no sender authentication. A wrapped key that opens
-  > proves only that somebody knew `pk_kex(d)`, which is public. Combined
-  > with §6's rotation — whose signed ACL entry commits to an epoch number
-  > and not to the key — anyone able to write where a device reads its
-  > wrapped keys can substitute a vault key of their choosing. That includes
-  > a hostile relay and a member revoked after they synced the ACL, which
-  > means revocation does not currently give the forward secrecy §6 claims.
-  > The fix is Auth mode with the sender required to be an admin at that
-  > epoch, or a key commitment inside the signed RotateKey; both change the
-  > wrapped-key format and need a version bump.
+  wrapped_VK[d] = HPKE_Seal_Auth(sk_kex(s), pk_kex(d), VK@n,
+                                 info = "truepass/v1/vaultkey",
+                                 aad  = vault_id ‖ epoch)
+                  for sending device s
 
 IK     = 256-bit random, per item version
 sealed_IK  = XChaCha20P1305(key = VK@n, nonce = random_24B, pt = IK)
@@ -114,6 +105,18 @@ ciphertext = XChaCha20P1305(key = IK, nonce = random_24B,
                             pt  = payload_bytes,
                             aad = vault_id ‖ item_id ‖ version ‖ epoch)
 ```
+
+**Auth mode, not Base.** The sender's static X25519 key is mixed into the key
+schedule, so opening a wrapped key means naming the sender in advance and
+succeeds only if that device sealed it. This is load-bearing rather than
+defensive: every member's `pk_kex` is published in the ACL log, so under Base
+mode a hostile relay — or a member revoked a moment ago — could seal a vault key
+of their own choosing to a remaining member and have it adopted, since
+`wrapped_VK` is unsigned and §6's signed `RotateKey` commits to an epoch number
+and not to key material. Recipients take the sender's key from the replayed ACL
+log, never from whatever delivered the blob, and never fall back to Base mode on
+failure. Keys sealed before this change are Base mode and are re-sealed in place
+on first unlock.
 
 **The AAD is not optional.** Binding each ciphertext to its own identity stops an
 attacker with write access to the relay (A1) from swapping one item's blob for
@@ -232,7 +235,9 @@ consensus node. Operations: `add_member`, `remove_member`, `change_role`,
 Revocation sequence:
 1. Append `remove_member(pk)`, signed.
 2. Increment epoch, generate `VK@n+1`.
-3. Re-wrap `VK@n+1` for every remaining member device.
+3. Re-wrap `VK@n+1` for every remaining member device, in Auth mode under
+   the revoking admin's own device key, so a recipient can tell the new key
+   came from an admin and not from the relay (§3).
 4. All subsequent changes use the new epoch.
 
 **Forward secrecy only.** The removed member keeps anything they already synced.

@@ -406,7 +406,7 @@ impl Vault {
             // transport is finally wired up.
             let _ = self
                 .current_vault_key()?
-                .wrap_for(recipient, self.meta().vault_id)?;
+                .wrap_for(self.device()?, recipient, self.meta().vault_id)?;
             rewrapped += 1;
         }
 

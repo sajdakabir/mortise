@@ -46,6 +46,13 @@ pub struct Enrollment {
     pub created_at_ms: u64,
     /// Account identity, sealed under the MUK.
     pub identity_wrapped: Vec<u8>,
+    /// X25519 public key of the device that sealed `vault_keys`.
+    ///
+    /// The keys are sealed in HPKE Auth mode, so opening one requires naming
+    /// the sender. Carrying it here is what lets the new device check that the
+    /// keys came from the device that enrolled it rather than from whatever
+    /// handed over the bundle — see `mortise_crypto::vault`.
+    pub sealed_by_kex: [u8; 32],
     /// Every epoch's vault key, sealed to the new device.
     ///
     /// All epochs, not just the current one: items sealed before a rotation
@@ -72,11 +79,18 @@ impl Vault {
         // should fail here rather than halfway through sealing.
         new_device.kex_public()?;
 
+        let sealer = self.device()?;
         let mut vault_keys = Vec::new();
         for epoch in self.known_epochs()? {
             let key = self.vault_key_at(Epoch(epoch))?;
-            vault_keys.push((epoch, key.wrap_for(new_device, meta.vault_id)?.to_bytes()));
+            vault_keys.push((
+                epoch,
+                key.wrap_for(sealer, new_device, meta.vault_id)?.to_bytes(),
+            ));
         }
+        // Taken now, while the borrow is still live: everything below needs
+        // `self` mutably.
+        let sealed_by_kex = *sealer.public().kex_public_bytes();
 
         let identity_wrapped: Vec<u8> =
             self.conn()
@@ -104,6 +118,7 @@ impl Vault {
             epoch: meta.epoch.value(),
             created_at_ms: meta.created_at_ms,
             identity_wrapped,
+            sealed_by_kex,
             vault_keys,
             known_devices,
             acl: self.acl_records()?,
@@ -176,16 +191,25 @@ pub fn join(
 
     // Confirm every key actually unwraps before committing to the file. A
     // half-usable vault is worse than a refused enrolment.
+    // Whoever sealed the keys has to be named before any of them will open.
+    let sealed_by = DevicePublic::from_parts([0u8; 32], enrollment.sealed_by_kex);
+
+    //
+    // Each key is then re-sealed to *this* device before being stored. The
+    // `vault_key` table is local at-rest storage and every row in it is sealed
+    // by the device that owns the file — that is the invariant `Vault::unlock`
+    // relies on when it names itself as the sender. Sender authentication
+    // belongs to keys in transit, and it has already been done by this point.
     let mut keys = BTreeMap::new();
     for (epoch, wrapped) in &enrollment.vault_keys {
         let wrapped = WrappedVaultKey::from_bytes(wrapped)?;
-        let key = VaultKey::unwrap_for(device, &wrapped, vault_id)?;
+        let key = VaultKey::unwrap_for(device, &sealed_by, &wrapped, vault_id)?;
         if key.epoch() != Epoch(*epoch) {
             return Err(Error::Corrupt(
                 "enrolment key epoch does not match its label",
             ));
         }
-        keys.insert(*epoch, wrapped);
+        keys.insert(*epoch, key.wrap_for(device, device.public(), vault_id)?);
     }
     if keys.is_empty() {
         return Err(Error::Corrupt("enrolment contains no vault keys"));
@@ -226,10 +250,15 @@ pub fn join(
         "INSERT INTO device (id, device_id, wrapped) VALUES (1, ?1, ?2)",
         params![device.id().as_bytes().as_slice(), device.wrap(&muk)?],
     )?;
-    for (epoch, wrapped) in &enrollment.vault_keys {
+    for (epoch, wrapped) in &keys {
         conn.execute(
-            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)",
-            params![enrollment.vault_id.as_slice(), epoch, wrapped],
+            "INSERT INTO vault_key (vault_id, epoch, wrapped, wrap_mode)
+             VALUES (?1, ?2, ?3, 2)",
+            params![
+                enrollment.vault_id.as_slice(),
+                epoch,
+                wrapped.to_bytes()
+            ],
         )?;
     }
     for (id, signing_key) in &enrollment.known_devices {

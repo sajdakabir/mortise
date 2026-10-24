@@ -76,6 +76,13 @@ pub struct VaultMeta {
     pub created_at_ms: u64,
 }
 
+/// `vault_key.wrap_mode` values. **Never renumber**: they are the only record
+/// of which HPKE mode sealed a stored key, and guessing wrong means either
+/// failing to open a key or opening an unauthenticated one.
+const WRAP_BASE: u8 = 1;
+/// Auth mode, the only mode written now. See `mortise_crypto::vault`.
+const WRAP_AUTH: u8 = 2;
+
 /// What the vault a new file is created with is called. It is the one vault
 /// that cannot be shared or deleted, so its name is fixed rather than chosen.
 pub const DEFAULT_VAULT_NAME: &str = "Personal";
@@ -174,11 +181,13 @@ impl Vault {
             params![device.id().as_bytes().as_slice(), device.wrap(&muk)?],
         )?;
         conn.execute(
-            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)",
+            "INSERT INTO vault_key (vault_id, epoch, wrapped, wrap_mode)
+             VALUES (?1, ?2, ?3, ?4)",
             params![
                 vault_id.as_bytes().as_slice(),
                 vault_key.epoch().value(),
-                vault_key.wrap_for(device.public(), vault_id)?.to_bytes()
+                vault_key.wrap_for(&device, device.public(), vault_id)?.to_bytes(),
+                WRAP_AUTH
             ],
         )?;
 
@@ -276,20 +285,59 @@ impl Vault {
             .map_err(|_| Error::Corrupt("device row is missing"))?;
         let device = Device::unwrap(&muk, &device_wrapped)?;
 
-        let mut vault_keys = BTreeMap::new();
-        {
-            let mut stmt = self
-                .conn
-                .prepare("SELECT epoch, wrapped FROM vault_key WHERE vault_id = ?1 ORDER BY epoch")?;
+        // Every row in `vault_key` is sealed by this device to itself — a key
+        // that arrived from another device is re-sealed before it is stored
+        // (see `enroll::join`), so naming ourselves as the sender here is the
+        // invariant rather than an assumption.
+        //
+        // Read every row out before touching any of them. Writing to a table
+        // while a statement is still walking it is not something to rely on,
+        // and the Base-mode rows below are rewritten in place.
+        let stored: Vec<(u32, Vec<u8>, u8)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT epoch, wrapped, wrap_mode FROM vault_key
+                 WHERE vault_id = ?1 ORDER BY epoch",
+            )?;
             let rows = stmt.query_map(params![self.meta.vault_id.as_bytes().as_slice()], |r| {
-                Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))
+                Ok((
+                    r.get::<_, u32>(0)?,
+                    r.get::<_, Vec<u8>>(1)?,
+                    r.get::<_, u8>(2)?,
+                ))
             })?;
-            for row in rows {
-                let (epoch, wrapped) = row?;
-                let wrapped = WrappedVaultKey::from_bytes(&wrapped)?;
-                let key = VaultKey::unwrap_for(&device, &wrapped, self.meta.vault_id)?;
-                vault_keys.insert(Epoch(epoch), key);
-            }
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+
+        let mut vault_keys = BTreeMap::new();
+        for (epoch, wrapped, mode) in stored {
+            let wrapped = WrappedVaultKey::from_bytes(&wrapped)?;
+            let key = match mode {
+                WRAP_AUTH => {
+                    VaultKey::unwrap_for(&device, device.public(), &wrapped, self.meta.vault_id)?
+                }
+                WRAP_BASE => {
+                    // Sealed before vault keys carried a sender. Open it on the
+                    // legacy path once and re-seal it authenticated, so the
+                    // Base reader is unreachable from the next unlock onward
+                    // rather than being a permanent fallback.
+                    let key =
+                        VaultKey::unwrap_legacy_base(&device, &wrapped, self.meta.vault_id)?;
+                    let resealed = key.wrap_for(&device, device.public(), self.meta.vault_id)?;
+                    self.conn.execute(
+                        "UPDATE vault_key SET wrapped = ?1, wrap_mode = ?2
+                         WHERE vault_id = ?3 AND epoch = ?4",
+                        params![
+                            resealed.to_bytes(),
+                            WRAP_AUTH,
+                            self.meta.vault_id.as_bytes().as_slice(),
+                            epoch
+                        ],
+                    )?;
+                    key
+                }
+                _ => return Err(Error::Corrupt("vault key has an unknown wrap mode")),
+            };
+            vault_keys.insert(Epoch(epoch), key);
         }
         if vault_keys.is_empty() {
             return Err(Error::Corrupt("vault has no keys"));
@@ -364,14 +412,16 @@ impl Vault {
     /// Install a rotated vault key, sealed to this device.
     pub(crate) fn store_vault_key(&mut self, key: VaultKey) -> Result<()> {
         let device = self.device()?;
-        let wrapped = key.wrap_for(device.public(), self.meta.vault_id)?;
+        let wrapped = key.wrap_for(device, device.public(), self.meta.vault_id)?;
         self.conn.execute(
-            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)
-             ON CONFLICT (vault_id, epoch) DO UPDATE SET wrapped = ?3",
+            "INSERT INTO vault_key (vault_id, epoch, wrapped, wrap_mode)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (vault_id, epoch) DO UPDATE SET wrapped = ?3, wrap_mode = ?4",
             params![
                 self.meta.vault_id.as_bytes().as_slice(),
                 key.epoch().value(),
-                wrapped.to_bytes()
+                wrapped.to_bytes(),
+                WRAP_AUTH
             ],
         )?;
         if let Some(unlocked) = self.unlocked.as_mut() {
@@ -493,4 +543,86 @@ fn read_meta(conn: &Connection) -> Result<VaultMeta> {
         epoch: Epoch(row.5),
         created_at_ms: row.6,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mortise_crypto::kdf::Argon2Params;
+
+    const FAST: Argon2Params = Argon2Params {
+        m_cost_kib: 8,
+        t_cost: 1,
+        p_cost: 1,
+    };
+    const PASSWORD: &[u8] = b"correct horse battery staple";
+
+    /// The upgrade a real vault goes through, on the one path whose failure
+    /// costs someone their passwords.
+    ///
+    /// Vaults created before vault keys carried a sender hold Base-mode wraps.
+    /// Unlock has to open them on the legacy path and re-seal them, and it has
+    /// to do it without being handed any hint beyond the stored mode — this is
+    /// the same sequence that runs on the user's own file the first time they
+    /// open it after updating.
+    #[test]
+    fn a_base_mode_vault_key_is_opened_and_upgraded_on_unlock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("v.db");
+        let (mut vault, account_key) = Vault::create(&path, PASSWORD, FAST).unwrap();
+
+        let vault_id = vault.meta.vault_id;
+        let epoch = vault.meta.epoch;
+
+        // Put the vault back into the pre-Auth-mode state: the same key, sealed
+        // the old way, marked as such.
+        let legacy = {
+            let device = vault.device().unwrap();
+            let key = vault.current_vault_key().unwrap();
+            key.wrap_base_legacy(device.public(), vault_id).unwrap()
+        };
+        let expected = vault.current_vault_key().unwrap().clone();
+        vault
+            .conn
+            .execute(
+                "UPDATE vault_key SET wrapped = ?1, wrap_mode = ?2
+                 WHERE vault_id = ?3 AND epoch = ?4",
+                params![
+                    legacy.to_bytes(),
+                    WRAP_BASE,
+                    vault_id.as_bytes().as_slice(),
+                    epoch.value()
+                ],
+            )
+            .unwrap();
+
+        vault.lock();
+        drop(vault);
+
+        let mut reopened = Vault::open(&path).unwrap();
+        reopened
+            .unlock(PASSWORD, &account_key)
+            .expect("a vault with a Base-mode key did not open");
+
+        assert_eq!(
+            reopened.current_vault_key().unwrap(),
+            &expected,
+            "the migrated key is not the key that was stored"
+        );
+
+        let mode: u8 = reopened
+            .conn
+            .query_row(
+                "SELECT wrap_mode FROM vault_key WHERE vault_id = ?1 AND epoch = ?2",
+                params![vault_id.as_bytes().as_slice(), epoch.value()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(mode, WRAP_AUTH, "the key was not re-sealed in place");
+
+        // And it stays open on the next unlock, now on the authenticated path.
+        reopened.lock();
+        reopened.unlock(PASSWORD, &account_key).unwrap();
+        assert_eq!(reopened.current_vault_key().unwrap(), &expected);
+    }
 }
