@@ -132,3 +132,87 @@ pub struct ErrorBody {
     /// Human-readable detail. Never contains vault contents.
     pub message: String,
 }
+
+/// One access-control entry, as it travels to and from the relay.
+///
+/// Every field is either the signed, opaque contents of an ACL entry or the
+/// sequence metadata the relay needs to order it. The relay cannot read roles
+/// or validate authority — it stores the log and hands it back in order, and
+/// clients verify every entry on apply.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WireAclEntry {
+    /// Sequence number within the vault's ACL log.
+    pub seq: u64,
+    /// Hex entry id.
+    pub id: String,
+    /// Hex id of the entry this one chains from.
+    pub prev: String,
+    /// Operation discriminant.
+    pub op_kind: u8,
+    /// Base64 operation body.
+    pub op_body: String,
+    /// Hex device id of the author.
+    pub author: String,
+    /// Issue time, milliseconds since the Unix epoch.
+    pub issued_at_ms: u64,
+    /// Hex Ed25519 signature.
+    pub signature: String,
+}
+
+/// Request body for an ACL push.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushAclRequest {
+    /// Entries to store, in sequence order.
+    pub entries: Vec<WireAclEntry>,
+}
+
+/// Response to an ACL push.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushAclResponse {
+    /// Entries newly stored.
+    pub accepted: u32,
+}
+
+/// Response to an ACL pull.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullAclResponse {
+    /// Entries after the requested sequence number.
+    pub entries: Vec<WireAclEntry>,
+    /// Whether more remain beyond this page.
+    pub more: bool,
+}
+
+/// A vault key sealed to one recipient device, in transit.
+///
+/// The body is an opaque authenticated blob the relay cannot open; it is
+/// addressed to a device so that device can collect it on its next sync.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WireKey {
+    /// Hex device id the key is sealed to.
+    pub recipient_device_id: String,
+    /// Key epoch.
+    pub epoch: u32,
+    /// Base64 sealed wrapped key. Opaque.
+    pub body: String,
+}
+
+/// Request body for a wrapped-key push.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushKeysRequest {
+    /// Keys to store, each addressed to a recipient device.
+    pub keys: Vec<WireKey>,
+}
+
+/// Response to a wrapped-key push.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushKeysResponse {
+    /// Keys newly stored or replaced.
+    pub accepted: u32,
+}
+
+/// Response to a wrapped-key pull.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullKeysResponse {
+    /// Keys addressed to the calling device.
+    pub keys: Vec<WireKey>,
+}

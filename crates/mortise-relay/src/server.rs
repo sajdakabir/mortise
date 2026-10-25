@@ -1,26 +1,34 @@
 //! HTTP surface.
 //!
-//! Four endpoints, all but one authenticated by device signature:
+//! Every route but health is authenticated by device signature. The relay
+//! stores signed, opaque blobs and orders them; it reads none of the contents
+//! and makes no authority decisions — clients verify everything on apply.
 //!
 //! | Route | Purpose |
 //! |---|---|
-//! | `POST /v1/vaults` | claim a vault id, registering the first device |
-//! | `POST /v1/vaults/{id}/devices` | authorize another device |
-//! | `POST /v1/vaults/{id}/changes` | push |
-//! | `GET  /v1/vaults/{id}/changes` | pull |
+//! | `POST   /v1/vaults` | claim a vault id, registering the first device |
+//! | `POST   /v1/vaults/{id}/devices` | authorize another device |
+//! | `DELETE /v1/vaults/{id}/devices/{device}` | stop serving a removed device |
+//! | `POST   /v1/vaults/{id}/changes` | push changes |
+//! | `GET    /v1/vaults/{id}/changes` | pull changes |
+//! | `POST   /v1/vaults/{id}/acl` | push ACL entries |
+//! | `GET    /v1/vaults/{id}/acl` | pull ACL entries |
+//! | `POST   /v1/vaults/{id}/keys` | push re-wrapped keys for other devices |
+//! | `GET    /v1/vaults/{id}/keys` | pull re-wrapped keys for this device |
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::auth::{self, SignedRequest};
 use crate::protocol::{
     AddDevice, ClaimVault, ErrorBody, HEADER_DEVICE, HEADER_SIGNATURE, HEADER_TIMESTAMP,
-    PullResponse, PushRequest, PushResponse,
+    PullAclResponse, PullKeysResponse, PullResponse, PushAclRequest, PushAclResponse,
+    PushKeysRequest, PushKeysResponse, PushRequest, PushResponse,
 };
 use crate::store::Store;
 
@@ -42,7 +50,10 @@ pub fn router(store: Store) -> Router {
         .route("/v1/health", get(|| async { "ok" }))
         .route("/v1/vaults", post(claim))
         .route("/v1/vaults/{vault_id}/devices", post(add_device))
+        .route("/v1/vaults/{vault_id}/devices/{device_id}", delete(remove_device))
         .route("/v1/vaults/{vault_id}/changes", post(push).get(pull))
+        .route("/v1/vaults/{vault_id}/acl", post(push_acl).get(pull_acl))
+        .route("/v1/vaults/{vault_id}/keys", post(push_keys).get(pull_keys))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY))
         .with_state(store)
 }
@@ -282,6 +293,146 @@ async fn pull(
             more,
         })
         .into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+/// Remove a device from this vault's allowlist, so the relay stops serving it.
+///
+/// Any registered device may do this, as with adding one: the relay cannot tell
+/// an admin from a member. It is defence in depth — clients already refuse a
+/// removed device's changes on ingest once the ACL removal reaches them — but it
+/// also stops the removed device from pushing or pulling at all.
+async fn remove_device(
+    State(store): State<Store>,
+    Path((vault_id, device_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/devices/{device_id}");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "DELETE", &path, b"") {
+        return *response;
+    }
+
+    match store.remove_device(&vault_id, &device_id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn push_acl(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/acl");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "POST", &path, &body) {
+        return *response;
+    }
+
+    let Ok(payload) = serde_json::from_slice::<PushAclRequest>(&body) else {
+        return fail(StatusCode::BAD_REQUEST, "bad_request", "Malformed body.");
+    };
+    if payload.entries.len() > PUSH_LIMIT {
+        return fail(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_many_entries",
+            "Send at most 500 entries per request.",
+        );
+    }
+
+    match store.push_acl(&vault_id, &payload.entries, now_ms()) {
+        Ok(accepted) => Json(PushAclResponse { accepted }).into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AclPullParams {
+    #[serde(default)]
+    after: u64,
+}
+
+async fn pull_acl(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    Query(params): Query<AclPullParams>,
+    headers: HeaderMap,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/acl?after={}", params.after);
+    if let Err(response) = authorize(&store, &vault_id, &headers, "GET", &path, b"") {
+        return *response;
+    }
+
+    match store.pull_acl(&vault_id, params.after, PULL_LIMIT) {
+        Ok((entries, more)) => Json(PullAclResponse { entries, more }).into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn push_keys(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/keys");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "POST", &path, &body) {
+        return *response;
+    }
+
+    let Ok(payload) = serde_json::from_slice::<PushKeysRequest>(&body) else {
+        return fail(StatusCode::BAD_REQUEST, "bad_request", "Malformed body.");
+    };
+    if payload.keys.len() > PUSH_LIMIT {
+        return fail(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_many_keys",
+            "Send at most 500 keys per request.",
+        );
+    }
+
+    match store.push_keys(&vault_id, &payload.keys, now_ms()) {
+        Ok(accepted) => Json(PushKeysResponse { accepted }).into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn pull_keys(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/keys");
+    // A device pulls only the keys addressed to itself, so the recipient is the
+    // authenticated caller rather than anything in the request.
+    let device_id = match authorize(&store, &vault_id, &headers, "GET", &path, b"") {
+        Ok(id) => id,
+        Err(response) => return *response,
+    };
+
+    match store.pull_keys(&vault_id, &device_id) {
+        Ok(keys) => Json(PullKeysResponse { keys }).into_response(),
         Err(_) => fail(
             StatusCode::INTERNAL_SERVER_ERROR,
             "storage",
