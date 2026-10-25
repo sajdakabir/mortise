@@ -191,10 +191,11 @@ impl Vault {
         )?;
 
         conn.execute(
-            "INSERT INTO known_device (device_id, signing_key) VALUES (?1, ?2)",
+            "INSERT INTO known_device (device_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
             params![
                 device.id().as_bytes().as_slice(),
-                device.public().signing_public().as_slice()
+                device.public().signing_public().as_slice(),
+                device.public().kex_public_bytes().as_slice()
             ],
         )?;
 

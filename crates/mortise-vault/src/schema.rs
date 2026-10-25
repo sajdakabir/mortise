@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -198,6 +198,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V5)?;
     conn.execute_batch(SCHEMA_V6)?;
     conn.execute_batch(SCHEMA_V7)?;
+    conn.execute_batch(SCHEMA_V8)?;
     Ok(())
 }
 
@@ -314,6 +315,30 @@ const SCHEMA_V7: &str = r#"
 ALTER TABLE vault_key ADD COLUMN format INTEGER NOT NULL DEFAULT 0;
 "#;
 
+/// Added in v8: ACL and key transport over the relay (crypto-spec §6).
+///
+/// Revocation used to take effect only on the device that issued it. For it to
+/// reach the others, two things have to travel: the ACL entries (carried by the
+/// sync layer now, not just the enrolment bundle) and the vault keys re-wrapped
+/// for the members who remain.
+///
+/// `known_device` gains the device's X25519 key so a key sealed by another admin
+/// — including the genesis owner, whom the ACL log does not name — can be
+/// authenticated on the way in. `key_outbox` holds the re-wraps a revocation
+/// produced until the relay has them; an offline member collects them on sync.
+const SCHEMA_V8: &str = r#"
+ALTER TABLE known_device ADD COLUMN kex_key BLOB NOT NULL DEFAULT x'';
+
+CREATE TABLE key_outbox (
+    vault_id            BLOB    NOT NULL,
+    recipient_device_id BLOB    NOT NULL,
+    epoch               INTEGER NOT NULL,
+    wrapped             BLOB    NOT NULL,
+    pushed              INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (vault_id, recipient_device_id, epoch)
+) STRICT;
+"#;
+
 /// The file's schema version, from whichever table holds it.
 ///
 /// v5 moved it out of `vault_meta` and into `account`. Both have to be
@@ -360,6 +385,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 7 {
         tx.execute_batch(SCHEMA_V7)?;
+    }
+    if found < 8 {
+        tx.execute_batch(SCHEMA_V8)?;
     }
     // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(

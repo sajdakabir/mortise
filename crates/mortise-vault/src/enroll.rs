@@ -61,8 +61,10 @@ pub struct Enrollment {
     pub enroller_signing: [u8; 32],
     /// The enrolling device's X25519 key, to authenticate the sealed keys.
     pub enroller_kex: [u8; 32],
-    /// Devices the new one should accept changes from, with their signing keys.
-    pub known_devices: Vec<([u8; 16], [u8; 32])>,
+    /// Devices the new one should accept changes from: id, signing key, and
+    /// X25519 key. The X25519 key lets the new device authenticate a vault key
+    /// one of them re-wraps after a rotation — the owner included.
+    pub known_devices: Vec<([u8; 16], [u8; 32], [u8; 32])>,
     /// The access control log, so the new device can replay it.
     ///
     /// Without this the new device would be in `known_device` but absent from
@@ -99,9 +101,17 @@ impl Vault {
                 })?;
 
         let mut known_devices = self.known_devices()?;
-        known_devices.push((*new_device.id().as_bytes(), *new_device.signing_public()));
+        known_devices.push((
+            *new_device.id().as_bytes(),
+            *new_device.signing_public(),
+            *new_device.kex_public_bytes(),
+        ));
 
-        self.trust_device(new_device.id(), new_device.signing_public())?;
+        self.trust_device(
+            new_device.id(),
+            new_device.signing_public(),
+            new_device.kex_public_bytes(),
+        )?;
 
         // Record the device in the ACL as well, at Member. Trusting its
         // signature is not the same as granting it the right to write, and the
@@ -137,24 +147,32 @@ impl Vault {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    /// Devices whose changes this vault accepts.
-    pub fn known_devices(&self) -> Result<Vec<([u8; 16], [u8; 32])>> {
+    /// Devices whose changes this vault accepts: id, signing key, X25519 key.
+    pub fn known_devices(&self) -> Result<Vec<([u8; 16], [u8; 32], [u8; 32])>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT device_id, signing_key FROM known_device")?;
+        let mut stmt = conn.prepare("SELECT device_id, signing_key, kex_key FROM known_device")?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+            Ok((
+                r.get::<_, Vec<u8>>(0)?,
+                r.get::<_, Vec<u8>>(1)?,
+                r.get::<_, Vec<u8>>(2)?,
+            ))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            let (id, key) = row?;
+            let (id, signing, kex) = row?;
             let id: [u8; 16] = id
                 .try_into()
                 .map_err(|_| Error::Corrupt("device id is the wrong length"))?;
-            let key: [u8; 32] = key
+            let signing: [u8; 32] = signing
                 .try_into()
                 .map_err(|_| Error::Corrupt("signing key is the wrong length"))?;
-            out.push((id, key));
+            // A device trusted before v8 has no stored kex; zero stands in. It
+            // only matters if that device re-wraps a key for this one, which a
+            // post-v8 enrolment or ACL add records properly.
+            let kex: [u8; 32] = kex.try_into().unwrap_or([0u8; 32]);
+            out.push((id, signing, kex));
         }
         Ok(out)
     }
@@ -260,17 +278,20 @@ pub fn join(
             ],
         )?;
     }
-    for (id, signing_key) in &enrollment.known_devices {
+    for (id, signing_key, kex_key) in &enrollment.known_devices {
         conn.execute(
-            "INSERT OR REPLACE INTO known_device (device_id, signing_key) VALUES (?1, ?2)",
-            params![id.as_slice(), signing_key.as_slice()],
+            "INSERT OR REPLACE INTO known_device (device_id, signing_key, kex_key)
+             VALUES (?1, ?2, ?3)",
+            params![id.as_slice(), signing_key.as_slice(), kex_key.as_slice()],
         )?;
     }
     conn.execute(
-        "INSERT OR REPLACE INTO known_device (device_id, signing_key) VALUES (?1, ?2)",
+        "INSERT OR REPLACE INTO known_device (device_id, signing_key, kex_key)
+         VALUES (?1, ?2, ?3)",
         params![
             device.id().as_bytes().as_slice(),
-            device.public().signing_public().as_slice()
+            device.public().signing_public().as_slice(),
+            device.public().kex_public_bytes().as_slice()
         ],
     )?;
 

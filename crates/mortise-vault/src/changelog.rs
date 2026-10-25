@@ -271,11 +271,25 @@ impl Vault {
     }
 
     /// Register a device whose changes this vault will accept.
-    pub fn trust_device(&self, device: DeviceId, signing_key: &[u8; 32]) -> Result<()> {
+    ///
+    /// The X25519 `kex_key` is stored too, so a vault key sealed by this device
+    /// (an admin re-wrapping after a rotation) can be authenticated when it
+    /// arrives over the relay — including the genesis owner, whom the ACL log
+    /// does not otherwise name with a device key.
+    pub fn trust_device(
+        &self,
+        device: DeviceId,
+        signing_key: &[u8; 32],
+        kex_key: &[u8; 32],
+    ) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO known_device (device_id, signing_key) VALUES (?1, ?2)
-             ON CONFLICT (device_id) DO UPDATE SET signing_key = ?2",
-            params![device.as_bytes().as_slice(), signing_key.as_slice()],
+            "INSERT INTO known_device (device_id, signing_key, kex_key) VALUES (?1, ?2, ?3)
+             ON CONFLICT (device_id) DO UPDATE SET signing_key = ?2, kex_key = ?3",
+            params![
+                device.as_bytes().as_slice(),
+                signing_key.as_slice(),
+                kex_key.as_slice()
+            ],
         )?;
         Ok(())
     }
