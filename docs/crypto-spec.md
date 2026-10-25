@@ -125,12 +125,9 @@ on its next unlock — so no vault is stranded. Every device re-seals the keys i
 receives to itself, so in steady state a key is always authenticated by the
 device that stored it.
 
-> **Still open until ACL transport ships (§6).** Authenticated wrapping closes
-> the substitution hole, but a revocation still only takes effect on the device
-> that issues it: ACL entries and the re-wrapped keys for remaining members do
-> not yet travel over the relay, so peers do not learn of a removal. Revocation
-> does not give the forward secrecy §6 claims until that transport exists.
-> Sharing must not ship before then.
+Authenticated wrapping closes the substitution hole, and §6 carries the ACL
+entries and re-wrapped keys that make a revocation take effect on every device,
+not just the one that issued it.
 
 **The AAD is not optional.** Binding each ciphertext to its own identity stops an
 attacker with write access to the relay (A1) from swapping one item's blob for
@@ -249,8 +246,18 @@ consensus node. Operations: `add_member`, `remove_member`, `change_role`,
 Revocation sequence:
 1. Append `remove_member(pk)`, signed.
 2. Increment epoch, generate `VK@n+1`.
-3. Re-wrap `VK@n+1` for every remaining member device.
+3. Re-wrap `VK@n+1` (Auth mode, §3) for every remaining member device.
 4. All subsequent changes use the new epoch.
+
+**It travels on sync.** The ACL is its own signed log, carried over the relay
+the same way changes are: entries are pushed and pulled, ordered by their strict
+sequence number, and each is verified on apply. The re-wrapped keys from step 3
+travel too, addressed to each remaining device, which authenticates one against
+the ACL (the sealer must be a current admin) and re-seals it to itself. So a
+removal and rotation reach every device on its next sync — not only the one that
+issued them — and the relay is additionally told to stop serving the removed
+device. Until a peer syncs it still trusts that device; propagation is as prompt
+as sync, not instant.
 
 **Forward secrecy only.** The removed member keeps anything they already synced.
 Cryptography cannot fix this. The UI must say so and offer to rotate the

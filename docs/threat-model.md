@@ -55,9 +55,13 @@ the design: compromising it, or compelling us, must not yield plaintext.
 
 ### A1 — Compromised relay, or legal compulsion against us
 **Capability:** full read/write of everything stored server-side, plus live traffic.
-**Must not achieve:** any plaintext secret, any ability to forge an accepted change.
+**Must not achieve:** any plaintext secret, any ability to forge an accepted change
+or to substitute a vault key.
 **Defence:** all payloads sealed client-side; every change Ed25519-signed and
 hash-chained, so server-injected or reordered changes are rejected by clients.
+Wrapped vault keys are sealed in HPKE Auth mode and accepted only from a current
+admin (crypto-spec §3), so the relay cannot slip in a key of its own; ACL entries
+are signed and verified on apply, so it cannot forge a membership change either.
 **Residual:** the relay still learns metadata — peer graph, timing, blob sizes,
 change frequency. Minimize; do not claim to eliminate.
 
@@ -112,10 +116,17 @@ audited dependencies, and reproducible builds so releases can be independently
 verified.
 
 ### A8 — Removed share member
-**Capability:** retains anything they synced before removal.
-**Defence:** key rotation gives **forward** secrecy only.
-**Residual, and it is not fixable by cryptography:** past data is theirs forever.
-The revoke UI must say so plainly and prompt to rotate the actual credentials.
+**Capability:** retains anything they synced before removal; may also control or
+collude with the relay, trying to have the device keep its access.
+**Defence:** removal and key rotation are signed ACL entries that travel on sync,
+and the re-wrapped keys go only to remaining devices (crypto-spec §6); the removed
+device is on no device's new epoch and is dropped from the relay's allowlist. It
+cannot substitute a vault key of its own, because a key is accepted only from a
+current admin (A1, crypto-spec §3). So its access ends once a peer syncs the
+removal — promptly, not instantly.
+**Residual, and it is not fixable by cryptography:** past data is theirs forever,
+and a peer that never syncs never learns of the removal. The revoke UI must say
+so plainly and prompt to rotate the actual credentials.
 
 ### A9 — Other local apps (non-root)
 **Capability:** read the clipboard, observe window titles, attempt to connect to
