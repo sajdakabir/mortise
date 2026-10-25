@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -197,6 +197,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V4)?;
     conn.execute_batch(SCHEMA_V5)?;
     conn.execute_batch(SCHEMA_V6)?;
+    conn.execute_batch(SCHEMA_V7)?;
     Ok(())
 }
 
@@ -301,6 +302,17 @@ CREATE TABLE project (
 ) STRICT;
 "#;
 
+/// Added in v7: how a vault key's wrapped blob is sealed.
+///
+/// Vault keys were sealed in HPKE Base mode, which carries no sender identity —
+/// so a substituted key could be accepted (crypto-spec §3). Authenticated
+/// wrapping (Auth mode) changes the blob format, and the two must be told apart
+/// without guessing from bytes. `0` is a legacy Base-mode blob; `2` is an
+/// authenticated one. Existing rows default to legacy and are rewritten to
+/// authenticated, in place, on the next unlock.
+const SCHEMA_V7: &str = r#"
+ALTER TABLE vault_key ADD COLUMN format INTEGER NOT NULL DEFAULT 0;
+"#;
 
 /// The file's schema version, from whichever table holds it.
 ///
@@ -345,6 +357,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 6 {
         tx.execute_batch(SCHEMA_V6)?;
+    }
+    if found < 7 {
+        tx.execute_batch(SCHEMA_V7)?;
     }
     // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(

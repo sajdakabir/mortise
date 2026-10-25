@@ -15,11 +15,11 @@
 //! held a writing role when it was made. Without this, "viewer" would be a
 //! label with nothing behind it.
 
-use rusqlite::{OptionalExtension, params};
-use serde::{Deserialize, Serialize};
 use mortise_crypto::acl::{Acl, AclEntry, AclOp, Role, UnsignedAclEntry};
 use mortise_crypto::identity::{DeviceId, DevicePublic};
 use mortise_crypto::vault::Epoch;
+use rusqlite::{OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::vault::{Vault, now_ms};
@@ -212,7 +212,7 @@ impl Vault {
     /// The device the genesis ACL names as owner.
     ///
     /// On the device that created the vault this is itself. An enrolled device
-    /// learns it from the ACL log's first entry chain.
+    /// learns it from the known-device rows the enrolment bundle carried.
     fn owner_device(&self) -> Result<DevicePublic> {
         let row: Option<(Vec<u8>, Vec<u8>)> = self
             .conn()
@@ -404,9 +404,11 @@ impl Vault {
             // The wrap is still performed so that a failure to seal for a
             // remaining member surfaces here rather than at the moment the
             // transport is finally wired up.
-            let _ = self
-                .current_vault_key()?
-                .wrap_for(recipient, self.meta().vault_id)?;
+            let _ = self.current_vault_key()?.wrap_for(
+                self.device()?,
+                recipient,
+                self.meta().vault_id,
+            )?;
             rewrapped += 1;
         }
 

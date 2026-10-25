@@ -93,20 +93,11 @@ without re-keying the identity or forcing every other device to re-enroll.
 
 ```
 VK@n   = 256-bit random             n = key epoch, incremented on every revocation
-per member device d:
-  wrapped_VK[d] = HPKE_Seal(pk_kex(d), VK@n, info = "truepass/v1/vaultkey")
-
-  > **Known gap, v1.** This is HPKE Base mode: it gives confidentiality to
-  > the recipient and no sender authentication. A wrapped key that opens
-  > proves only that somebody knew `pk_kex(d)`, which is public. Combined
-  > with §6's rotation — whose signed ACL entry commits to an epoch number
-  > and not to the key — anyone able to write where a device reads its
-  > wrapped keys can substitute a vault key of their choosing. That includes
-  > a hostile relay and a member revoked after they synced the ACL, which
-  > means revocation does not currently give the forward secrecy §6 claims.
-  > The fix is Auth mode with the sender required to be an admin at that
-  > epoch, or a key commitment inside the signed RotateKey; both change the
-  > wrapped-key format and need a version bump.
+per member device d, sealed by an admin device s:
+  wrapped_VK[d] = HPKE_Seal_Auth(sk_kex(s), pk_kex(d), VK@n,
+                                 info = "truepass/v1/vaultkey",
+                                 aad  = vault_id ‖ epoch ‖ device_id(s))
+  stored as:  0x02 ‖ device_id(s) ‖ epoch ‖ encapped ‖ ciphertext
 
 IK     = 256-bit random, per item version
 sealed_IK  = XChaCha20P1305(key = VK@n, nonce = random_24B, pt = IK)
@@ -114,6 +105,32 @@ ciphertext = XChaCha20P1305(key = IK, nonce = random_24B,
                             pt  = payload_bytes,
                             aad = vault_id ‖ item_id ‖ version ‖ epoch)
 ```
+
+**Wrapped keys are authenticated (HPKE Auth mode).** Earlier builds used Base
+mode, which gives confidentiality but no sender authentication: a wrapped key
+that opened proved only that somebody knew the recipient's public key, which is
+public. Anyone able to write where a device reads its wrapped keys — a hostile
+relay, or a member revoked after it synced the ACL — could substitute a vault
+key of their choosing. Auth mode binds the seal to the sealing device's X25519
+key; the recipient authenticates against it and accepts the key only if that
+device is a current admin or owner in the ACL (whose device key an admin's
+signed `AddMember` attests). Neither a relay nor a revoked member holds an
+admin's device key, so neither can forge an accepted substitute. The sender id
+travels in the blob and is bound into the AAD, so it cannot be relabelled.
+
+The wrapped-key format is versioned: a leading `0x02` and a `format` column mark
+an authenticated blob. A vault written in the old Base-mode format is read once
+on the legacy path and re-sealed to the opening device in Auth mode, in place,
+on its next unlock — so no vault is stranded. Every device re-seals the keys it
+receives to itself, so in steady state a key is always authenticated by the
+device that stored it.
+
+> **Still open until ACL transport ships (§6).** Authenticated wrapping closes
+> the substitution hole, but a revocation still only takes effect on the device
+> that issues it: ACL entries and the re-wrapped keys for remaining members do
+> not yet travel over the relay, so peers do not learn of a removal. Revocation
+> does not give the forward secrecy §6 claims until that transport exists.
+> Sharing must not ship before then.
 
 **The AAD is not optional.** Binding each ciphertext to its own identity stops an
 attacker with write access to the relay (A1) from swapping one item's blob for
