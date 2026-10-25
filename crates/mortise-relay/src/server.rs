@@ -50,7 +50,10 @@ pub fn router(store: Store) -> Router {
         .route("/v1/health", get(|| async { "ok" }))
         .route("/v1/vaults", post(claim))
         .route("/v1/vaults/{vault_id}/devices", post(add_device))
-        .route("/v1/vaults/{vault_id}/devices/{device_id}", delete(remove_device))
+        .route(
+            "/v1/vaults/{vault_id}/devices/{device_id}",
+            delete(remove_device),
+        )
         .route("/v1/vaults/{vault_id}/changes", post(push).get(pull))
         .route("/v1/vaults/{vault_id}/acl", post(push_acl).get(pull_acl))
         .route("/v1/vaults/{vault_id}/keys", post(push_keys).get(pull_keys))

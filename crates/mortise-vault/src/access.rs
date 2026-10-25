@@ -449,21 +449,16 @@ impl Vault {
     /// Used as the pull cursor: the strict ACL sequence is its own cursor, so no
     /// separate one is stored.
     pub fn acl_seq(&self) -> Result<u64> {
-        let max: Option<i64> = self.conn().query_row(
-            "SELECT MAX(seq) FROM acl_log WHERE vault_id = ?1",
-            params![self.meta().vault_id.as_bytes().as_slice()],
-            |r| r.get(0),
-        )?;
+        // The ACL log is one strict sequence per file, like `acl_entries` reads
+        // it — not filtered by vault_id, which `apply_acl_entry` leaves empty.
+        let max: Option<i64> = self
+            .conn()
+            .query_row("SELECT MAX(seq) FROM acl_log", [], |r| r.get(0))?;
         Ok(max.unwrap_or(0) as u64)
     }
 
     /// Queue a re-wrapped key for a remaining member to collect over the relay.
-    fn queue_rewrapped_key(
-        &self,
-        recipient: DeviceId,
-        epoch: Epoch,
-        wrapped: &[u8],
-    ) -> Result<()> {
+    fn queue_rewrapped_key(&self, recipient: DeviceId, epoch: Epoch, wrapped: &[u8]) -> Result<()> {
         self.conn().execute(
             "INSERT INTO key_outbox (vault_id, recipient_device_id, epoch, wrapped, pushed)
              VALUES (?1, ?2, ?3, ?4, 0)
@@ -537,7 +532,9 @@ impl Vault {
         }
         let wrapped = WrappedVaultKey::from_bytes(wrapped).map_err(Error::Crypto)?;
         if wrapped.epoch() != Epoch(epoch) {
-            return Err(Error::Corrupt("delivered key epoch does not match its label"));
+            return Err(Error::Corrupt(
+                "delivered key epoch does not match its label",
+            ));
         }
 
         let key = {

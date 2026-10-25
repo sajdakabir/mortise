@@ -311,10 +311,10 @@ impl Store {
                  WHERE vault_id = ?1 AND seq > ?2
                  ORDER BY seq LIMIT ?3",
             )?;
-            let rows = stmt.query_map(
-                params![vault_id, after as i64, i64::from(limit) + 1],
-                |r| r.get::<_, String>(0),
-            )?;
+            let rows = stmt
+                .query_map(params![vault_id, after as i64, i64::from(limit) + 1], |r| {
+                    r.get::<_, String>(0)
+                })?;
 
             let mut out = Vec::new();
             let mut more = false;
@@ -348,7 +348,13 @@ impl Store {
                      VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT (vault_id, recipient_device_id, epoch)
                        DO UPDATE SET body = ?4, stored_at_ms = ?5",
-                    params![vault_id, key.recipient_device_id, key.epoch, key.body, now_ms],
+                    params![
+                        vault_id,
+                        key.recipient_device_id,
+                        key.epoch,
+                        key.body,
+                        now_ms
+                    ],
                 )?;
                 accepted += 1;
             }

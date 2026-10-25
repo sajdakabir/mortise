@@ -27,6 +27,9 @@ use crate::error::{Error, Result};
 use crate::schema;
 use crate::vault::Vault;
 
+/// A device this vault trusts: id, Ed25519 signing key, X25519 key.
+pub type KnownDevice = ([u8; 16], [u8; 32], [u8; 32]);
+
 /// Everything a new device needs, once it has the password and account key.
 ///
 /// Contains no plaintext key material: the vault keys inside are sealed to the
@@ -64,7 +67,7 @@ pub struct Enrollment {
     /// Devices the new one should accept changes from: id, signing key, and
     /// X25519 key. The X25519 key lets the new device authenticate a vault key
     /// one of them re-wraps after a rotation — the owner included.
-    pub known_devices: Vec<([u8; 16], [u8; 32], [u8; 32])>,
+    pub known_devices: Vec<KnownDevice>,
     /// The access control log, so the new device can replay it.
     ///
     /// Without this the new device would be in `known_device` but absent from
@@ -148,7 +151,7 @@ impl Vault {
     }
 
     /// Devices whose changes this vault accepts: id, signing key, X25519 key.
-    pub fn known_devices(&self) -> Result<Vec<([u8; 16], [u8; 32], [u8; 32])>> {
+    pub fn known_devices(&self) -> Result<Vec<KnownDevice>> {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT device_id, signing_key, kex_key FROM known_device")?;
         let rows = stmt.query_map([], |r| {
