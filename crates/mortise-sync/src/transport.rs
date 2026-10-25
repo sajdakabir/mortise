@@ -77,6 +77,13 @@ impl Transport for HttpTransport {
                     .header("content-type", "application/json")
                     .send(body)
             }
+            "DELETE" => {
+                let mut request = self.agent.delete(&url);
+                for (name, value) in headers {
+                    request = request.header(*name, value);
+                }
+                request.call()
+            }
             other => {
                 return Err(Error::Unreachable(format!("unsupported method {other}")));
             }
