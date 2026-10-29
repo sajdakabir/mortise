@@ -41,3 +41,45 @@ origin is attacker-controlled by the time it arrives.
 `proof.js` reimplements `mortise_app_lib::browser::protocol::proof_payload`.
 Length-prefixed fields, big-endian `u32`, in a fixed order. If the two ever
 drift, every request fails closed — annoying, but the safe direction.
+
+## Tests
+
+End-to-end, in a real Chromium with this directory loaded unpacked. No
+desktop app is needed: `test/e2e/support/stub-host.mjs` stands in for
+mortise-proxy and the app, and the browser spawns it through ordinary native
+messaging, via a host manifest written into the throwaway test profile. The
+stub checks every proof the way the app does, so a proof regression fails here
+rather than passing against a lenient fake.
+
+```sh
+cd extension
+npm install
+npm run test:setup   # once: downloads Playwright's Chromium
+npm test             # or: npx playwright test fill.spec.js --headed
+```
+
+Pages in `test/e2e/pages` are served from one local server under several
+hostnames (`*.test` all resolve to 127.0.0.1), so `login.test` embedding
+`idp.test` is a genuinely cross-origin iframe. Fixtures cover a plain login,
+a username-then-password flow, a cross-origin iframe, a late-rendering
+single-page app, a form in shadow DOM and a change-password form.
+
+Tests for behaviour that does not work yet are `test.fixme` with a comment
+saying what is wrong and what should happen — multi-step username, the popup
+filling an iframe, shadow DOM, change-password capture. Fixing one means
+deleting its `.fixme`. Failures keep a trace: `npx playwright show-trace
+test-results/<test>/trace.zip`.
+
+Two things that look odd and are deliberate:
+
+- **The popup is the real toolbar popup**, opened with `chrome.action.openPopup()`
+  and reached over a second CDP connection, because Playwright does not
+  surface action popups. Opening `popup.html` in a tab would make the popup
+  its own active tab and its own sender — a different code path.
+- **Tests run one at a time.** When two test workers launch Chromium at once,
+  the extension's service worker can come up paused, without its `chrome`
+  bindings, and every evaluate against it hangs.
+
+There is no PR workflow in `.github/workflows` yet, so nothing runs these
+automatically; run them before sending a change to anything in this directory.
+`tools/package.sh` packages from an allowlist, so none of this ships.

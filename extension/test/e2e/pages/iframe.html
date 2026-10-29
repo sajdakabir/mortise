@@ -1,0 +1,16 @@
+<!doctype html>
+<!--
+  A page on one origin embedding a sign-in form from another, the way an
+  identity provider widget or a payment form is embedded. The frame's src is
+  filled in from ?frame= so the test can point it at any origin.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Embedding page</title></head>
+  <body>
+    <h1>Embedding page</h1>
+    <iframe id="frame" title="Sign in" width="480" height="320"></iframe>
+    <script>
+      document.getElementById("frame").src = new URLSearchParams(location.search).get("frame");
+    </script>
+  </body>
+</html>
