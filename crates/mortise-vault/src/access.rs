@@ -15,30 +15,32 @@
 //! held a writing role when it was made. Without this, "viewer" would be a
 //! label with nothing behind it.
 
-use rusqlite::{OptionalExtension, params};
-use serde::{Deserialize, Serialize};
 use mortise_crypto::acl::{Acl, AclEntry, AclOp, Role, UnsignedAclEntry};
 use mortise_crypto::identity::{DeviceId, DevicePublic};
-use mortise_crypto::vault::Epoch;
+use mortise_crypto::vault::{Epoch, VaultKey, WrappedVaultKey};
+use rusqlite::{OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::vault::{Vault, now_ms};
 
 /// What a revocation did, and what it could not undo.
 ///
-/// # This is local only
+/// # How it reaches other devices
 ///
-/// **A revocation currently takes effect on the device that issued it and
-/// nowhere else.** The sync layer carries changes, not ACL entries —
-/// [`Vault::unpushed_acl_entries`] has no caller outside tests — so peers
-/// never learn of the removal, never see the key rotation, and go on
-/// accepting the removed device's changes and writing under the epoch whose
-/// key it still holds. The relay also has no device-removal endpoint, so it
-/// keeps serving that device every change the others push.
+/// The removal and the key rotation are issued as signed ACL entries, and the
+/// new key is re-wrapped for every remaining member. All of it travels on the
+/// next sync: the ACL entries and the re-wrapped keys are pushed to the relay,
+/// and peers apply them, stop accepting the removed device's changes, and pick
+/// up the new epoch's key. Until a peer syncs it still trusts the removed
+/// device — propagation is as prompt as sync, not instant.
 ///
-/// The fields below therefore describe an intent rather than a completed
-/// state, and `rewrapped_for` counts keys that were sealed and discarded.
-/// Sharing must not ship until ACL entries sync.
+/// # What it cannot undo
+///
+/// Forward secrecy only. Whatever the removed device already synced is theirs
+/// forever; rotation protects only what is written afterwards.
+/// `items_the_removed_device_retains` is how many items the caller should tell
+/// the user to rotate by hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Revocation {
     /// The epoch now in force.
@@ -212,27 +214,29 @@ impl Vault {
     /// The device the genesis ACL names as owner.
     ///
     /// On the device that created the vault this is itself. An enrolled device
-    /// learns it from the ACL log's first entry chain.
+    /// learns it from the known-device rows the enrolment bundle carried.
     fn owner_device(&self) -> Result<DevicePublic> {
         let row: Option<(Vec<u8>, Vec<u8>)> = self
             .conn()
             .query_row(
-                "SELECT signing_key, device_id FROM known_device
+                "SELECT signing_key, kex_key FROM known_device
                  ORDER BY rowid LIMIT 1",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
 
-        let (signing, _) = row.ok_or(Error::Corrupt("vault has no known devices"))?;
+        let (signing, kex) = row.ok_or(Error::Corrupt("vault has no known devices"))?;
         let signing: [u8; 32] = signing
             .try_into()
             .map_err(|_| Error::Corrupt("signing key is the wrong length"))?;
+        // Role decisions never read the kex half; authenticating a vault key the
+        // owner re-wrapped does. A vault created before v8 has an empty kex here,
+        // which only matters once another device must verify a key this owner
+        // sealed — and an enrolment under v8 records the real one.
+        let kex: [u8; 32] = kex.try_into().unwrap_or([0u8; 32]);
 
-        // The kex half is not needed to evaluate roles, and the genesis owner's
-        // is already recorded in the device row it came from. Zero stands in so
-        // role decisions do not depend on a field they never read.
-        Ok(DevicePublic::from_parts(signing, [0u8; 32]))
+        Ok(DevicePublic::from_parts(signing, kex))
     }
 
     fn acl_entries(&self) -> Result<Vec<AclEntry>> {
@@ -309,7 +313,11 @@ impl Vault {
         // revocation actually stop a device.
         match entry.op() {
             AclOp::AddMember { device, .. } => {
-                self.trust_device(device.id(), device.signing_public())?;
+                self.trust_device(
+                    device.id(),
+                    device.signing_public(),
+                    device.kex_public_bytes(),
+                )?;
             }
             AclOp::RemoveMember { device } => {
                 self.conn().execute(
@@ -383,30 +391,23 @@ impl Vault {
         self.store_vault_key(rotated)?;
         self.issue_acl_op(AclOp::RotateKey { epoch: new_epoch })?;
 
-        // Re-wrap for everyone who remains. Each gets the new key sealed to
-        // their own device key, which is what the removed device no longer has.
+        // Re-wrap for everyone who remains and queue the sealed copies for the
+        // relay. Each gets the new key sealed to their own device key, which is
+        // what the removed device no longer has; an offline member collects it
+        // on its next sync.
         let acl = self.acl()?;
         let recipients: Vec<_> = acl.key_recipients().cloned().collect();
         let mut rewrapped = 0;
         for recipient in &recipients {
-            if recipient.id() == self.device()?.id() {
+            let recipient_id = recipient.id();
+            if recipient_id == self.device()?.id() {
                 continue; // already stored above
             }
-            // Computed and then dropped, because there is nowhere to put it.
-            //
-            // The intent was that these sealed copies travel with the ACL log
-            // and an offline device collects them on its next sync. That
-            // mechanism does not exist: the sync layer carries changes only,
-            // and `unpushed_acl_entries` below has no caller outside tests.
-            // Until it does, a revocation takes effect on this device and
-            // nowhere else — see the warning on `Revocation`.
-            //
-            // The wrap is still performed so that a failure to seal for a
-            // remaining member surfaces here rather than at the moment the
-            // transport is finally wired up.
-            let _ = self
+            let bytes = self
                 .current_vault_key()?
-                .wrap_for(recipient, self.meta().vault_id)?;
+                .wrap_for(self.device()?, recipient, self.meta().vault_id)?
+                .to_bytes();
+            self.queue_rewrapped_key(recipient_id, new_epoch, &bytes)?;
             rewrapped += 1;
         }
 
@@ -441,5 +442,111 @@ impl Vault {
             params![up_to_seq as i64],
         )?;
         Ok(())
+    }
+
+    /// The sequence number of the latest ACL entry held, 0 if only genesis.
+    ///
+    /// Used as the pull cursor: the strict ACL sequence is its own cursor, so no
+    /// separate one is stored.
+    pub fn acl_seq(&self) -> Result<u64> {
+        // The ACL log is one strict sequence per file, like `acl_entries` reads
+        // it — not filtered by vault_id, which `apply_acl_entry` leaves empty.
+        let max: Option<i64> = self
+            .conn()
+            .query_row("SELECT MAX(seq) FROM acl_log", [], |r| r.get(0))?;
+        Ok(max.unwrap_or(0) as u64)
+    }
+
+    /// Queue a re-wrapped key for a remaining member to collect over the relay.
+    fn queue_rewrapped_key(&self, recipient: DeviceId, epoch: Epoch, wrapped: &[u8]) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO key_outbox (vault_id, recipient_device_id, epoch, wrapped, pushed)
+             VALUES (?1, ?2, ?3, ?4, 0)
+             ON CONFLICT (vault_id, recipient_device_id, epoch)
+               DO UPDATE SET wrapped = ?4, pushed = 0",
+            params![
+                self.meta().vault_id.as_bytes().as_slice(),
+                recipient.as_bytes().as_slice(),
+                epoch.value(),
+                wrapped,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Re-wrapped keys not yet pushed: `(recipient, epoch, wrapped bytes)`.
+    pub fn unpushed_keys(&self) -> Result<Vec<(DeviceId, u32, Vec<u8>)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT recipient_device_id, epoch, wrapped FROM key_outbox
+             WHERE vault_id = ?1 AND pushed = 0 ORDER BY epoch",
+        )?;
+        let rows = stmt.query_map(params![self.meta().vault_id.as_bytes().as_slice()], |r| {
+            Ok((
+                r.get::<_, Vec<u8>>(0)?,
+                r.get::<_, u32>(1)?,
+                r.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, epoch, wrapped) = row?;
+            let id: [u8; 16] = id
+                .try_into()
+                .map_err(|_| Error::Corrupt("outbox device id is the wrong length"))?;
+            out.push((DeviceId::from_bytes(id), epoch, wrapped));
+        }
+        Ok(out)
+    }
+
+    /// Mark all queued keys as delivered to the relay.
+    pub fn mark_keys_pushed(&mut self) -> Result<()> {
+        self.conn().execute(
+            "UPDATE key_outbox SET pushed = 1 WHERE vault_id = ?1",
+            params![self.meta().vault_id.as_bytes().as_slice()],
+        )?;
+        Ok(())
+    }
+
+    /// Whether a key for `epoch` is already stored.
+    fn has_vault_key(&self, epoch: Epoch) -> Result<bool> {
+        let count: u32 = self.conn().query_row(
+            "SELECT COUNT(*) FROM vault_key WHERE vault_id = ?1 AND epoch = ?2",
+            params![self.meta().vault_id.as_bytes().as_slice(), epoch.value()],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Store a vault key received over the relay, after authenticating it.
+    ///
+    /// The blob is addressed to this device and sealed by another device after a
+    /// rotation. It is authenticated against the ACL — the sealer must be a
+    /// current admin or owner — then re-sealed to this device so later unlocks
+    /// take the self path. Returns whether the key was new.
+    ///
+    /// Requires the vault to be unlocked: re-sealing needs this device's key.
+    pub fn apply_wrapped_key(&mut self, epoch: u32, wrapped: &[u8]) -> Result<bool> {
+        if self.has_vault_key(Epoch(epoch))? {
+            return Ok(false);
+        }
+        let wrapped = WrappedVaultKey::from_bytes(wrapped).map_err(Error::Crypto)?;
+        if wrapped.epoch() != Epoch(epoch) {
+            return Err(Error::Corrupt(
+                "delivered key epoch does not match its label",
+            ));
+        }
+
+        let key = {
+            let device = self.device()?;
+            let sender = wrapped
+                .sender_id()
+                .ok_or(Error::Corrupt("delivered key has no sender"))?;
+            let sender_kex = self.resolve_sender_kex(device, sender)?;
+            VaultKey::unwrap_for(device, &wrapped, self.meta().vault_id, &sender_kex)
+                .map_err(Error::Crypto)?
+        };
+        self.store_vault_key(key)?;
+        Ok(true)
     }
 }

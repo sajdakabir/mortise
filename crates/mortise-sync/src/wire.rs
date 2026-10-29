@@ -9,10 +9,12 @@
 //! decode into something plausible.
 
 use data_encoding::BASE64;
+use mortise_crypto::acl::AclEntry;
 use mortise_crypto::change::{Change, ChangeId, Hlc, UnsignedChange};
 use mortise_crypto::identity::DeviceId;
 use mortise_crypto::vault::{Epoch, VaultId};
-use mortise_relay::protocol::WireChange;
+use mortise_relay::protocol::{WireAclEntry, WireChange};
+use mortise_vault::access::AclEntryRecord;
 
 /// Lowercase hex.
 pub fn hex(bytes: &[u8]) -> String {
@@ -75,4 +77,37 @@ pub fn from_wire(wire: &WireChange, vault: VaultId) -> Option<Change> {
     );
 
     Some(Change::from_parts(unsigned, id, signature))
+}
+
+/// Render an ACL entry for the relay.
+pub fn acl_to_wire(entry: &AclEntry) -> WireAclEntry {
+    let rec = AclEntryRecord::from_entry(entry);
+    WireAclEntry {
+        seq: rec.seq,
+        id: hex(&rec.id),
+        prev: hex(&rec.prev),
+        op_kind: rec.op_kind,
+        op_body: BASE64.encode(&rec.op_body),
+        author: hex(&rec.author),
+        issued_at_ms: rec.issued_at_ms,
+        signature: hex(&rec.signature),
+    }
+}
+
+/// Rebuild an ACL entry from the relay's representation.
+///
+/// Like [`from_wire`], does not verify the signature — `apply_acl_entry` does —
+/// and returns `None` on anything malformed, so a relay cannot panic a client.
+pub fn acl_from_wire(wire: &WireAclEntry, vault: VaultId) -> Option<AclEntry> {
+    let rec = AclEntryRecord {
+        seq: wire.seq,
+        id: unhex::<32>(&wire.id)?,
+        prev: unhex::<32>(&wire.prev)?,
+        op_kind: wire.op_kind,
+        op_body: BASE64.decode(wire.op_body.as_bytes()).ok()?,
+        author: unhex::<16>(&wire.author)?,
+        issued_at_ms: wire.issued_at_ms,
+        signature: unhex::<64>(&wire.signature)?.to_vec(),
+    };
+    rec.to_entry(vault)
 }

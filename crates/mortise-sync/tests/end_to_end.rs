@@ -277,6 +277,105 @@ fn ingest_works_while_locked_but_applying_waits() {
     assert_eq!(f.b.reveal(id).unwrap(), payload);
 }
 
+// --- revocation over the relay (crypto-spec §6) ---
+
+/// The headline of Stage 2: a revocation issued on one device reaches the
+/// others. The remaining member learns the removal and the rotation, picks up
+/// the new epoch's key, reads what is written afterwards, and refuses anything
+/// from the removed device — which is also cut off at the relay.
+#[test]
+fn a_revocation_reaches_the_other_device_and_cuts_off_the_removed_one() {
+    let url = spawn_relay();
+    let dir = TempDir::new().unwrap();
+
+    // A owns the vault; B and C are enrolled members.
+    let (mut a, account_key) = Vault::create(dir.path().join("a.db"), PASSWORD, FAST).unwrap();
+
+    let device_b = Device::generate().unwrap();
+    let enroll_b = a.enroll_device(device_b.public()).unwrap();
+    let mut b = enroll::join(
+        dir.path().join("b.db"),
+        PASSWORD,
+        &account_key,
+        &device_b,
+        &enroll_b,
+    )
+    .unwrap();
+
+    let device_c = Device::generate().unwrap();
+    let enroll_c = a.enroll_device(device_c.public()).unwrap();
+    let mut c = enroll::join(
+        dir.path().join("c.db"),
+        PASSWORD,
+        &account_key,
+        &device_c,
+        &enroll_c,
+    )
+    .unwrap();
+
+    let syncer = Syncer::new(HttpTransport::new(&url));
+    syncer.claim(&a).unwrap();
+    for d in [&device_b, &device_c] {
+        syncer
+            .authorize_device(&a, d.public().id().as_bytes(), d.public().signing_public())
+            .unwrap();
+    }
+
+    // Converge, so B learns C was added before C is removed.
+    syncer.sync(&mut a).unwrap();
+    syncer.sync(&mut b).unwrap();
+    syncer.sync(&mut c).unwrap();
+    assert!(
+        b.acl().unwrap().role(device_c.public().id()).is_some(),
+        "B should see C as a member before the revocation"
+    );
+
+    // A revokes C, then everyone syncs.
+    let c_id = *device_c.public().id().as_bytes();
+    a.revoke_member(device_c.public().id()).unwrap();
+    syncer.sync(&mut a).unwrap();
+    let out_b = syncer.sync(&mut b).unwrap();
+
+    assert!(
+        out_b.acl_pulled >= 2,
+        "B did not receive the removal and the rotation"
+    );
+    assert!(out_b.keys_applied >= 1, "B did not receive the rotated key");
+    assert!(
+        b.acl().unwrap().role(device_c.public().id()).is_none(),
+        "B still trusts the revoked device"
+    );
+    assert_eq!(
+        b.meta().epoch.value(),
+        a.meta().epoch.value(),
+        "B is not on the new epoch"
+    );
+
+    // An item A writes under the new epoch reaches and opens on B.
+    let (meta, payload) = item("after-revocation", "s3cret");
+    let id = a.create_item(&meta, &payload).unwrap();
+    syncer.sync(&mut a).unwrap();
+    let out_b2 = syncer.sync(&mut b).unwrap();
+    assert!(out_b2.pulled >= 1, "the post-rotation item did not reach B");
+    assert_eq!(b.reveal(id).unwrap(), payload);
+
+    // A change from the removed device is refused by B on ingest.
+    c.create_item(&item("from-c", "x").0, &item("from-c", "x").1)
+        .unwrap();
+    let _ = syncer.push(&mut c);
+    let out_b3 = syncer.sync(&mut b).unwrap();
+    assert!(
+        out_b3.rejected >= 1,
+        "B accepted a change from the revoked device"
+    );
+
+    // Defence in depth: once C is removed at the relay, its sync is refused.
+    syncer.remove_device(&a, &c_id).unwrap();
+    c.create_item(&item("from-c-again", "y").0, &item("from-c-again", "y").1)
+        .unwrap();
+    assert!(matches!(syncer.push(&mut c), Err(Error::Refused { .. })));
+}
+
 // --- what the relay refuses ---
 
 #[test]

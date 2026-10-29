@@ -13,13 +13,21 @@
 use hpke::{Deserializable, Kem as KemTrait, OpModeR, OpModeS, Serializable};
 
 use crate::error::{Error, Result};
-use crate::identity::{Device, DevicePublic, Kem};
+use crate::identity::{DEVICE_ID_LEN, Device, DeviceId, DevicePublic, Kem, KexPublic};
 use crate::secret::Key32;
 
 /// Length of a serialized vault identifier.
 pub const VAULT_ID_LEN: usize = 16;
 
 const HPKE_INFO: &[u8] = b"truepass/v1/vaultkey";
+
+/// Leading byte of a serialized authenticated (HPKE Auth mode) wrapped key.
+///
+/// A legacy Base-mode blob has no such tag — it begins with the epoch's
+/// big-endian high byte, which for every realistic epoch is `0x00`. The two are
+/// told apart by the stored `format` column rather than by guessing from bytes;
+/// the tag is a self-describing cross-check.
+const FORMAT_AUTH: u8 = 0x02;
 
 type HpkeAead = hpke::aead::ChaCha20Poly1305;
 type HpkeKdf = hpke::kdf::HkdfSha256;
@@ -107,31 +115,57 @@ impl VaultKey {
         &self.key
     }
 
-    /// Seal this vault key to a member device.
-    pub fn wrap_for(&self, recipient: &DevicePublic, vault: VaultId) -> Result<WrappedVaultKey> {
-        let aad = wrap_aad(vault, self.epoch);
-        // NOTE: Base mode carries no sender identity.
-        //
-        // A successful `unwrap_for` therefore proves only that somebody who
-        // knew the recipient's public key produced this blob — not that an
-        // admin did, and not that the key inside is the one the vault agreed
-        // on. Nothing else closes that: `WrappedVaultKey` is unsigned, the
-        // AAD binds only vault and epoch (both attacker-chosen when the
-        // attacker is minting), and the signed `AclOp::RotateKey` commits to
-        // a counter rather than to key material.
-        //
-        // So a party who can write where a device reads its wrapped keys — a
-        // hostile relay, or a revoked member who already synced the ACL and
-        // holds every remaining device's public key — can substitute a vault
-        // key of their choosing and have it accepted, defeating the forward
-        // secrecy revocation is supposed to give.
-        //
-        // Fixing it means HPKE Auth mode here and in `unwrap_for`, with the
-        // authenticated sender required to be an admin at that epoch, or a
-        // BLAKE3 commitment to the key inside the signed RotateKey entry.
-        // Either changes the wrapped-key format, so it is a versioned change
-        // and an amendment to crypto-spec §3 and §6 — which specify this
-        // construction and are themselves unsound here.
+    /// Seal this vault key to a member device, authenticated as `sender`.
+    ///
+    /// Uses HPKE **Auth mode** (spec §3): the seal is bound to `sender`'s X25519
+    /// key, so a device that opens it learns not merely that the key is intact
+    /// but that whoever produced it held `sender`'s private key. The recipient
+    /// side ([`VaultKey::unwrap_for`]) authenticates against that key, and the
+    /// vault layer checks `sender` was an admin — which is what stops a hostile
+    /// relay, or a member revoked after it synced the ACL, from substituting a
+    /// vault key of its own: neither holds an admin's device key.
+    ///
+    /// The sender id travels in the blob and is bound into the AAD, so it cannot
+    /// be relabelled to point at a different device after the fact.
+    pub fn wrap_for(
+        &self,
+        sender: &Device,
+        recipient: &DevicePublic,
+        vault: VaultId,
+    ) -> Result<WrappedVaultKey> {
+        let sender_id = sender.id();
+        let aad = wrap_aad(vault, self.epoch, Some(sender_id));
+        let mode = OpModeS::Auth((sender.kex_private().clone(), sender.public().kex_public()?));
+        let (encapped, ciphertext) = hpke::single_shot_seal::<HpkeAead, HpkeKdf, Kem>(
+            &mode,
+            &recipient.kex_public()?,
+            HPKE_INFO,
+            self.key.expose(),
+            &aad,
+        )
+        .map_err(|_| Error::Encrypt)?;
+
+        Ok(WrappedVaultKey {
+            sender: Some(sender_id),
+            epoch: self.epoch,
+            encapped: encapped.to_bytes().to_vec(),
+            ciphertext,
+        })
+    }
+
+    /// Seal in the pre-authentication HPKE Base mode.
+    ///
+    /// Retained only so a vault written before authenticated wrapping existed
+    /// can still be read and upgraded (see [`VaultKey::unwrap_legacy`]), and so
+    /// migration tests can construct a genuine legacy blob. **Production code
+    /// must use [`VaultKey::wrap_for`]** — a Base-mode blob carries no sender
+    /// identity, which is exactly the gap authenticated wrapping closes.
+    pub fn wrap_legacy_for(
+        &self,
+        recipient: &DevicePublic,
+        vault: VaultId,
+    ) -> Result<WrappedVaultKey> {
+        let aad = wrap_aad(vault, self.epoch, None);
         let (encapped, ciphertext) = hpke::single_shot_seal::<HpkeAead, HpkeKdf, Kem>(
             &OpModeS::Base,
             &recipient.kex_public()?,
@@ -142,17 +176,60 @@ impl VaultKey {
         .map_err(|_| Error::Encrypt)?;
 
         Ok(WrappedVaultKey {
+            sender: None,
             epoch: self.epoch,
             encapped: encapped.to_bytes().to_vec(),
             ciphertext,
         })
     }
 
-    /// Recover a vault key sealed to this device.
-    pub fn unwrap_for(device: &Device, wrapped: &WrappedVaultKey, vault: VaultId) -> Result<Self> {
+    /// Recover a vault key sealed to this device, authenticating the sender
+    /// against `sender_kex`.
+    ///
+    /// Fails if the blob was not sealed by the holder of `sender_kex` — which is
+    /// how a substituted key is rejected. The caller is responsible for having
+    /// established that `sender_kex` belongs to a device entitled to set the
+    /// vault key (an admin); the vault layer does this against the ACL before
+    /// calling in.
+    pub fn unwrap_for(
+        device: &Device,
+        wrapped: &WrappedVaultKey,
+        vault: VaultId,
+        sender_kex: &KexPublic,
+    ) -> Result<Self> {
         let encapped = <Kem as KemTrait>::EncappedKey::from_bytes(&wrapped.encapped)
             .map_err(|_| Error::Decrypt)?;
-        let aad = wrap_aad(vault, wrapped.epoch);
+        let aad = wrap_aad(vault, wrapped.epoch, wrapped.sender);
+
+        let plaintext = hpke::single_shot_open::<HpkeAead, HpkeKdf, Kem>(
+            &OpModeR::Auth(sender_kex.clone()),
+            device.kex_private(),
+            &encapped,
+            HPKE_INFO,
+            &wrapped.ciphertext,
+            &aad,
+        )
+        .map_err(|_| Error::Decrypt)?;
+
+        Ok(Self {
+            key: Key32::from_slice(&plaintext)?,
+            epoch: wrapped.epoch,
+        })
+    }
+
+    /// Recover a vault key sealed in the pre-authentication Base mode.
+    ///
+    /// For reading a vault written before authenticated wrapping, on the path
+    /// that upgrades it in place. New blobs always go through
+    /// [`VaultKey::unwrap_for`].
+    pub fn unwrap_legacy(
+        device: &Device,
+        wrapped: &WrappedVaultKey,
+        vault: VaultId,
+    ) -> Result<Self> {
+        let encapped = <Kem as KemTrait>::EncappedKey::from_bytes(&wrapped.encapped)
+            .map_err(|_| Error::Decrypt)?;
+        let aad = wrap_aad(vault, wrapped.epoch, None);
 
         let plaintext = hpke::single_shot_open::<HpkeAead, HpkeKdf, Kem>(
             &OpModeR::Base,
@@ -174,6 +251,9 @@ impl VaultKey {
 /// A vault key sealed to one device's X25519 public key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrappedVaultKey {
+    /// `Some` for an authenticated (Auth-mode) blob, naming the sealing device;
+    /// `None` for a legacy Base-mode blob read off an older vault.
+    sender: Option<DeviceId>,
     epoch: Epoch,
     encapped: Vec<u8>,
     ciphertext: Vec<u8>,
@@ -185,8 +265,34 @@ impl WrappedVaultKey {
         self.epoch
     }
 
-    /// Serialize for storage or sync: `epoch(4) ‖ len(4) ‖ encapped ‖ ciphertext`.
+    /// The device that sealed this key, if it is an authenticated blob.
+    pub fn sender_id(&self) -> Option<DeviceId> {
+        self.sender
+    }
+
+    /// Serialize an authenticated blob:
+    /// `0x02 ‖ sender(16) ‖ epoch(4) ‖ enc_len(4) ‖ encapped ‖ ciphertext`.
+    ///
+    /// A legacy blob (no sender) serializes in the old layout, via
+    /// [`WrappedVaultKey::to_bytes_legacy`].
     pub fn to_bytes(&self) -> Vec<u8> {
+        let Some(sender) = self.sender else {
+            return self.to_bytes_legacy();
+        };
+        let mut out =
+            Vec::with_capacity(1 + DEVICE_ID_LEN + 8 + self.encapped.len() + self.ciphertext.len());
+        out.push(FORMAT_AUTH);
+        out.extend_from_slice(sender.as_bytes());
+        out.extend_from_slice(&self.epoch.0.to_be_bytes());
+        out.extend_from_slice(&(self.encapped.len() as u32).to_be_bytes());
+        out.extend_from_slice(&self.encapped);
+        out.extend_from_slice(&self.ciphertext);
+        out
+    }
+
+    /// Serialize in the legacy Base-mode layout:
+    /// `epoch(4) ‖ enc_len(4) ‖ encapped ‖ ciphertext`.
+    pub fn to_bytes_legacy(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(8 + self.encapped.len() + self.ciphertext.len());
         out.extend_from_slice(&self.epoch.0.to_be_bytes());
         out.extend_from_slice(&(self.encapped.len() as u32).to_be_bytes());
@@ -195,8 +301,45 @@ impl WrappedVaultKey {
         out
     }
 
-    /// Parse bytes produced by [`WrappedVaultKey::to_bytes`].
+    /// Parse an authenticated blob produced by [`WrappedVaultKey::to_bytes`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        const HEADER: usize = 1 + DEVICE_ID_LEN + 8;
+        if bytes.len() < HEADER || bytes[0] != FORMAT_AUTH {
+            return Err(Error::Decrypt);
+        }
+        let sender = DeviceId::from_bytes(
+            bytes[1..1 + DEVICE_ID_LEN]
+                .try_into()
+                .map_err(|_| Error::Decrypt)?,
+        );
+        let epoch_at = 1 + DEVICE_ID_LEN;
+        let epoch = Epoch(u32::from_be_bytes(
+            bytes[epoch_at..epoch_at + 4]
+                .try_into()
+                .map_err(|_| Error::Decrypt)?,
+        ));
+        let encapped_len = u32::from_be_bytes(
+            bytes[epoch_at + 4..HEADER]
+                .try_into()
+                .map_err(|_| Error::Decrypt)?,
+        ) as usize;
+
+        let rest = &bytes[HEADER..];
+        if rest.len() < encapped_len {
+            return Err(Error::Decrypt);
+        }
+        let (encapped, ciphertext) = rest.split_at(encapped_len);
+
+        Ok(Self {
+            sender: Some(sender),
+            epoch,
+            encapped: encapped.to_vec(),
+            ciphertext: ciphertext.to_vec(),
+        })
+    }
+
+    /// Parse a legacy Base-mode blob (`epoch(4) ‖ len(4) ‖ encapped ‖ ciphertext`).
+    pub fn from_bytes_legacy(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < 8 {
             return Err(Error::Decrypt);
         }
@@ -213,6 +356,7 @@ impl WrappedVaultKey {
         let (encapped, ciphertext) = rest.split_at(encapped_len);
 
         Ok(Self {
+            sender: None,
             epoch,
             encapped: encapped.to_vec(),
             ciphertext: ciphertext.to_vec(),
@@ -220,12 +364,15 @@ impl WrappedVaultKey {
     }
 }
 
-/// AAD binding a wrapped vault key to its vault and epoch.
-///
-/// Fixed width by construction, so no length prefixes are needed.
-fn wrap_aad(vault: VaultId, epoch: Epoch) -> [u8; VAULT_ID_LEN + 4] {
-    let mut aad = [0u8; VAULT_ID_LEN + 4];
-    aad[..VAULT_ID_LEN].copy_from_slice(vault.as_bytes());
-    aad[VAULT_ID_LEN..].copy_from_slice(&epoch.0.to_be_bytes());
+/// AAD binding a wrapped vault key to its vault, epoch, and — for an
+/// authenticated blob — the sealing device, so none of the three can be
+/// relabelled without the open failing.
+fn wrap_aad(vault: VaultId, epoch: Epoch, sender: Option<DeviceId>) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(VAULT_ID_LEN + 4 + DEVICE_ID_LEN);
+    aad.extend_from_slice(vault.as_bytes());
+    aad.extend_from_slice(&epoch.0.to_be_bytes());
+    if let Some(sender) = sender {
+        aad.extend_from_slice(sender.as_bytes());
+    }
     aad
 }

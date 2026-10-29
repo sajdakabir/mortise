@@ -14,14 +14,19 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, params};
-use mortise_crypto::identity::{Device, DeviceId, Identity};
+use mortise_crypto::identity::{Device, DeviceId, Identity, KexPublic};
 use mortise_crypto::kdf::{self, Argon2Params};
 use mortise_crypto::secret::{Key32, Salt16};
 use mortise_crypto::vault::{Epoch, VaultId, VaultKey, WrappedVaultKey};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::{Error, Result};
 use crate::schema;
+
+/// `vault_key.format` for a legacy HPKE Base-mode blob (no sender identity).
+pub(crate) const KEY_FORMAT_LEGACY: u8 = 0;
+/// `vault_key.format` for an authenticated HPKE Auth-mode blob.
+pub(crate) const KEY_FORMAT_AUTH: u8 = 2;
 
 /// Material that unlocks a vault without the master password.
 ///
@@ -174,19 +179,23 @@ impl Vault {
             params![device.id().as_bytes().as_slice(), device.wrap(&muk)?],
         )?;
         conn.execute(
-            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)",
+            "INSERT INTO vault_key (vault_id, epoch, wrapped, format) VALUES (?1, ?2, ?3, ?4)",
             params![
                 vault_id.as_bytes().as_slice(),
                 vault_key.epoch().value(),
-                vault_key.wrap_for(device.public(), vault_id)?.to_bytes()
+                vault_key
+                    .wrap_for(&device, device.public(), vault_id)?
+                    .to_bytes(),
+                KEY_FORMAT_AUTH,
             ],
         )?;
 
         conn.execute(
-            "INSERT INTO known_device (device_id, signing_key) VALUES (?1, ?2)",
+            "INSERT INTO known_device (device_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
             params![
                 device.id().as_bytes().as_slice(),
-                device.public().signing_public().as_slice()
+                device.public().signing_public().as_slice(),
+                device.public().kex_public_bytes().as_slice()
             ],
         )?;
 
@@ -276,23 +285,66 @@ impl Vault {
             .map_err(|_| Error::Corrupt("device row is missing"))?;
         let device = Device::unwrap(&muk, &device_wrapped)?;
 
+        let vault_id = self.meta.vault_id;
         let mut vault_keys = BTreeMap::new();
+        let mut legacy_epochs: Vec<u32> = Vec::new();
         {
-            let mut stmt = self
-                .conn
-                .prepare("SELECT epoch, wrapped FROM vault_key WHERE vault_id = ?1 ORDER BY epoch")?;
-            let rows = stmt.query_map(params![self.meta.vault_id.as_bytes().as_slice()], |r| {
-                Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))
+            let mut stmt = self.conn.prepare(
+                "SELECT epoch, wrapped, format FROM vault_key WHERE vault_id = ?1 ORDER BY epoch",
+            )?;
+            let rows = stmt.query_map(params![vault_id.as_bytes().as_slice()], |r| {
+                Ok((
+                    r.get::<_, u32>(0)?,
+                    r.get::<_, Vec<u8>>(1)?,
+                    r.get::<_, u8>(2)?,
+                ))
             })?;
             for row in rows {
-                let (epoch, wrapped) = row?;
-                let wrapped = WrappedVaultKey::from_bytes(&wrapped)?;
-                let key = VaultKey::unwrap_for(&device, &wrapped, self.meta.vault_id)?;
+                let (epoch, wrapped, format) = row?;
+                let key = match format {
+                    KEY_FORMAT_AUTH => {
+                        let wrapped = WrappedVaultKey::from_bytes(&wrapped)?;
+                        let sender = wrapped
+                            .sender_id()
+                            .ok_or(Error::Corrupt("authenticated vault key has no sender"))?;
+                        let sender_kex = self.resolve_sender_kex(&device, sender)?;
+                        VaultKey::unwrap_for(&device, &wrapped, vault_id, &sender_kex)?
+                    }
+                    KEY_FORMAT_LEGACY => {
+                        // A pre-authentication Base-mode blob. It was sealed to
+                        // this device, so it opens on the legacy path; it is then
+                        // rewritten in authenticated form below.
+                        let wrapped = WrappedVaultKey::from_bytes_legacy(&wrapped)?;
+                        legacy_epochs.push(epoch);
+                        VaultKey::unwrap_legacy(&device, &wrapped, vault_id)?
+                    }
+                    _ => return Err(Error::Corrupt("vault key has an unknown format")),
+                };
                 vault_keys.insert(Epoch(epoch), key);
             }
         }
         if vault_keys.is_empty() {
             return Err(Error::Corrupt("vault has no keys"));
+        }
+
+        // Upgrade any legacy key in place: re-seal to this device in Auth mode so
+        // every future unlock takes the authenticated path. Idempotent — a key
+        // already stored as authenticated is never in `legacy_epochs`.
+        for epoch in &legacy_epochs {
+            let key = vault_keys
+                .get(&Epoch(*epoch))
+                .ok_or(Error::Corrupt("legacy key vanished before upgrade"))?;
+            let rewrapped = key.wrap_for(&device, device.public(), vault_id)?;
+            self.conn.execute(
+                "UPDATE vault_key SET wrapped = ?1, format = ?2
+                 WHERE vault_id = ?3 AND epoch = ?4",
+                params![
+                    rewrapped.to_bytes(),
+                    KEY_FORMAT_AUTH,
+                    vault_id.as_bytes().as_slice(),
+                    epoch,
+                ],
+            )?;
         }
 
         self.meta_key = Some(kdf::derive_meta_key(&muk)?);
@@ -361,23 +413,56 @@ impl Vault {
         Ok(())
     }
 
-    /// Install a rotated vault key, sealed to this device.
+    /// Install a rotated vault key, sealed to this device in Auth mode.
     pub(crate) fn store_vault_key(&mut self, key: VaultKey) -> Result<()> {
         let device = self.device()?;
-        let wrapped = key.wrap_for(device.public(), self.meta.vault_id)?;
+        let wrapped = key.wrap_for(device, device.public(), self.meta.vault_id)?;
         self.conn.execute(
-            "INSERT INTO vault_key (vault_id, epoch, wrapped) VALUES (?1, ?2, ?3)
-             ON CONFLICT (vault_id, epoch) DO UPDATE SET wrapped = ?3",
+            "INSERT INTO vault_key (vault_id, epoch, wrapped, format) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (vault_id, epoch) DO UPDATE SET wrapped = ?3, format = ?4",
             params![
                 self.meta.vault_id.as_bytes().as_slice(),
                 key.epoch().value(),
-                wrapped.to_bytes()
+                wrapped.to_bytes(),
+                KEY_FORMAT_AUTH,
             ],
         )?;
         if let Some(unlocked) = self.unlocked.as_mut() {
             unlocked.vault_keys.insert(key.epoch(), key);
         }
         Ok(())
+    }
+
+    /// The X25519 public key to authenticate a wrapped vault key's sender
+    /// against, resolved from the sender id in the blob.
+    ///
+    /// For a key this device sealed to itself — the steady state, since every
+    /// ingest path re-wraps to self — the sender is this device and its key is
+    /// to hand. Otherwise the sender must be a current admin or owner whose
+    /// device key the ACL records (attested by an admin's signed `AddMember`);
+    /// anyone else is rejected. Checking the *current* ACL is the property we
+    /// want: a since-revoked sealer is no longer a member, so its substitute is
+    /// refused.
+    pub(crate) fn resolve_sender_kex(
+        &self,
+        device: &Device,
+        sender: DeviceId,
+    ) -> Result<KexPublic> {
+        if sender == device.id() {
+            return Ok(device.public().kex_public()?);
+        }
+        let acl = self.acl()?;
+        let member = acl
+            .members()
+            .find(|(id, _)| **id == sender)
+            .map(|(_, m)| m)
+            .ok_or(Error::Corrupt(
+                "wrapped key names a sender that is not a member",
+            ))?;
+        if !member.role().can_manage_acl() {
+            return Err(Error::Corrupt("wrapped key sender is not an admin"));
+        }
+        Ok(member.device().kex_public()?)
     }
 
     /// This machine's device id. Available while locked.
@@ -493,4 +578,83 @@ fn read_meta(conn: &Connection) -> Result<VaultMeta> {
         epoch: Epoch(row.5),
         created_at_ms: row.6,
     })
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+
+    const FAST: Argon2Params = Argon2Params {
+        m_cost_kib: 64,
+        t_cost: 1,
+        p_cost: 1,
+    };
+    const PASSWORD: &[u8] = b"correct horse battery staple";
+
+    /// A vault created before authenticated wrapping holds a Base-mode key. It
+    /// must still unlock, and upgrade the stored key in place so every unlock
+    /// after takes the authenticated path. This is the end-to-end case the
+    /// feature turns on.
+    #[test]
+    fn a_legacy_base_mode_vault_upgrades_itself_on_unlock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("vault.db");
+
+        let (vault, account_key) = Vault::create(&path, PASSWORD, FAST).unwrap();
+        let vault_id = vault.meta().vault_id;
+        let epoch = vault.meta().epoch.value();
+        // What a pre-v7 device would have used to seal its own key.
+        let device_public = vault.device().unwrap().public().clone();
+        let vault_key = vault.current_vault_key().unwrap().clone();
+        drop(vault);
+
+        // Rewrite the stored key as a genuine Base-mode blob, marked legacy —
+        // exactly what sat on disk before authenticated wrapping.
+        let legacy = vault_key.wrap_legacy_for(&device_public, vault_id).unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            let updated = conn
+                .execute(
+                    "UPDATE vault_key SET wrapped = ?1, format = ?2
+                     WHERE vault_id = ?3 AND epoch = ?4",
+                    params![
+                        legacy.to_bytes_legacy(),
+                        KEY_FORMAT_LEGACY,
+                        vault_id.as_bytes().as_slice(),
+                        epoch,
+                    ],
+                )
+                .unwrap();
+            assert_eq!(updated, 1, "test setup did not rewrite the key row");
+        }
+
+        // It opens despite the legacy key...
+        let mut vault = Vault::open(&path).unwrap();
+        vault.unlock(PASSWORD, &account_key).unwrap();
+        assert!(vault.is_unlocked());
+        drop(vault);
+
+        // ...and the blob on disk is now authenticated, not Base mode.
+        let conn = Connection::open(&path).unwrap();
+        let (bytes, format): (Vec<u8>, u8) = conn
+            .query_row(
+                "SELECT wrapped, format FROM vault_key WHERE vault_id = ?1 AND epoch = ?2",
+                params![vault_id.as_bytes().as_slice(), epoch],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(format, KEY_FORMAT_AUTH, "key was not upgraded in place");
+        let upgraded = WrappedVaultKey::from_bytes(&bytes).expect("not authenticated form");
+        assert_eq!(
+            upgraded.sender_id(),
+            Some(device_public.id()),
+            "upgraded key is not sealed by this device"
+        );
+        drop(conn);
+
+        // And it unlocks again on the authenticated path.
+        let mut vault = Vault::open(&path).unwrap();
+        vault.unlock(PASSWORD, &account_key).unwrap();
+        assert!(vault.is_unlocked());
+    }
 }

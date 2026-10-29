@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::protocol::WireChange;
+use crate::protocol::{WireAclEntry, WireChange, WireKey};
 
 const SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
@@ -41,6 +41,29 @@ CREATE TABLE IF NOT EXISTS change_blob (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS change_pull ON change_blob (vault_id, seq);
+
+-- ACL entries, stored verbatim and ordered by their own sequence number. Like
+-- change_blob, the relay never looks inside: it cannot read roles or validate
+-- authority, so clients verify every entry on apply.
+CREATE TABLE IF NOT EXISTS acl_entry (
+    vault_id     TEXT    NOT NULL REFERENCES vault (vault_id) ON DELETE CASCADE,
+    seq          INTEGER NOT NULL,
+    body         TEXT    NOT NULL,
+    stored_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (vault_id, seq)
+) STRICT;
+
+-- Vault keys re-wrapped for a specific device after a rotation, waiting for
+-- that device to collect them. The body is an opaque sealed blob; one row per
+-- (vault, recipient, epoch), replaced if re-sent.
+CREATE TABLE IF NOT EXISTS wrapped_key (
+    vault_id            TEXT    NOT NULL REFERENCES vault (vault_id) ON DELETE CASCADE,
+    recipient_device_id TEXT    NOT NULL,
+    epoch               INTEGER NOT NULL,
+    body                TEXT    NOT NULL,
+    stored_at_ms        INTEGER NOT NULL,
+    PRIMARY KEY (vault_id, recipient_device_id, epoch)
+) STRICT;
 "#;
 
 /// Handle to the relay's database.
@@ -248,6 +271,118 @@ impl Store {
                 cursor = seq;
             }
             Ok((out, cursor, false))
+        })
+    }
+
+    /// Store ACL entries, ignoring ones already held at that sequence number.
+    pub fn push_acl(
+        &self,
+        vault_id: &str,
+        entries: &[WireAclEntry],
+        now_ms: i64,
+    ) -> rusqlite::Result<u32> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let mut accepted = 0;
+            for entry in entries {
+                let body = serde_json::to_string(entry).unwrap_or_default();
+                let inserted = tx.execute(
+                    "INSERT OR IGNORE INTO acl_entry (vault_id, seq, body, stored_at_ms)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![vault_id, entry.seq as i64, body, now_ms],
+                )?;
+                accepted += inserted as u32;
+            }
+            tx.commit()?;
+            Ok(accepted)
+        })
+    }
+
+    /// ACL entries after sequence `after`, up to `limit`, in order.
+    pub fn pull_acl(
+        &self,
+        vault_id: &str,
+        after: u64,
+        limit: u32,
+    ) -> rusqlite::Result<(Vec<WireAclEntry>, bool)> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT body FROM acl_entry
+                 WHERE vault_id = ?1 AND seq > ?2
+                 ORDER BY seq LIMIT ?3",
+            )?;
+            let rows = stmt
+                .query_map(params![vault_id, after as i64, i64::from(limit) + 1], |r| {
+                    r.get::<_, String>(0)
+                })?;
+
+            let mut out = Vec::new();
+            let mut more = false;
+            for row in rows {
+                if out.len() as u32 == limit {
+                    more = true;
+                    break;
+                }
+                if let Ok(entry) = serde_json::from_str(&row?) {
+                    out.push(entry);
+                }
+            }
+            Ok((out, more))
+        })
+    }
+
+    /// Store re-wrapped keys, replacing any for the same recipient and epoch.
+    pub fn push_keys(
+        &self,
+        vault_id: &str,
+        keys: &[WireKey],
+        now_ms: i64,
+    ) -> rusqlite::Result<u32> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let mut accepted = 0;
+            for key in keys {
+                tx.execute(
+                    "INSERT INTO wrapped_key
+                       (vault_id, recipient_device_id, epoch, body, stored_at_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT (vault_id, recipient_device_id, epoch)
+                       DO UPDATE SET body = ?4, stored_at_ms = ?5",
+                    params![
+                        vault_id,
+                        key.recipient_device_id,
+                        key.epoch,
+                        key.body,
+                        now_ms
+                    ],
+                )?;
+                accepted += 1;
+            }
+            tx.commit()?;
+            Ok(accepted)
+        })
+    }
+
+    /// Keys addressed to `recipient_device_id`, newest epoch last.
+    pub fn pull_keys(
+        &self,
+        vault_id: &str,
+        recipient_device_id: &str,
+    ) -> rusqlite::Result<Vec<WireKey>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT epoch, body FROM wrapped_key
+                 WHERE vault_id = ?1 AND recipient_device_id = ?2
+                 ORDER BY epoch",
+            )?;
+            let rows = stmt.query_map(params![vault_id, recipient_device_id], |r| {
+                Ok(WireKey {
+                    recipient_device_id: recipient_device_id.to_string(),
+                    epoch: r.get::<_, u32>(0)?,
+                    body: r.get::<_, String>(1)?,
+                })
+            })?;
+            rows.collect()
         })
     }
 }

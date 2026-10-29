@@ -1,16 +1,18 @@
 //! The push/pull loop.
 
+use data_encoding::BASE64;
 use mortise_crypto::identity::Device;
 use mortise_relay::auth::sign;
 use mortise_relay::protocol::{
     AddDevice, ClaimVault, ErrorBody, HEADER_DEVICE, HEADER_SIGNATURE, HEADER_TIMESTAMP,
-    PullResponse, PushRequest, PushResponse,
+    PullAclResponse, PullKeysResponse, PullResponse, PushAclRequest, PushAclResponse,
+    PushKeysRequest, PushKeysResponse, PushRequest, PushResponse, WireKey,
 };
 use mortise_vault::Vault;
 
 use crate::error::{Error, Result};
 use crate::transport::Transport;
-use crate::wire::{from_wire, hex, to_wire};
+use crate::wire::{acl_from_wire, acl_to_wire, from_wire, hex, to_wire};
 
 /// Most changes sent in one request. Matches the relay's own limit.
 const PUSH_BATCH: u32 = 500;
@@ -30,6 +32,10 @@ pub struct SyncOutcome {
     pub rejected: u32,
     /// Changes folded into the item table.
     pub applied: u32,
+    /// Peer ACL entries downloaded and applied (memberships, rotations).
+    pub acl_pulled: u32,
+    /// Vault keys delivered over the relay and stored.
+    pub keys_applied: u32,
     /// Whether more remain on the relay.
     pub more: bool,
 }
@@ -249,15 +255,174 @@ impl<T: Transport> Syncer<T> {
         Ok(outcome)
     }
 
-    /// Push then pull.
+    /// Upload ACL entries the relay has not acknowledged.
+    pub fn push_acl(&self, vault: &mut Vault) -> Result<u32> {
+        let entries = vault.unpushed_acl_entries()?;
+        if entries.is_empty() {
+            return Ok(0);
+        }
+
+        let path = format!("/v1/vaults/{}/acl", hex(vault.meta().vault_id.as_bytes()));
+        let body = serde_json::to_vec(&PushAclRequest {
+            entries: entries.iter().map(acl_to_wire).collect(),
+        })?;
+
+        let device = vault.device()?;
+        let (status, response) = self.call(device, "POST", &path, &body)?;
+        if status != 200 {
+            return Err(Self::refuse(status, &response));
+        }
+        let _: PushAclResponse =
+            serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
+
+        let max_seq = entries.iter().map(|e| e.seq()).max().unwrap_or(0);
+        vault.mark_acl_pushed(max_seq)?;
+        Ok(entries.len() as u32)
+    }
+
+    /// Download and apply ACL entries issued by peers.
     ///
-    /// In that order on purpose: uploading first means a conflicting remote
-    /// change is merged against work that is already safely stored, rather than
-    /// resolved against a local state the relay has never seen.
+    /// The ACL is a strict sequence, so its own sequence number is the cursor.
+    /// An entry that will not apply — a fork, or one whose predecessor has not
+    /// arrived — stops the run rather than being skipped past; the next sync
+    /// retries from the same point.
+    pub fn pull_acl(&self, vault: &mut Vault) -> Result<u32> {
+        let vault_id = vault.meta().vault_id;
+        let mut applied = 0;
+
+        loop {
+            let after = vault.acl_seq()?;
+            let path = format!("/v1/vaults/{}/acl?after={after}", hex(vault_id.as_bytes()));
+
+            let device = vault.device()?;
+            let (status, response) = self.call(device, "GET", &path, b"")?;
+            if status != 200 {
+                return Err(Self::refuse(status, &response));
+            }
+            let parsed: PullAclResponse =
+                serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
+
+            if parsed.entries.is_empty() {
+                break;
+            }
+
+            for wire in &parsed.entries {
+                let Some(entry) = acl_from_wire(wire, vault_id) else {
+                    continue;
+                };
+                // Skip anything already held — our own entries, or ones applied
+                // on an earlier page.
+                if entry.seq() <= vault.acl_seq()? {
+                    continue;
+                }
+                match vault.apply_acl_entry(&entry, false) {
+                    Ok(()) => applied += 1,
+                    Err(_) => return Ok(applied),
+                }
+            }
+
+            if !parsed.more {
+                break;
+            }
+        }
+        Ok(applied)
+    }
+
+    /// Upload re-wrapped keys the relay has not acknowledged.
+    pub fn push_keys(&self, vault: &mut Vault) -> Result<u32> {
+        let keys = vault.unpushed_keys()?;
+        if keys.is_empty() {
+            return Ok(0);
+        }
+
+        let path = format!("/v1/vaults/{}/keys", hex(vault.meta().vault_id.as_bytes()));
+        let body = serde_json::to_vec(&PushKeysRequest {
+            keys: keys
+                .iter()
+                .map(|(id, epoch, wrapped)| WireKey {
+                    recipient_device_id: hex(id.as_bytes()),
+                    epoch: *epoch,
+                    body: BASE64.encode(wrapped),
+                })
+                .collect(),
+        })?;
+
+        let device = vault.device()?;
+        let (status, response) = self.call(device, "POST", &path, &body)?;
+        if status != 200 {
+            return Err(Self::refuse(status, &response));
+        }
+        let _: PushKeysResponse =
+            serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
+
+        vault.mark_keys_pushed()?;
+        Ok(keys.len() as u32)
+    }
+
+    /// Download and apply vault keys addressed to this device.
+    ///
+    /// A key that fails to authenticate against the ACL is dropped rather than
+    /// fatal — a hostile relay cannot make the client reject the whole sync by
+    /// serving one bad key.
+    pub fn pull_keys(&self, vault: &mut Vault) -> Result<u32> {
+        let path = format!("/v1/vaults/{}/keys", hex(vault.meta().vault_id.as_bytes()));
+
+        let device = vault.device()?;
+        let (status, response) = self.call(device, "GET", &path, b"")?;
+        if status != 200 {
+            return Err(Self::refuse(status, &response));
+        }
+        let parsed: PullKeysResponse =
+            serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
+
+        let mut applied = 0;
+        for key in &parsed.keys {
+            let Ok(bytes) = BASE64.decode(key.body.as_bytes()) else {
+                continue;
+            };
+            if let Ok(true) = vault.apply_wrapped_key(key.epoch, &bytes) {
+                applied += 1;
+            }
+        }
+        Ok(applied)
+    }
+
+    /// Stop the relay serving a device that has been removed from the vault.
+    ///
+    /// Defence in depth: clients already refuse a removed device's changes once
+    /// the ACL removal reaches them. This also stops that device syncing at all.
+    pub fn remove_device(&self, vault: &Vault, device_id: &[u8; 16]) -> Result<()> {
+        let path = format!(
+            "/v1/vaults/{}/devices/{}",
+            hex(vault.meta().vault_id.as_bytes()),
+            hex(device_id)
+        );
+        let device = vault.device()?;
+        match self.call(device, "DELETE", &path, b"")? {
+            (204, _) => Ok(()),
+            (status, body) => Err(Self::refuse(status, &body)),
+        }
+    }
+
+    /// Push then pull, across changes, the ACL, and re-wrapped keys.
+    ///
+    /// Order matters. Uploading first means a conflicting remote change is
+    /// merged against work already safely stored. On the way down the ACL comes
+    /// before keys and keys before changes: a membership change or rotation has
+    /// to be known before the key it introduces is stored, and that key has to
+    /// be stored before changes written under the new epoch can be applied.
     pub fn sync(&self, vault: &mut Vault) -> Result<SyncOutcome> {
         let pushed = self.push(vault)?;
+        self.push_acl(vault)?;
+        self.push_keys(vault)?;
+
+        let acl_pulled = self.pull_acl(vault)?;
+        let keys_applied = self.pull_keys(vault)?;
+
         let mut outcome = self.pull(vault)?;
         outcome.pushed = pushed;
+        outcome.acl_pulled = acl_pulled;
+        outcome.keys_applied = keys_applied;
         Ok(outcome)
     }
 }
