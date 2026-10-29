@@ -14,8 +14,8 @@ document.** If something is needed that is not here, amend this file first.
 | Key derivation | HKDF-SHA-256 | Domain-separated by `info` string. Never reuse an `info` |
 | AEAD | XChaCha20-Poly1305 | 192-bit nonce, so **random nonces are safe**. This is why XChaCha and not ChaCha |
 | Signing | Ed25519 | |
-| Key agreement / sealing | HPKE (RFC 9180) | DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + ChaCha20-Poly1305. Standardized; do not hand-roll NaCl box |
-| Hashing / change chain | BLAKE3 | |
+| Key agreement / sealing | HPKE (RFC 9180) | DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + ChaCha20-Poly1305. Standardized; do not hand-roll NaCl box. Auth mode for vault keys (§3), AuthPSK mode for join requests (§6.4) |
+| Hashing / change chain | BLAKE3 | Plain hash for ids and the change chain; `derive_key` mode (context string = `info`) for fingerprints (§6.5); keyed mode for environment item ids (§6.7) |
 | Guard index | HMAC-SHA-256 | |
 | Randomness | OS CSPRNG (`getrandom`) | Never a userspace PRNG for key material |
 
@@ -28,6 +28,17 @@ the fixed-size key material this crate handles, with constant-time comparison
 that `secrecy` does not provide.
 
 All `info` strings are prefixed `truepass/v1/` so a future v2 cannot collide.
+The complete registry — adding one is a spec change:
+
+| String | Used as | Section |
+|---|---|---|
+| `truepass/v1/muk`, `dbkey`, `guard-index`, `metakey` | HKDF info | §2.1 |
+| `truepass/v1/identity`, `truepass/v1/device` | AEAD AAD wrapping keys under the MUK | §2 |
+| `truepass/v1/vaultkey` | HPKE info, vault-key wrapping | §3 |
+| `truepass/v1/invite-mailbox`, `truepass/v1/invite-psk` | HKDF info from an invite secret | §6.4 |
+| `truepass/v1/join-request` | HPKE info, join requests | §6.4 |
+| `truepass/v1/fingerprint` | BLAKE3 `derive_key` context | §6.5 |
+| `truepass/v1/env-item-id` | HKDF info from `VK@0` | §6.7 |
 
 ## 2. Key hierarchy
 
@@ -88,6 +99,25 @@ sealed **to device keys**, not to the identity key.
 
 This means a lost laptop is revoked by removing one device cert and rotating,
 without re-keying the identity or forcing every other device to re-enroll.
+
+A device certificate travels as exactly 185 bytes:
+
+```
+cert = canonical ‖ signature
+canonical = 0x01 (tag DeviceCert) ‖ identity_pub(32) ‖ device_id(16)
+            ‖ device_sign_pub(32) ‖ device_kex_pub(32) ‖ issued_at_ms(u64 BE)
+signature = Ed25519(identity_sk, BLAKE3(canonical))          (64 bytes)
+```
+
+A decoder rejects anything that is not 185 bytes, whose tag is not `0x01`,
+whose `device_id` is not `BLAKE3(device_sign_pub)[..16]`, or whose signature
+does not verify under `identity_pub`. A certificate that verifies proves only
+that *some* identity vouches for the device; which identity it should be is the
+fingerprint check of §6.5.
+
+One device id serves every vault on a machine: a project vault (§6.1) copies the
+device keys of the personal vault rather than minting new ones, so membership,
+which is per device (§6), names the same device in every vault it belongs to.
 
 ## 3. Vault and item encryption
 
@@ -234,6 +264,16 @@ Instead the encoding removes the failure mode by construction:
 Type tags are permanent. Renumbering one silently invalidates every signature
 ever produced over that type.
 
+| Tag | Type | Section |
+|---|---|---|
+| `0x01` | device certificate | §2.3 |
+| `0x02` | change | §5 |
+| `0x03` | ACL entry | §6 |
+| `0x04` | invite | §6.4 |
+| `0x05` | join request (plaintext) | §6.4 |
+
+`lp(x)` below means `u32 BE length ‖ x`, the `bytes` field of this encoding.
+
 Payload bytes are opaque to this crate: serialization of item contents belongs
 to the layer above, which keeps the crypto core free of a serde format.
 
@@ -249,6 +289,10 @@ Revocation sequence:
 3. Re-wrap `VK@n+1` (Auth mode, §3) for every remaining member device.
 4. All subsequent changes use the new epoch.
 
+Steps 1 and 2 are committed together through the two-phase protocol of §6.3:
+`VK@n+1` exists only in memory until the relay has accepted both entries, so a
+revocation that loses a race leaves no orphaned key behind.
+
 **It travels on sync.** The ACL is its own signed log, carried over the relay
 the same way changes are: entries are pushed and pulled, ordered by their strict
 sequence number, and each is verified on apply. The re-wrapped keys from step 3
@@ -261,13 +305,245 @@ as sync, not instant.
 
 **Forward secrecy only.** The removed member keeps anything they already synced.
 Cryptography cannot fix this. The UI must say so and offer to rotate the
-underlying credentials — see A8.
+underlying credentials — see A8. Rotation does not re-seal existing items under
+the new key: it protects what is written afterwards, nothing more, and
+re-sealing what the removed device already holds would buy nothing.
 
-### Sharing and key discovery
+Membership is **per device** (`add_member` names a device key, not an account).
+Someone with two Macs is two members, each granted on its own.
 
-The default path embeds the recipient's X25519 public key **in the invite link**,
-so sealing never consults our directory. Directory lookup is a fallback, and
-carries the A3 risk. Fingerprints are shown in the UI for out-of-band checking.
+### 6.1 Project vaults
+
+A project that is shared is its own vault: its own vault id, ACL, key epochs,
+change log, DAG heads and relay cursor, in its own file. Nothing about one vault's
+membership can leak into another's, because no table is shared between them.
+
+A project vault file carries copies of the account row (salt, Argon2 parameters)
+and of the identity and device keys, still sealed under the MUK. It therefore
+unlocks with the MUK the personal vault's unlock already derived — no second
+Argon2 run, no second password — and it signs with the same device key (§2.3).
+Its own vault keys are generated per vault and sealed to that device (§3).
+
+The project's definition — name, description, environments, member labels —
+lives in the project vault's change log as ordinary sealed changes (§6.6), so it
+syncs to members exactly like secrets do. A project that has never been shared
+is unchanged: its definition is sealed under `META_KEY` (§4.1) and its items
+carry the project's name as a label inside the personal vault. Sharing one
+promotes it: a project vault is created, each item is re-sealed into it (§6.7
+gives environment secrets their deterministic ids), and the originals are
+deleted from the personal vault through the change log, so the deletion syncs to
+the account's other devices.
+
+### 6.2 The genesis owner
+
+The genesis ACL names one owner device that no entry introduces. Every replay
+starts from it, so it is stored explicitly with the vault — signing key and
+X25519 key — rather than inferred from the set of trusted devices:
+
+- the device that creates a vault records itself;
+- a device joining someone else's project pins the owner keys carried in the
+  invite (§6.4);
+- a device enrolled into the same account copies them from the enrolment
+  bundle.
+
+Removing the genesis owner is legal when another owner remains (`acl.rs`), and
+after it the owner's device is no longer trusted for changes; the stored genesis
+keys are used for nothing but replay, so the ACL still replays.
+
+### 6.3 Committing an ACL change
+
+The ACL is a strict sequence, so two admins editing it at once cannot both win.
+They must not silently fork either. A change is therefore committed in two
+phases against the relay, which serializes:
+
+1. **Pull** the ACL to the relay's head.
+2. **Build and sign** the entries against that head without applying them. A
+   revocation builds `remove_member` and `rotate_key` together, holding the new
+   epoch's key in memory only.
+3. **Push.** The relay accepts entry `n` only if it holds entry `n − 1` and the
+   entry's `prev` equals that entry's id (entry 1: only if it holds none). It
+   answers per entry: *accepted*, *duplicate* (the same id is already stored at
+   that sequence number) or *conflict*.
+4. **Apply** locally, and store the new key, only for entries the relay
+   accepted (or already held). On conflict, pull again, re-check the intent
+   against the new ACL — the member may already be gone, the role already set —
+   and re-issue once. A second conflict fails the operation with "someone else
+   changed membership"; nothing was applied locally.
+
+The relay's acceptance is not trusted for safety — clients verify every entry on
+apply, and a relay can only refuse — but an honest relay is what turns
+concurrent edits into a visible conflict instead of a fork.
+
+**Fork detection.** A client pulling the ACL asks for entries from its own head
+onward, including the head itself, and requires the relay's entry at that
+sequence number to have the same id as its local head. A mismatch means the
+relay is serving a different history (or the client's own entries were never
+accepted): the pull stops with an error and applies nothing. A relay can still
+withhold a suffix of the log; that is the "as prompt as sync" residual of A8.
+
+### 6.4 Invites and joining
+
+Joining someone else's project takes one link from the owner and one click from
+the owner. The link carries everything the joiner must trust, and a secret that
+authenticates the joiner's answer.
+
+```
+secret      = 32 random bytes
+mailbox_id  = HKDF-SHA256(ikm = secret, info = "truepass/v1/invite-mailbox")[..16]
+psk         = HKDF-SHA256(ikm = secret, info = "truepass/v1/invite-psk")      -> 32 B
+
+invite = 0x04 ‖ vault_id(16) ‖ lp(relay_url) ‖ inviter_cert(185)
+         ‖ lp(inviter_name) ‖ lp(project_name)
+         ‖ owner_sign_pub(32) ‖ owner_kex_pub(32)
+         ‖ secret(32) ‖ expires_at_ms(u64 BE)
+link   = "mortise://join#" ‖ base64url_nopad(invite ‖ BLAKE3(invite)[..4])
+```
+
+`inviter_cert` is the inviting device's certificate (§2.3); `owner_*` are the
+genesis owner's device keys (§6.2), which differ from the inviter's when an admin
+invites. The four-byte checksum only catches a link damaged in copying.
+
+The invite is not signed. It travels over whatever channel the owner picks, and
+anyone able to alter it there can replace a signature along with everything
+else. What protects the joiner is the fingerprint (§6.5) of the inviter's
+identity, shown before anything is sent. What protects the owner is that nothing
+is granted without their explicit action.
+
+A decoder refuses: a bad checksum or tag; a relay URL that is not `https://`, or
+`http://` to a loopback address (the rule the relay setting uses); a name over 64
+bytes or a URL over 2048; an inviter certificate that does not verify; an
+expired invite.
+
+**Mailbox.** On creating an invite the inviter registers `mailbox_id` with the
+relay, authenticated as a device of the vault, with an expiry of at most seven
+days. The relay keeps at most one request per mailbox: the first post is stored,
+any later one refused. The mailbox is deleted on expiry or when the inviter
+closes it. The relay sees the mailbox id, never the secret.
+
+**Join request.** The joiner posts one sealed request to the mailbox:
+
+```
+pt      = 0x05 ‖ joiner_cert(185) ‖ lp(joiner_name)
+ct      = HPKE AuthPSK Seal(skS = joiner device X25519, pkR = inviter_cert.device_kex,
+                            info   = "truepass/v1/join-request",
+                            psk    = psk, psk_id = mailbox_id,
+                            aad    = vault_id ‖ mailbox_id,
+                            pt)
+request = 0x01 ‖ joiner_kex_pub(32) ‖ encapped(32) ‖ ct
+```
+
+The inviter opens it with its device key, the psk derived from the secret it
+kept, and the sender key in the request, then requires the plaintext tag, a
+joiner certificate that verifies, and that certificate's device X25519 key to
+equal the sender key. So:
+
+- the relay cannot fabricate a request, or alter one, because it does not hold
+  the psk, which only the link carries;
+- a request cannot be replayed into another invite, because each has its own
+  psk and both ids are in the AAD;
+- the request proves possession of the joiner device's X25519 key, and the
+  certificate proves which identity vouches for that device.
+
+Anyone holding the link can produce a valid request — it is a bearer secret. So
+nothing is granted automatically. The owner's app shows the requester's
+identity fingerprint first, their self-chosen name beside it, and a role picker.
+**Only on Grant** does it:
+
+1. pull the ACL and commit `add_member(joiner device, role)` (§6.3);
+2. seal every epoch's vault key to the joiner device (Auth mode, §3) and deliver
+   them over the relay — every epoch, so history opens;
+3. write the joiner's member label (§6.6), recording their name and certificate;
+4. claim the vault on the relay if it was never synced, authorize the joiner
+   device there, and push.
+
+**The joiner** creates the project vault locally with no vault key ("waiting for
+access"), pins `owner_sign_pub`/`owner_kex_pub` as the genesis owner (§6.2),
+and syncs in order: the ACL, replayed from the pinned owner and required to
+contain an `add_member` of its own device before it considers itself a member;
+then keys, each accepted only if sealed by a device that ACL makes an admin or
+owner (§3); then changes, verified as always (§5). A relay that serves another
+ACL or a key of its own choosing cannot make either verify from the pinned owner.
+
+### 6.5 Fingerprints
+
+```
+fp      = BLAKE3 derive_key(context = "truepass/v1/fingerprint", identity_pub), 60-byte XOF output
+group_i = u40_be(fp[5i .. 5i+5]) mod 100000            for i = 0..11
+shown   = the twelve groups as zero-padded 5-digit numbers, space separated
+```
+
+Sixty digits, about 199 bits; the modulo bias is below 2⁻²³ per group. The
+fingerprint covers the **identity** key only: one person's devices share it,
+and the device certificate (§2.3) is what binds a device to that identity.
+
+Display names are self-chosen, recorded by whoever grants access, and synced.
+They can impersonate anyone. The fingerprint is the authority, and the UI shows
+it beside every name it shows.
+
+### 6.6 Project manifest
+
+A project vault's definition is three kinds of mutation in its change log,
+sealed under the vault key like any change (§5):
+
+| Mutation | Merge |
+|---|---|
+| `set_info { name, description }` | last-write-wins on the pair, ordered by `(HLC, device_id)` |
+| `add_environment { name }` | add-only set, compared ASCII-case-insensitively; the earliest add by `(HLC, device_id)` keeps its spelling and sets the order |
+| `set_member_label { device_id, name, cert }` | last-write-wins per device |
+
+A member label is applied only if its author is the labelled device or an
+admin/owner, and only if `cert` verifies and certifies a device whose signing key
+equals the ACL's. Like every change, manifest changes from a viewer or a
+non-member are refused on ingest (§6), and refused locally before they are made.
+Each device materializes the result into a local row sealed under `META_KEY`, so
+the project list draws while locked, as the search cache does (§4.1).
+
+### 6.7 Environment item ids
+
+```
+env_id_key = HKDF-SHA256(ikm = VK@0, info = "truepass/v1/env-item-id")
+item_id    = BLAKE3 keyed(env_id_key, vault_id ‖ lp(lower_ascii(environment)) ‖ lp(KEY))[..16]
+```
+
+Deterministic, so two members who create the same `KEY` in the same environment
+write the same item and last-write-wins converges, instead of leaving two items
+that an `.env` export would emit twice. `KEY` is case-sensitive, as environment
+variables are; the environment name is not, matching §6.6.
+
+Keyed, rather than a plain hash of the name, so that an id in the local file or
+on the relay does not let someone without the vault key confirm a guess like
+`STRIPE_SECRET_KEY` — titles stay unreadable at rest (A4). The key comes from the
+vault's first epoch, which every member receives (§6.4), so it never changes
+under rotation.
+
+### 6.8 Delivering wrapped keys
+
+The relay stores a delivered key per `(vault, recipient, epoch, pusher)`, where
+the pusher is the authenticated device that sent it. One member therefore cannot
+overwrite a key another device delivered, which would otherwise be a cheap
+denial of service. The recipient tries every candidate for an epoch and keeps
+the first that authenticates as sealed by a current admin or owner (§3).
+
+### 6.9 Leaving and removal
+
+A member may remove itself: `remove_member` authored by the removed device is
+legal at any role. Leaving cannot rotate the key — a member cannot — so the first
+admin or owner device to sync that finds a `remove_member` with no `rotate_key`
+after it commits the rotation itself (§6.3) and re-wraps for those who remain.
+Until then the departed device can still open what it is sent, and an offline
+device keeps working locally until it next syncs.
+
+A device that pulls its own `remove_member`, or that the relay refuses after it
+had been a member, marks the vault **access removed**: it stops syncing it and
+keeps the local copy, read-only. It is not deleted — the person has seen it all
+already, and deleting it would only destroy their own notes on it.
+
+### Key discovery
+
+Mortise runs no key directory. The inviter's keys reach the joiner inside the
+link, and the joiner's come back through the mailbox, authenticated by the
+link's secret (§6.4). Each side is shown the other's fingerprint (§6.5) for
+checking out of band; the owner sees it before granting anything.
 
 ## 7. Recovery
 
