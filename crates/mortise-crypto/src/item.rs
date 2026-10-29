@@ -39,6 +39,47 @@ impl ItemId {
     pub fn as_bytes(&self) -> &[u8; ITEM_ID_LEN] {
         &self.0
     }
+
+    /// The id of the environment secret `key` in `environment` (spec §6.7).
+    ///
+    /// Deterministic, so two members who create the same variable in the same
+    /// environment — offline, at the same moment — write the same item and
+    /// last-write-wins converges on one, instead of leaving two that an `.env`
+    /// export would emit twice.
+    ///
+    /// Keyed under a key derived from the vault's **first** key, which every
+    /// member holds and no rotation changes. A plain hash of the name would let
+    /// anyone holding the file, or the relay, confirm a guess like
+    /// `STRIPE_SECRET_KEY`; this way the id says nothing without the vault key.
+    ///
+    /// The environment is compared case-insensitively (ASCII), like the
+    /// project's environment set; the variable name is not, as in a shell.
+    pub fn for_env_secret(
+        first_key: &VaultKey,
+        vault: VaultId,
+        environment: &str,
+        key: &str,
+    ) -> Result<Self> {
+        if first_key.epoch() != Epoch::INITIAL {
+            return Err(Error::EpochMismatch {
+                expected: Epoch::INITIAL.value(),
+                got: first_key.epoch().value(),
+            });
+        }
+        let id_key = crate::kdf::subkey(first_key.key(), crate::kdf::info::ENV_ITEM_ID)?;
+        let environment = environment.to_ascii_lowercase();
+
+        let mut hasher = blake3::Hasher::new_keyed(id_key.expose());
+        hasher.update(vault.as_bytes());
+        hasher.update(&(environment.len() as u32).to_be_bytes());
+        hasher.update(environment.as_bytes());
+        hasher.update(&(key.len() as u32).to_be_bytes());
+        hasher.update(key.as_bytes());
+
+        let mut id = [0u8; ITEM_ID_LEN];
+        id.copy_from_slice(&hasher.finalize().as_bytes()[..ITEM_ID_LEN]);
+        Ok(Self(id))
+    }
 }
 
 /// One encrypted item version, as stored locally and shipped over sync.

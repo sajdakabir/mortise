@@ -33,6 +33,10 @@ pub enum Tag {
     Change = 2,
     /// An entry in the ACL log (spec §6).
     AclEntry = 3,
+    /// An invite to a project vault (spec §6.4).
+    Invite = 4,
+    /// The plaintext of a join request (spec §6.4).
+    JoinRequest = 5,
 }
 
 /// Append-only deterministic writer.
@@ -104,6 +108,71 @@ impl Writer {
     /// encoded here exists to be hashed or signed.
     pub fn digest(&self) -> [u8; 32] {
         *blake3::hash(&self.0).as_bytes()
+    }
+}
+
+/// Cursor over bytes produced by [`Writer`], for the few encodings that are
+/// parsed as well as hashed — certificates and invites travel, so they must
+/// come back in.
+///
+/// Every read is bounds-checked and returns `None` on short input: the bytes
+/// come from another machine, possibly a hostile one, and must never panic a
+/// decoder.
+#[derive(Debug, Clone)]
+pub struct Reader<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> Reader<'a> {
+    /// Start reading `bytes`, which must begin with `tag`.
+    pub fn new(bytes: &'a [u8], tag: Tag) -> Option<Self> {
+        let (&first, rest) = bytes.split_first()?;
+        (first == tag as u8).then_some(Self { bytes: rest })
+    }
+
+    /// Read `N` bytes.
+    pub fn fixed<const N: usize>(&mut self) -> Option<[u8; N]> {
+        if self.bytes.len() < N {
+            return None;
+        }
+        let (head, rest) = self.bytes.split_at(N);
+        self.bytes = rest;
+        head.try_into().ok()
+    }
+
+    /// Read a big-endian `u32`.
+    pub fn u32(&mut self) -> Option<u32> {
+        self.fixed::<4>().map(u32::from_be_bytes)
+    }
+
+    /// Read a big-endian `u64`.
+    pub fn u64(&mut self) -> Option<u64> {
+        self.fixed::<8>().map(u64::from_be_bytes)
+    }
+
+    /// Read a `u32`-length-prefixed byte string of at most `max` bytes.
+    ///
+    /// The cap is checked before anything is sliced, so a hostile length
+    /// prefix cannot make the decoder allocate or scan beyond it.
+    pub fn bytes(&mut self, max: usize) -> Option<&'a [u8]> {
+        let len = self.u32()? as usize;
+        if len > max || self.bytes.len() < len {
+            return None;
+        }
+        let (head, rest) = self.bytes.split_at(len);
+        self.bytes = rest;
+        Some(head)
+    }
+
+    /// Whatever has not been read.
+    pub fn rest(&self) -> &'a [u8] {
+        self.bytes
+    }
+
+    /// Succeed only if every byte was consumed. Trailing bytes are rejected
+    /// rather than ignored, so one value has exactly one encoding.
+    pub fn finish(self) -> Option<()> {
+        self.bytes.is_empty().then_some(())
     }
 }
 

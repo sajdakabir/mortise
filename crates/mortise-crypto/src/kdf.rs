@@ -29,6 +29,13 @@ pub mod info {
     /// Local search-cache key. Account-scoped, unlike the vault key, so the
     /// cache stays readable while the vault is locked.
     pub const META_KEY: &[u8] = b"truepass/v1/metakey";
+    /// Key for deriving environment-secret item ids, from the vault's first
+    /// key (spec §6.7).
+    pub const ENV_ITEM_ID: &[u8] = b"truepass/v1/env-item-id";
+    /// Relay mailbox id, from an invite's secret (spec §6.4).
+    pub const INVITE_MAILBOX: &[u8] = b"truepass/v1/invite-mailbox";
+    /// HPKE pre-shared key for join requests, from an invite's secret (§6.4).
+    pub const INVITE_PSK: &[u8] = b"truepass/v1/invite-psk";
 }
 
 /// Argon2id cost parameters, stored per-vault so they can be raised later

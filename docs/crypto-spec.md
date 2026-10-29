@@ -392,7 +392,7 @@ secret      = 32 random bytes
 mailbox_id  = HKDF-SHA256(ikm = secret, info = "truepass/v1/invite-mailbox")[..16]
 psk         = HKDF-SHA256(ikm = secret, info = "truepass/v1/invite-psk")      -> 32 B
 
-invite = 0x04 ‖ vault_id(16) ‖ lp(relay_url) ‖ inviter_cert(185)
+invite = 0x04 ‖ vault_id(16) ‖ lp(relay_url) ‖ lp(inviter_cert)
          ‖ lp(inviter_name) ‖ lp(project_name)
          ‖ owner_sign_pub(32) ‖ owner_kex_pub(32)
          ‖ secret(32) ‖ expires_at_ms(u64 BE)
@@ -410,8 +410,11 @@ identity, shown before anything is sent. What protects the owner is that nothing
 is granted without their explicit action.
 
 A decoder refuses: a bad checksum or tag; a relay URL that is not `https://`, or
-`http://` to a loopback address (the rule the relay setting uses); a name over 64
-bytes or a URL over 2048; an inviter certificate that does not verify; an
+`http://` to a loopback address (the rule the relay setting uses); a person's
+name over 64 bytes, a project name over 128, or a URL over 2048; an empty name,
+or one containing control characters or Unicode bidi overrides (both let a name
+render as something it is not, beside a fingerprint someone is comparing); a
+certificate (`lp` of exactly 185 bytes) that does not verify; trailing bytes; an
 expired invite.
 
 **Mailbox.** On creating an invite the inviter registers `mailbox_id` with the
@@ -423,7 +426,7 @@ closes it. The relay sees the mailbox id, never the secret.
 **Join request.** The joiner posts one sealed request to the mailbox:
 
 ```
-pt      = 0x05 ‖ joiner_cert(185) ‖ lp(joiner_name)
+pt      = 0x05 ‖ lp(joiner_cert) ‖ lp(joiner_name)
 ct      = HPKE AuthPSK Seal(skS = joiner device X25519, pkR = inviter_cert.device_kex,
                             info   = "truepass/v1/join-request",
                             psk    = psk, psk_id = mailbox_id,
