@@ -10,9 +10,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Emitter, Manager};
 use mortise_proxy::framing::{read_frame, write_frame};
 use mortise_vault::{ItemPayload, Origin};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::associations;
 use super::protocol::{LoginCandidate, Request, Response};

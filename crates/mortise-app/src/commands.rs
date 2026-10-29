@@ -15,11 +15,11 @@
 
 use std::time::Duration;
 
-use tauri::{Manager, State};
 use mortise_crypto::generate::{PasswordSpec, password};
 use mortise_crypto::kdf::Argon2Params;
 use mortise_crypto::recovery;
 use mortise_vault::{ItemPayload, Vault};
+use tauri::{Manager, State};
 use zeroize::Zeroizing;
 
 use crate::dto::{ItemRow, MetaInput, NewVault, VaultStatus, id_from_hex};
@@ -1009,10 +1009,7 @@ pub fn is_loopback_host(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("http://") else {
         return false;
     };
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default();
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     let host_port = match authority.rsplit_once('@') {
         Some((_, after)) => after,
         None => authority,

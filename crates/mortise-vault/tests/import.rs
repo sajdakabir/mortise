@@ -5,10 +5,10 @@
 //! byte-identical. A password that imports but decrypts to something else is
 //! worse than one that fails to import at all, because nothing reports it.
 
-use tempfile::TempDir;
 use mortise_crypto::kdf::Argon2Params;
 use mortise_vault::import;
 use mortise_vault::{ItemPayload, Vault};
+use tempfile::TempDir;
 
 const FAST: Argon2Params = Argon2Params {
     m_cost_kib: 64,
@@ -54,7 +54,9 @@ fn an_export_round_trips_through_encryption() {
         .expect("the quoted title did not survive");
     let payload = v.reveal(acme.id).unwrap();
     match &payload {
-        ItemPayload::Login { password, notes, .. } => {
+        ItemPayload::Login {
+            password, notes, ..
+        } => {
             assert_eq!(password, "pa,ss\"word");
             assert_eq!(notes.as_deref(), Some("line one\nline two"));
         }
@@ -106,7 +108,10 @@ fn the_sample_csv_parses() {
     let file = std::fs::File::open(path).expect("sample-data.csv is missing");
     let (items, report) = import::parse(file).expect("sample-data.csv should parse");
 
-    assert_eq!(report.unsupported, 0, "every row should be a kind we support");
+    assert_eq!(
+        report.unsupported, 0,
+        "every row should be a kind we support"
+    );
     assert_eq!(report.empty, 0, "no row should be dropped as empty");
     assert_eq!(items.len(), report.parsed);
 
