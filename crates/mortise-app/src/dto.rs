@@ -8,9 +8,9 @@
 //! Ids become hex strings here because the webview has no use for byte arrays
 //! and JSON would mangle them into number lists.
 
-use serde::{Deserialize, Serialize};
 use mortise_crypto::item::ItemId;
 use mortise_vault::{ItemKind, ItemMeta, ItemSummary};
+use serde::{Deserialize, Serialize};
 
 /// Render an item id for the webview.
 pub fn id_to_hex(id: ItemId) -> String {

@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use mortise_vault::Vault;
 
-use crate::error::CmdError;
 use crate::browser::associations::Association;
+use crate::error::CmdError;
 
 /// A login the browser saw submitted, waiting for the user to accept it.
 ///
@@ -169,9 +169,10 @@ impl AppState {
     pub fn take_approved_association(&self, token: Option<&str>) -> Option<Association> {
         let expected = self.approved_token.lock().ok()?.clone()?;
         let presented = token?;
-        if !bool::from(
-            subtle::ConstantTimeEq::ct_eq(presented.as_bytes(), expected.as_bytes()),
-        ) {
+        if !bool::from(subtle::ConstantTimeEq::ct_eq(
+            presented.as_bytes(),
+            expected.as_bytes(),
+        )) {
             return None;
         }
         let taken = self.approved_association.lock().ok()?.take();

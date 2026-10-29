@@ -92,11 +92,27 @@ pub enum Error {
 /// underscores before comparison so `Login Username`, `login_username` and
 /// `loginusername` all collapse to the same key.
 const TITLE: &[&str] = &["name", "title", "accountname", "itemname", "displayname"];
-const URL: &[&str] = &["url", "urls", "loginuri", "uri", "website", "weburl", "loginurl"];
-const USERNAME: &[&str] = &["username", "loginusername", "user", "email", "account", "loginname"];
+const URL: &[&str] = &[
+    "url", "urls", "loginuri", "uri", "website", "weburl", "loginurl",
+];
+const USERNAME: &[&str] = &[
+    "username",
+    "loginusername",
+    "user",
+    "email",
+    "account",
+    "loginname",
+];
 const PASSWORD: &[&str] = &["password", "loginpassword", "pass"];
 const NOTES: &[&str] = &["notes", "note", "extra", "comment", "comments"];
-const TOTP: &[&str] = &["totp", "logintotp", "otpauth", "otp", "twofactor", "authkey"];
+const TOTP: &[&str] = &[
+    "totp",
+    "logintotp",
+    "otpauth",
+    "otp",
+    "twofactor",
+    "authkey",
+];
 const FOLDER: &[&str] = &["folder", "grouping", "group", "category", "collection"];
 const KIND: &[&str] = &["type", "itemtype"];
 
@@ -145,9 +161,7 @@ fn cell(row: &csv::StringRecord, index: Option<usize>) -> Option<String> {
 /// because one row was odd. A partial import the user can see the shape of
 /// beats an all-or-nothing error on a 2,000-row export.
 pub fn parse<R: Read>(reader: R) -> Result<(Vec<(ItemMeta, ItemPayload)>, ParseReport), Error> {
-    let mut rdr = csv::ReaderBuilder::new()
-        .flexible(true)
-        .from_reader(reader);
+    let mut rdr = csv::ReaderBuilder::new().flexible(true).from_reader(reader);
 
     let headers: Vec<String> = rdr
         .headers()
@@ -196,9 +210,19 @@ pub fn parse<R: Read>(reader: R) -> Result<(Vec<(ItemMeta, ItemPayload)>, ParseR
         if let Some(k) = kind.as_deref()
             && !matches!(
                 k,
-                "login" | "note" | "securenote" | "secure note" | "1"
-                    | "apikey" | "api key" | "api_key" | "token"
-                    | "env" | "envsecret" | "env secret" | "secret"
+                "login"
+                    | "note"
+                    | "securenote"
+                    | "secure note"
+                    | "1"
+                    | "apikey"
+                    | "api key"
+                    | "api_key"
+                    | "token"
+                    | "env"
+                    | "envsecret"
+                    | "env secret"
+                    | "secret"
             )
         {
             report.unsupported += 1;
@@ -287,7 +311,9 @@ mod tests {
         );
         assert_eq!(report.parsed, 2);
         assert_eq!(report.unsupported, 0);
-        assert!(matches!(&items[0].1, ItemPayload::ApiKey { key, .. } if key == "placeholder-key-abc"));
+        assert!(
+            matches!(&items[0].1, ItemPayload::ApiKey { key, .. } if key == "placeholder-key-abc")
+        );
         assert!(
             matches!(&items[1].1, ItemPayload::EnvSecret { value } if value == "postgres://localhost/acme")
         );
