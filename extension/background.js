@@ -211,26 +211,39 @@ const handlers = {
     // Two callers with different notions of "here". A content script speaks
     // for its own frame; the popup speaks for the active tab's main frame.
     // The credential has to go back to whichever one was authorised, so the
-    // origin and the injection target are decided together.
-    const fromPage = sender?.tab != null;
-    const tab = sender?.tab ?? (await activeTab());
-    const frameId = fromPage ? (sender.frameId ?? 0) : 0;
-    const origin = fromPage ? senderOrigin(sender) : originOf(tab);
-    if (!origin || tab?.id == null) {
+    // origin and the injection target are decided together — and pinned to
+    // one document, not to a frame. A frame keeps its id when it navigates,
+    // and the round trip to the vault is plenty of time for it to do so.
+    const target = await fillTarget(sender);
+    if (!target) {
       return { type: "error", code: "bad_origin", message: "This page cannot be filled." };
     }
 
-    const response = await sendSigned({ type: "credential", item_id: itemId, origin });
+    const response = await sendSigned({
+      type: "credential",
+      item_id: itemId,
+      origin: target.origin,
+    });
     if (response?.type !== "credential") return response;
 
-    // Inject only now, and only into the frame the origin came from. Filling
-    // the main frame on a subframe's request would put the credential
-    // somewhere the user never authorised.
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id, frameIds: [frameId] },
-      func: fillForm,
-      args: [response.username ?? "", response.password],
-    });
+    // Ask the browser again, now, what that document is and where it lives.
+    // The vault matched the credential against `target.origin`; anywhere else
+    // is somewhere the user never authorised, however it got there.
+    if (!(await stillAt(target))) return PAGE_CHANGED;
+
+    // Targeted by document rather than frame, so the browser itself refuses
+    // if the document is replaced between the check above and this call. A
+    // document cannot change origin, which is what makes the check hold.
+    let result;
+    try {
+      [result] = await chrome.scripting.executeScript({
+        target: { tabId: target.tabId, documentIds: [target.documentId] },
+        func: fillForm,
+        args: [response.username ?? "", response.password],
+      });
+    } catch {
+      return PAGE_CHANGED;
+    }
 
     return result?.result?.filled
       ? { type: "filled" }
@@ -268,7 +281,6 @@ async function activeOrigin() {
   return originOf(await activeTab());
 }
 
-/** The tab's origin, or null for pages that must never be filled. */
 /**
  * The origin of the frame a content script message came from.
  *
@@ -298,14 +310,83 @@ function senderOrigin(sender) {
   }
 }
 
+/** The tab's origin, or null for pages that must never be filled. */
 function originOf(tab) {
-  if (!tab?.url) return null;
+  return urlOrigin(tab?.url);
+}
+
+function urlOrigin(href) {
+  if (!href) return null;
   try {
-    const url = new URL(tab.url);
+    const url = new URL(href);
     // Only real web pages. chrome://, file://, data: and extension pages are
     // either privileged or have no meaningful origin to match against.
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
     return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+const PAGE_CHANGED = {
+  type: "error",
+  code: "page_changed",
+  message: "The page changed before Mortise could fill it. Try again.",
+};
+
+/**
+ * The one document a fill is for, and the origin the vault will match.
+ *
+ * A content script's document is `sender.documentId`, which the browser
+ * supplies alongside `sender.origin`; nothing the page says enters into it.
+ * The popup speaks for the active tab's main frame, so that frame's current
+ * document is looked up, and its URL has to agree with the tab's — if they
+ * differ the tab is mid-navigation and "here" is not settled yet.
+ */
+async function fillTarget(sender) {
+  if (sender?.tab != null) {
+    const origin = senderOrigin(sender);
+    if (!origin || sender.tab.id == null || !sender.documentId) return null;
+    return {
+      tabId: sender.tab.id,
+      frameId: sender.frameId ?? 0,
+      documentId: sender.documentId,
+      origin,
+    };
+  }
+
+  const tab = await activeTab();
+  if (tab?.id == null) return null;
+  const frame = await frameInfo({ tabId: tab.id, frameId: 0 });
+  const origin = urlOrigin(frame?.url);
+  if (!origin || !frame.documentId || origin !== originOf(tab)) return null;
+  return { tabId: tab.id, frameId: 0, documentId: frame.documentId, origin };
+}
+
+/**
+ * Whether the frame the fill is for is still showing the target document,
+ * and that document is still on the origin the credential was matched
+ * against — by the browser's account, read just before injection rather
+ * than trusted from earlier.
+ *
+ * Asked by frame rather than by document so the answer is about what the
+ * frame shows *now*. `documentLifecycle` additionally rules out a document
+ * kept in the back/forward cache or one that is prerendering: neither is
+ * something the user is looking at.
+ */
+async function stillAt(target) {
+  const frame = await frameInfo({ tabId: target.tabId, frameId: target.frameId });
+  return (
+    frame?.documentId === target.documentId &&
+    frame.documentLifecycle === "active" &&
+    urlOrigin(frame.url) === target.origin
+  );
+}
+
+/** `webNavigation.getFrame`, with "no such frame" and errors both as null. */
+async function frameInfo(details) {
+  try {
+    return (await chrome.webNavigation.getFrame(details)) ?? null;
   } catch {
     return null;
   }
