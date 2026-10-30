@@ -167,6 +167,47 @@ impl<T: Transport> Syncer<T> {
         unreachable!("the retry loop always returns")
     }
 
+    /// Conditionally append one membership operation. A competing ACL edit is
+    /// pulled and the operation is reissued once against the new head.
+    pub fn add_member(
+        &self,
+        vault: &mut Vault,
+        device: mortise_crypto::identity::DevicePublic,
+        role: mortise_crypto::acl::Role,
+    ) -> Result<()> {
+        for attempt in 0..2 {
+            self.pull_acl(vault)?;
+            let entry = vault.prepare_acl_op(mortise_crypto::acl::AclOp::AddMember {
+                device: device.clone(),
+                role,
+            })?;
+            let path = format!("/v1/vaults/{}/acl", hex(vault.meta().vault_id.as_bytes()));
+            let body = serde_json::to_vec(&PushAclRequest {
+                entries: vec![acl_to_wire(&entry)],
+            })?;
+            let (status, response) = self.call(vault.device()?, "POST", &path, &body)?;
+            if status != 200 {
+                return Err(Self::refuse(status, &response));
+            }
+            let response: PushAclResponse =
+                serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
+            if response.results != vec![AclPushResult::Accepted] {
+                if attempt == 0 {
+                    continue;
+                }
+                return Err(Error::Refused {
+                    code: "acl_conflict".into(),
+                    message: "someone else changed membership".into(),
+                });
+            }
+            let seq = entry.seq();
+            vault.apply_acl_entry(&entry, true)?;
+            vault.mark_acl_pushed(seq)?;
+            return Ok(());
+        }
+        unreachable!("the retry loop always returns")
+    }
+
     /// Build a syncer over `transport`.
     pub fn new(transport: T) -> Self {
         Self { transport }

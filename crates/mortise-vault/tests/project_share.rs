@@ -88,6 +88,32 @@ fn a_project_vault_is_an_independent_file_with_the_accounts_device_identity() {
 }
 
 #[test]
+fn an_invite_creates_a_keyless_vault_pinned_to_its_genesis_owner() {
+    let dir = TempDir::new().unwrap();
+    let (owner, _) = Vault::create(dir.path().join("owner.db"), b"password", FAST).unwrap();
+    let (account, _) = Vault::create(dir.path().join("joiner.db"), b"password", FAST).unwrap();
+
+    let waiting = Vault::create_waiting_project_vault(
+        dir.path().join("waiting.db"),
+        &account,
+        owner.meta().vault_id,
+        owner.device().unwrap().public(),
+    )
+    .unwrap();
+
+    assert!(waiting.is_unlocked());
+    assert!(waiting.known_epochs().unwrap().is_empty());
+    assert_eq!(
+        waiting.acl().unwrap().role(owner.device_id().unwrap()),
+        Some(mortise_crypto::acl::Role::Owner)
+    );
+    assert_eq!(
+        waiting.acl().unwrap().role(waiting.device_id().unwrap()),
+        None
+    );
+}
+
+#[test]
 fn environment_secrets_use_stable_ids_and_replace_the_same_key() {
     let dir = TempDir::new().unwrap();
     let (account, _) = Vault::create(dir.path().join("personal.db"), b"password", FAST).unwrap();

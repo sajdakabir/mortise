@@ -119,6 +119,12 @@ pub fn run() {
             commands::set_relay,
             commands::sync_now,
             commands::claim_vault_on_relay,
+            commands::create_project_invite,
+            commands::inspect_project_invite,
+            commands::request_project_access,
+            commands::pending_project_join,
+            commands::grant_project_join,
+            commands::complete_project_join,
             commands::touch,
         ])
         .run(tauri::generate_context!())

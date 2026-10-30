@@ -7,6 +7,7 @@
 
 use std::sync::Mutex;
 
+use mortise_crypto::acl::Role;
 use mortise_crypto::identity::Device;
 use mortise_crypto::identity::Identity;
 use mortise_crypto::invite::{Invite, JoinRequest};
@@ -212,6 +213,48 @@ fn one_invite_link_carries_a_join_request_through_a_single_use_mailbox() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn granting_an_invite_delivers_acl_and_every_key_to_a_waiting_vault() {
+    let mut f = Fixture::new();
+    let (meta, payload) = item("Historic", "before-join");
+    let historic = f.a.create_item(&meta, &payload).unwrap();
+    f.syncer.sync(&mut f.a).unwrap();
+
+    let joiner_dir = TempDir::new().unwrap();
+    let (joiner_account, _) =
+        Vault::create(joiner_dir.path().join("account.db"), PASSWORD, FAST).unwrap();
+    let mut waiting = Vault::create_waiting_project_vault(
+        joiner_dir.path().join("waiting.db"),
+        &joiner_account,
+        f.a.meta().vault_id,
+        f.a.device().unwrap().public(),
+    )
+    .unwrap();
+    waiting
+        .set_relay_url(f.a.relay_url().unwrap().as_deref())
+        .unwrap();
+
+    let joiner = waiting.device().unwrap().public().clone();
+    f.syncer
+        .add_member(&mut f.a, joiner.clone(), Role::Member)
+        .unwrap();
+    assert_eq!(f.a.queue_all_keys_for(&joiner).unwrap(), 1);
+    f.syncer
+        .authorize_device(&f.a, joiner.id().as_bytes(), joiner.signing_public())
+        .unwrap();
+    f.syncer.sync(&mut f.a).unwrap();
+    let outcome = f.syncer.sync(&mut waiting).unwrap();
+
+    assert!(outcome.acl_pulled >= 1);
+    assert_eq!(waiting.acl().unwrap().role(joiner.id()), Some(Role::Member));
+    assert_eq!(waiting.known_epochs().unwrap(), [0]);
+    assert_eq!(
+        (outcome.pulled, outcome.applied, outcome.rejected),
+        (1, 1, 0)
+    );
+    assert_eq!(waiting.reveal(historic).unwrap(), payload);
 }
 
 #[test]
