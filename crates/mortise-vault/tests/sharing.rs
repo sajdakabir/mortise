@@ -177,6 +177,39 @@ fn revocation_removes_the_member_and_advances_the_epoch() {
     assert!(!p.a.may_write(p.b_device.public().id()).unwrap());
 }
 
+#[test]
+fn preparing_a_revocation_does_not_change_local_state() {
+    let p = Pair::new();
+    let member = p.b_device.public().id();
+    let epoch = p.a.meta().epoch;
+    let head = p.a.acl().unwrap().head();
+
+    let prepared = p.a.prepare_revocation(member).unwrap();
+
+    assert_eq!(prepared.entries()[0].seq() + 1, prepared.entries()[1].seq());
+    assert_eq!(p.a.meta().epoch, epoch);
+    assert_eq!(p.a.acl().unwrap().head(), head);
+    assert_eq!(p.a.acl().unwrap().role(member), Some(Role::Member));
+    assert_eq!(p.a.known_epochs().unwrap(), vec![epoch.value()]);
+}
+
+#[test]
+fn access_removed_keeps_the_local_copy_but_refuses_new_writes() {
+    let mut p = Pair::new();
+    let id =
+        p.a.create_item(&item("Still here").0, &item("Still here").1)
+            .unwrap();
+
+    p.a.mark_access_removed().unwrap();
+
+    assert!(p.a.access_removed().unwrap());
+    assert_eq!(p.a.reveal(id).unwrap(), item("Still here").1);
+    assert!(
+        p.a.create_item(&item("Too late").0, &item("Too late").1)
+            .is_err()
+    );
+}
+
 /// The threat model's A8 made concrete: revocation is forward secrecy only.
 /// The report exists so the UI can tell the user how much to rotate by hand,
 /// rather than implying the data was somehow clawed back.
@@ -238,6 +271,40 @@ fn the_last_owner_cannot_revoke_themselves() {
 
     assert!(p.a.revoke_member(owner).is_err());
     assert_eq!(p.a.acl().unwrap().role(owner), Some(Role::Owner));
+}
+
+#[test]
+fn acl_replay_keeps_its_genesis_anchor_after_the_genesis_owner_leaves() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("v.db");
+    let (mut vault, account_key) = Vault::create(&path, PASSWORD, FAST).unwrap();
+    let genesis = vault.device().unwrap().id();
+    let successor = Device::generate().unwrap();
+
+    vault
+        .issue_acl_op(AclOp::AddMember {
+            device: successor.public().clone(),
+            role: Role::Owner,
+        })
+        .unwrap();
+    vault
+        .issue_acl_op(AclOp::RemoveMember { device: genesis })
+        .unwrap();
+
+    assert_eq!(vault.acl().unwrap().role(genesis), None);
+    assert_eq!(
+        vault.acl().unwrap().role(successor.public().id()),
+        Some(Role::Owner)
+    );
+    drop(vault);
+
+    let mut reopened = Vault::open(&path).unwrap();
+    reopened.unlock(PASSWORD, &account_key).unwrap();
+    assert_eq!(reopened.acl().unwrap().role(genesis), None);
+    assert_eq!(
+        reopened.acl().unwrap().role(successor.public().id()),
+        Some(Role::Owner)
+    );
 }
 
 // --- the log itself ---

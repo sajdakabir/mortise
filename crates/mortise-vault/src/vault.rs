@@ -198,6 +198,14 @@ impl Vault {
                 device.public().kex_public_bytes().as_slice()
             ],
         )?;
+        conn.execute(
+            "INSERT INTO vault_genesis (vault_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
+            params![
+                vault_id.as_bytes().as_slice(),
+                device.public().signing_public().as_slice(),
+                device.public().kex_public_bytes().as_slice()
+            ],
+        )?;
 
         let meta_key = kdf::derive_meta_key(&muk)?;
         let mut vault_keys = BTreeMap::new();

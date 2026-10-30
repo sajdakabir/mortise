@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 11;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -199,6 +199,9 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V6)?;
     conn.execute_batch(SCHEMA_V7)?;
     conn.execute_batch(SCHEMA_V8)?;
+    conn.execute_batch(SCHEMA_V9)?;
+    conn.execute_batch(SCHEMA_V10)?;
+    conn.execute_batch(SCHEMA_V11)?;
     Ok(())
 }
 
@@ -339,6 +342,42 @@ CREATE TABLE key_outbox (
 ) STRICT;
 "#;
 
+/// Added in v9: the genesis owner is an explicit, per-vault trust anchor.
+///
+/// Inferring it from `known_device` insertion order was unsafe: enrolment and
+/// ACL replay legitimately reorder that table, while every ACL replay must
+/// start from the same device forever (crypto-spec §6.2).
+const SCHEMA_V9: &str = r#"
+CREATE TABLE vault_genesis (
+    vault_id    BLOB PRIMARY KEY REFERENCES vault (vault_id) ON DELETE CASCADE,
+    signing_key BLOB NOT NULL,
+    kex_key     BLOB NOT NULL
+) STRICT;
+
+-- Existing files were created with their genesis owner as the first trusted
+-- device. Freeze that one-time legacy inference into an explicit row.
+INSERT INTO vault_genesis (vault_id, signing_key, kex_key)
+SELECT v.vault_id, d.signing_key, d.kex_key
+FROM vault v
+JOIN known_device d ON d.rowid = (SELECT MIN(rowid) FROM known_device);
+"#;
+
+/// Added in v10: the local, account-key-sealed materialization of a shared
+/// project's manifest. The authoritative mutations remain in `change_log`;
+/// this row exists so the project list can render while locked (§6.6).
+const SCHEMA_V10: &str = r#"
+CREATE TABLE project_manifest_cache (
+    id     INTEGER PRIMARY KEY CHECK (id = 1),
+    sealed BLOB NOT NULL
+) STRICT;
+"#;
+
+/// Added in v11: a removed member keeps its local copy read-only and stops
+/// syncing instead of pretending the already-seen data can be clawed back.
+const SCHEMA_V11: &str = r#"
+ALTER TABLE vault ADD COLUMN access_removed INTEGER NOT NULL DEFAULT 0;
+"#;
+
 /// The file's schema version, from whichever table holds it.
 ///
 /// v5 moved it out of `vault_meta` and into `account`. Both have to be
@@ -388,6 +427,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 8 {
         tx.execute_batch(SCHEMA_V8)?;
+    }
+    if found < 9 {
+        tx.execute_batch(SCHEMA_V9)?;
+    }
+    if found < 10 {
+        tx.execute_batch(SCHEMA_V10)?;
+    }
+    if found < 11 {
+        tx.execute_batch(SCHEMA_V11)?;
     }
     // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(

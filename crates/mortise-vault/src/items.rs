@@ -61,6 +61,51 @@ fn cache_aad(item: ItemId) -> Vec<u8> {
 }
 
 impl Vault {
+    /// Create or replace an environment secret using the deterministic id from
+    /// crypto-spec §6.7. Concurrent writes to the same `(environment, KEY)`
+    /// therefore converge through the normal item LWW rule.
+    pub fn upsert_project_env_secret(
+        &mut self,
+        environment: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<ItemId> {
+        let environment = environment.trim();
+        let key = key.trim();
+        if environment.is_empty() || key.is_empty() {
+            return Err(Error::Invalid(
+                "an environment secret needs an environment and key",
+            ));
+        }
+        let id = ItemId::for_env_secret(
+            self.vault_key_at(Epoch(0))?,
+            self.meta().vault_id,
+            environment,
+            key,
+        )?;
+        let existing: Option<(u32, i64)> = self
+            .conn()
+            .query_row(
+                "SELECT version, created_at_ms FROM item WHERE item_id = ?1 AND deleted = 0",
+                params![id.as_bytes().as_slice()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let meta = ItemMeta {
+            title: key.to_string(),
+            environment: Some(environment.to_string()),
+            ..Default::default()
+        };
+        let payload = ItemPayload::EnvSecret {
+            value: value.to_string(),
+        };
+        let (version, created) = existing.map_or((1, None), |(version, created)| {
+            (version.saturating_add(1), Some(created as u64))
+        });
+        self.write_item(id, version, &meta, &payload, created)?;
+        Ok(id)
+    }
+
     /// Store a new item. Returns its generated id.
     pub fn create_item(&mut self, meta: &ItemMeta, payload: &ItemPayload) -> Result<ItemId> {
         let id = ItemId::generate()?;
