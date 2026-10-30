@@ -71,6 +71,13 @@ export const ipc = {
   addEnvironment: (projectId: string, environment: string) =>
     call<ProjectSummary>("add_environment", { projectId, environment }),
   deleteProject: (projectId: string) => call<void>("delete_project", { projectId }),
+  createProjectInvite: (projectId: string, inviterName: string) =>
+    call<string>("create_project_invite", { projectId, inviterName }),
+  inspectProjectInvite: (link: string) =>
+    call<{ project_name: string; inviter_name: string; fingerprint: string; expires_at_ms: number }>(
+      "inspect_project_invite", { link }),
+  requestProjectAccess: (link: string, joinerName: string) =>
+    call<void>("request_project_access", { link, joinerName }),
   importEnv: (project: string, environment: string, text: string) =>
     call<EnvImportReport>("import_env", { project, environment, text }),
   importEnvFile: (project: string, environment: string, path: string) =>
@@ -322,6 +329,12 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       mockState.projects.splice(i, 1);
       return as(undefined);
     }
+    case "create_project_invite":
+      return as("mortise://join#mock-single-use-invite");
+    case "inspect_project_invite":
+      return as({ project_name: "Payments", inviter_name: "Sajda", fingerprint: "12345 67890 12345 67890 12345 67890 12345 67890 12345 67890 12345 67890", expires_at_ms: Date.now() + 60_000 });
+    case "request_project_access":
+      return as(undefined);
     case "import_env_file":
       return as({ added: 2, updated: 0, unchanged: 0, skipped: 1, unreadable: 0, duplicates: [] });
     case "import_env": {

@@ -1120,6 +1120,163 @@ pub async fn claim_vault_on_relay(app: tauri::AppHandle) -> CmdResult<()> {
     .map_err(|_| CmdError::bad_request("Registration was interrupted."))?
 }
 
+/// Promote one local developer-secrets project to its own vault and return the
+/// single invite link to share with a teammate.
+#[tauri::command]
+pub async fn create_project_invite(
+    app: tauri::AppHandle,
+    project_id: String,
+    inviter_name: String,
+) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let project_path = state
+            .vault_path()
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("projects")
+            .join(format!("{project_id}.vault"));
+        if let Some(parent) = project_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|_| CmdError::bad_request("Could not create the project vault."))?;
+        }
+
+        state.with_vault(|vault| {
+            let account = vault.ok_or_else(|| state.no_vault_error())?;
+            let project = account
+                .projects()?
+                .into_iter()
+                .find(|project| project.id == project_id)
+                .ok_or_else(|| CmdError::bad_request("No such project."))?;
+            let relay = account
+                .relay_url()?
+                .ok_or_else(|| CmdError::bad_request("Configure a relay before sharing."))?;
+
+            let mut shared = mortise_vault::Vault::create_project_vault(
+                &project_path,
+                account,
+                &project.name,
+                &project.description,
+            )?;
+            shared.set_relay_url(Some(&relay))?;
+            for environment in &project.environments {
+                shared.add_shared_project_environment(environment)?;
+            }
+
+            let rows: Vec<_> = account
+                .search("")?
+                .into_iter()
+                .filter(|row| row.meta.project.as_deref() == Some(project.name.as_str()))
+                .collect();
+            for row in &rows {
+                let payload = account.reveal(row.id)?;
+                if let mortise_vault::ItemPayload::EnvSecret { value } = &payload {
+                    shared.upsert_project_env_secret(
+                        row.meta.environment.as_deref().unwrap_or("dev"),
+                        &row.meta.title,
+                        value,
+                    )?;
+                }
+            }
+
+            let syncer = mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(&relay));
+            syncer.claim(&shared).map_err(sync_error)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0);
+            let cert = shared.identity()?.certify(shared.device()?.public(), now);
+            let invite = mortise_crypto::invite::Invite::create(
+                shared.meta().vault_id,
+                &relay,
+                cert,
+                &inviter_name,
+                &project.name,
+                shared.device()?.public().clone(),
+                now,
+                now + mortise_crypto::invite::MAX_INVITE_LIFETIME_MS,
+            )?;
+            syncer
+                .register_invite(&shared, &invite)
+                .map_err(sync_error)?;
+            syncer.sync(&mut shared).map_err(sync_error)?;
+
+            // Remove originals only after the independent vault is registered
+            // and its contents are safely on the relay.
+            for row in rows {
+                account.delete_item(row.id)?;
+            }
+            account.delete_project(&project_id)?;
+            Ok(invite.to_link())
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("Sharing was interrupted."))?
+}
+
+/// Safe, key-free details shown before a join request is sent.
+#[derive(Debug, serde::Serialize)]
+pub struct InvitePreview {
+    /// Project name claimed by the inviter.
+    pub project_name: String,
+    /// Self-chosen inviter label.
+    pub inviter_name: String,
+    /// Identity fingerprint to compare out of band.
+    pub fingerprint: String,
+    /// Expiry time.
+    pub expires_at_ms: u64,
+}
+
+/// Parse an invite and expose only what the confirmation screen needs.
+#[tauri::command]
+pub fn inspect_project_invite(link: String) -> CmdResult<InvitePreview> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let invite = mortise_crypto::invite::Invite::from_link(&link, now)?;
+    Ok(InvitePreview {
+        project_name: invite.project_name().to_string(),
+        inviter_name: invite.inviter_name().to_string(),
+        fingerprint: invite.inviter().identity().fingerprint().to_string(),
+        expires_at_ms: invite.expires_at_ms(),
+    })
+}
+
+/// Send this device's authenticated request through the invite mailbox.
+#[tauri::command]
+pub async fn request_project_access(
+    app: tauri::AppHandle,
+    link: String,
+    joiner_name: String,
+) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        let invite = mortise_crypto::invite::Invite::from_link(&link, now)?;
+        let state = app.state::<AppState>();
+        state.with_vault(|vault| {
+            let account = vault.ok_or_else(|| state.no_vault_error())?;
+            let cert = account.identity()?.certify(account.device()?.public(), now);
+            let request = mortise_crypto::invite::JoinRequest::seal(
+                &invite,
+                account.device()?,
+                &cert,
+                &joiner_name,
+            )?;
+            let syncer =
+                mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(invite.relay_url()));
+            syncer
+                .post_join_request(invite.mailbox_id()?, &request)
+                .map_err(sync_error)
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("The join request was interrupted."))?
+}
+
 /// What one sync round did.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SyncReport {
