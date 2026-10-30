@@ -14,7 +14,7 @@ use hpke::{Deserializable, Kem as KemTrait, Serializable};
 use zeroize::Zeroizing;
 
 use crate::aead;
-use crate::encode::{Canonical, Tag, Writer};
+use crate::encode::{Canonical, Reader, Tag, Writer};
 use crate::error::{Error, Result};
 use crate::secret::Key32;
 
@@ -28,6 +28,16 @@ pub type KexPublic = <Kem as KemTrait>::PublicKey;
 
 /// Length of a serialized device identifier.
 pub const DEVICE_ID_LEN: usize = 16;
+
+/// Length of a serialized [`DeviceCert`]: tag, identity, device id, both device
+/// keys, issue time, signature (spec §2.3).
+pub const DEVICE_CERT_LEN: usize = 1 + 32 + DEVICE_ID_LEN + 32 + 32 + 8 + 64;
+
+/// Context string for the identity fingerprint (spec §6.5).
+const FINGERPRINT_CONTEXT: &str = "truepass/v1/fingerprint";
+
+/// Digit groups in a rendered fingerprint.
+pub const FINGERPRINT_GROUPS: usize = 12;
 
 const IDENTITY_AAD: &[u8] = b"truepass/v1/identity";
 const DEVICE_AAD: &[u8] = b"truepass/v1/device";
@@ -79,12 +89,52 @@ impl IdentityPublic {
         VerifyingKey::from_bytes(&self.0).map_err(|_| Error::Signature)
     }
 
-    /// Fingerprint for out-of-band verification (threat model A3).
+    /// Fingerprint for out-of-band verification (threat model A3, spec §6.5).
     ///
-    /// Shown to users so they can confirm they are sealing to the person they
-    /// think they are, rather than trusting our key directory.
-    pub fn fingerprint(&self) -> [u8; 32] {
-        *blake3::hash(&self.0).as_bytes()
+    /// Shown to users so they can confirm the person they are granting access
+    /// to, or joining, holds the identity they think — rather than whoever got
+    /// hold of an invite link, or whatever key a relay would have liked them to
+    /// trust. Covers the identity only; a [`DeviceCert`] binds each device to it.
+    pub fn fingerprint(&self) -> Fingerprint {
+        let mut hasher = blake3::Hasher::new_derive_key(FINGERPRINT_CONTEXT);
+        hasher.update(&self.0);
+        let mut bytes = [0u8; FINGERPRINT_GROUPS * 5];
+        hasher.finalize_xof().fill(&mut bytes);
+
+        let mut groups = [0u32; FINGERPRINT_GROUPS];
+        for (group, chunk) in groups.iter_mut().zip(bytes.chunks_exact(5)) {
+            let mut wide = [0u8; 8];
+            wide[3..].copy_from_slice(chunk);
+            *group = (u64::from_be_bytes(wide) % 100_000) as u32;
+        }
+        Fingerprint(groups)
+    }
+}
+
+/// An identity fingerprint: twelve groups of five decimal digits (spec §6.5).
+///
+/// Digits rather than hex because people compare them aloud, over a call, and
+/// "four two seven one nine" survives that better than "eff zero bee".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Fingerprint([u32; FINGERPRINT_GROUPS]);
+
+impl Fingerprint {
+    /// The twelve groups, each below 100000.
+    pub fn groups(&self) -> &[u32; FINGERPRINT_GROUPS] {
+        &self.0
+    }
+}
+
+/// `12345 67890 …`: zero-padded groups separated by single spaces.
+impl core::fmt::Display for Fingerprint {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        for (i, group) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(" ")?;
+            }
+            write!(f, "{group:05}")?;
+        }
+        Ok(())
     }
 }
 
@@ -302,6 +352,67 @@ impl DeviceCert {
     /// Issue time, milliseconds since the Unix epoch.
     pub fn issued_at_ms(&self) -> u64 {
         self.issued_at_ms
+    }
+
+    /// Serialize: the canonical encoding followed by the signature, exactly
+    /// [`DEVICE_CERT_LEN`] bytes (spec §2.3).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = self.canonical_bytes();
+        out.extend_from_slice(&self.signature);
+        out
+    }
+
+    /// Parse and **verify** a certificate produced by [`DeviceCert::to_bytes`].
+    ///
+    /// Refuses anything of the wrong length or tag, a device id that does not
+    /// derive from the device's signing key, and a signature that does not
+    /// verify under the stated identity. As with [`DeviceCert::verify`], the
+    /// caller must still decide whether that identity is the expected one.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != DEVICE_CERT_LEN {
+            return Err(Error::Length {
+                expected: DEVICE_CERT_LEN,
+                got: bytes.len(),
+            });
+        }
+        let mut r = Reader::new(bytes, Tag::DeviceCert).ok_or(Error::Signature)?;
+        let parsed = (|| {
+            let identity = IdentityPublic(r.fixed::<32>()?);
+            let device_id = DeviceId(r.fixed::<DEVICE_ID_LEN>()?);
+            let sign_pub = r.fixed::<32>()?;
+            let kex_pub = r.fixed::<32>()?;
+            let issued_at_ms = r.u64()?;
+            let signature = r.fixed::<64>()?;
+            Some((
+                identity,
+                device_id,
+                sign_pub,
+                kex_pub,
+                issued_at_ms,
+                signature,
+            ))
+        })();
+        let (identity, device_id, sign_pub, kex_pub, issued_at_ms, signature) =
+            parsed.ok_or(Error::Signature)?;
+        r.finish().ok_or(Error::Signature)?;
+
+        let device = DevicePublic::from_parts(sign_pub, kex_pub);
+        // The id is encoded for the signature's sake but never trusted: one
+        // that does not derive from the key would let a certificate name a
+        // device other than the one whose keys it carries.
+        if device.id() != device_id {
+            return Err(Error::Signature);
+        }
+        device.kex_public()?;
+
+        let cert = Self {
+            identity,
+            device,
+            issued_at_ms,
+            signature,
+        };
+        cert.verify()?;
+        Ok(cert)
     }
 
     /// Verify the certificate against its stated identity.

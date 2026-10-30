@@ -29,7 +29,12 @@ fn account_key() -> Key32 {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write;
+
+    bytes.iter().fold(String::new(), |mut output, byte| {
+        write!(output, "{byte:02x}").expect("writing to a String cannot fail");
+        output
+    })
 }
 
 #[test]
@@ -133,12 +138,35 @@ fn all_spec_info_strings_carry_the_version_prefix() {
         kdf::info::DB_KEY,
         kdf::info::GUARD_INDEX,
         kdf::info::META_KEY,
+        kdf::info::ENV_ITEM_ID,
+        kdf::info::INVITE_MAILBOX,
+        kdf::info::INVITE_PSK,
     ] {
         assert!(
             info.starts_with(b"truepass/v1/"),
             "info string {:?} is missing the truepass/v1/ prefix",
             core::str::from_utf8(info)
         );
+    }
+}
+
+/// Spec §1: never reuse an `info`. Two subsystems sharing one would derive the
+/// same key for different jobs.
+#[test]
+fn no_two_spec_info_strings_are_the_same() {
+    let all = [
+        kdf::info::MUK,
+        kdf::info::DB_KEY,
+        kdf::info::GUARD_INDEX,
+        kdf::info::META_KEY,
+        kdf::info::ENV_ITEM_ID,
+        kdf::info::INVITE_MAILBOX,
+        kdf::info::INVITE_PSK,
+    ];
+    for (i, a) in all.iter().enumerate() {
+        for b in &all[i + 1..] {
+            assert_ne!(a, b);
+        }
     }
 }
 

@@ -1,8 +1,8 @@
 //! Measures the real unlock cost. Spec §10 requires this before the Argon2
 //! parameters are frozen.
-use std::time::Instant;
 use mortise_crypto::kdf::{self, Argon2Params};
 use mortise_crypto::secret::Key32;
+use std::time::Instant;
 
 fn main() {
     let salt = [0x42u8; 16];

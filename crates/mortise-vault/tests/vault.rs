@@ -2,10 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use tempfile::TempDir;
 use mortise_crypto::kdf::Argon2Params;
 use mortise_crypto::secret::Key32;
 use mortise_vault::{Error, ItemMeta, ItemPayload, Vault};
+use tempfile::TempDir;
 
 /// Cheap Argon2 so the suite is not dominated by key stretching.
 const FAST: Argon2Params = Argon2Params {
@@ -649,7 +649,12 @@ fn a_project_holding_secrets_will_not_be_deleted() {
         ..Default::default()
     };
     f.vault
-        .create_item(&meta, &ItemPayload::EnvSecret { value: "postgres://x".into() })
+        .create_item(
+            &meta,
+            &ItemPayload::EnvSecret {
+                value: "postgres://x".into(),
+            },
+        )
         .unwrap();
 
     assert!(f.vault.delete_project(&p.id).is_err());
@@ -666,8 +671,14 @@ fn a_project_name_is_not_readable_in_the_file() {
 
     let bytes = std::fs::read(&f.path).unwrap();
     let haystack = String::from_utf8_lossy(&bytes);
-    assert!(!haystack.contains("acme-payroll"), "the project name is in the file");
-    assert!(!haystack.contains("wages"), "the description is in the file");
+    assert!(
+        !haystack.contains("acme-payroll"),
+        "the project name is in the file"
+    );
+    assert!(
+        !haystack.contains("wages"),
+        "the description is in the file"
+    );
 }
 
 /// The project list is drawn before anyone types a password, so it has to
