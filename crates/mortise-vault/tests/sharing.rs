@@ -193,6 +193,23 @@ fn preparing_a_revocation_does_not_change_local_state() {
     assert_eq!(p.a.known_epochs().unwrap(), vec![epoch.value()]);
 }
 
+#[test]
+fn access_removed_keeps_the_local_copy_but_refuses_new_writes() {
+    let mut p = Pair::new();
+    let id =
+        p.a.create_item(&item("Still here").0, &item("Still here").1)
+            .unwrap();
+
+    p.a.mark_access_removed().unwrap();
+
+    assert!(p.a.access_removed().unwrap());
+    assert_eq!(p.a.reveal(id).unwrap(), item("Still here").1);
+    assert!(
+        p.a.create_item(&item("Too late").0, &item("Too late").1)
+            .is_err()
+    );
+}
+
 /// The threat model's A8 made concrete: revocation is forward secrecy only.
 /// The report exists so the UI can tell the user how much to rotate by hand,
 /// rather than implying the data was somehow clawed back.

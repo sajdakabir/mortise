@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -201,6 +201,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V8)?;
     conn.execute_batch(SCHEMA_V9)?;
     conn.execute_batch(SCHEMA_V10)?;
+    conn.execute_batch(SCHEMA_V11)?;
     Ok(())
 }
 
@@ -371,6 +372,12 @@ CREATE TABLE project_manifest_cache (
 ) STRICT;
 "#;
 
+/// Added in v11: a removed member keeps its local copy read-only and stops
+/// syncing instead of pretending the already-seen data can be clawed back.
+const SCHEMA_V11: &str = r#"
+ALTER TABLE vault ADD COLUMN access_removed INTEGER NOT NULL DEFAULT 0;
+"#;
+
 /// The file's schema version, from whichever table holds it.
 ///
 /// v5 moved it out of `vault_meta` and into `account`. Both have to be
@@ -426,6 +433,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 10 {
         tx.execute_batch(SCHEMA_V10)?;
+    }
+    if found < 11 {
+        tx.execute_batch(SCHEMA_V11)?;
     }
     // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(

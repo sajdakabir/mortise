@@ -119,6 +119,9 @@ fn seal_aad(vault: VaultId, epoch: Epoch) -> Vec<u8> {
 impl Vault {
     /// Append a signed change for `mutation` and return its id.
     pub(crate) fn record_mutation(&mut self, mutation: &Mutation) -> Result<ChangeId> {
+        if self.access_removed()? {
+            return Err(Error::Invalid("access to this project was removed"));
+        }
         let vault_id = self.meta().vault_id;
         let key = self.current_vault_key()?;
         let epoch = key.epoch();

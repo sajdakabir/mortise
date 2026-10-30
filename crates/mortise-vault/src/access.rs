@@ -202,6 +202,27 @@ impl AclEntryRecord {
 }
 
 impl Vault {
+    /// Whether this device has learned that it is no longer a member.
+    pub fn access_removed(&self) -> Result<bool> {
+        let removed: bool = self.conn().query_row(
+            "SELECT access_removed FROM vault WHERE vault_id = ?1",
+            params![self.meta().vault_id.as_bytes().as_slice()],
+            |row| row.get(0),
+        )?;
+        Ok(removed)
+    }
+
+    /// Preserve the local copy but make it read-only after removal (§6.9).
+    /// The sync layer calls this when the pulled ACL removes this device or the
+    /// relay refuses it as a former member.
+    pub fn mark_access_removed(&mut self) -> Result<()> {
+        self.conn().execute(
+            "UPDATE vault SET access_removed = 1 WHERE vault_id = ?1",
+            params![self.meta().vault_id.as_bytes().as_slice()],
+        )?;
+        Ok(())
+    }
+
     /// The whole ACL log, for handing to a device being enrolled.
     pub fn acl_records(&self) -> Result<Vec<AclEntryRecord>> {
         Ok(self

@@ -86,3 +86,27 @@ fn a_project_vault_is_an_independent_file_with_the_accounts_device_identity() {
     );
     assert!(account.shared_project_manifest().unwrap().is_none());
 }
+
+#[test]
+fn environment_secrets_use_stable_ids_and_replace_the_same_key() {
+    let dir = TempDir::new().unwrap();
+    let (account, _) = Vault::create(dir.path().join("personal.db"), b"password", FAST).unwrap();
+    let mut project =
+        Vault::create_project_vault(dir.path().join("project.db"), &account, "API", "").unwrap();
+
+    let first = project
+        .upsert_project_env_secret("Prod", "TOKEN", "one")
+        .unwrap();
+    let second = project
+        .upsert_project_env_secret("prod", "TOKEN", "two")
+        .unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(project.item_count().unwrap(), 1);
+    assert_eq!(
+        project.reveal(first).unwrap(),
+        mortise_vault::model::ItemPayload::EnvSecret {
+            value: "two".into()
+        }
+    );
+}
