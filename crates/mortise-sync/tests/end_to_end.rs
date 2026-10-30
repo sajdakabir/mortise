@@ -8,6 +8,8 @@
 use std::sync::Mutex;
 
 use mortise_crypto::identity::Device;
+use mortise_crypto::identity::Identity;
+use mortise_crypto::invite::{Invite, JoinRequest};
 use mortise_crypto::kdf::Argon2Params;
 use mortise_relay::protocol::{PullResponse, WireChange};
 use mortise_relay::server::router;
@@ -148,6 +150,68 @@ fn an_item_reaches_the_other_device_through_the_relay() {
 
     assert_eq!(titles(&f.b), vec!["GitHub"]);
     assert_eq!(f.b.reveal(id).unwrap(), payload);
+}
+
+#[test]
+fn one_invite_link_carries_a_join_request_through_a_single_use_mailbox() {
+    let f = Fixture::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let inviter_cert =
+        f.a.identity()
+            .unwrap()
+            .certify(f.a.device().unwrap().public(), now);
+    let invite = Invite::create(
+        f.a.meta().vault_id,
+        f.a.relay_url().unwrap().as_deref().unwrap(),
+        inviter_cert,
+        "Owner",
+        "Payments",
+        f.a.device().unwrap().public().clone(),
+        now,
+        now + 60_000,
+    )
+    .unwrap();
+    f.syncer.register_invite(&f.a, &invite).unwrap();
+
+    let joiner_identity = Identity::generate().unwrap();
+    let joiner = Device::generate().unwrap();
+    let joiner_cert = joiner_identity.certify(joiner.public(), now);
+    let sealed = JoinRequest::seal(&invite, &joiner, &joiner_cert, "New teammate").unwrap();
+    f.syncer
+        .post_join_request(invite.mailbox_id().unwrap(), &sealed)
+        .unwrap();
+    assert!(
+        f.syncer
+            .post_join_request(invite.mailbox_id().unwrap(), &sealed)
+            .is_err()
+    );
+
+    let received = f
+        .syncer
+        .get_join_request(&f.a, invite.mailbox_id().unwrap())
+        .unwrap()
+        .unwrap();
+    let opened = JoinRequest::open(
+        f.a.device().unwrap(),
+        f.a.meta().vault_id,
+        invite.secret(),
+        &received,
+    )
+    .unwrap();
+    assert_eq!(opened.name(), "New teammate");
+    assert_eq!(opened.cert(), &joiner_cert);
+    f.syncer
+        .close_invite(&f.a, invite.mailbox_id().unwrap())
+        .unwrap();
+    assert!(
+        f.syncer
+            .get_join_request(&f.a, invite.mailbox_id().unwrap())
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -332,7 +396,9 @@ fn a_revocation_reaches_the_other_device_and_cuts_off_the_removed_one() {
 
     // A revokes C, then everyone syncs.
     let c_id = *device_c.public().id().as_bytes();
-    a.revoke_member(device_c.public().id()).unwrap();
+    syncer
+        .revoke_member(&mut a, device_c.public().id())
+        .unwrap();
     syncer.sync(&mut a).unwrap();
     let out_b = syncer.sync(&mut b).unwrap();
 
@@ -359,17 +425,12 @@ fn a_revocation_reaches_the_other_device_and_cuts_off_the_removed_one() {
     assert!(out_b2.pulled >= 1, "the post-rotation item did not reach B");
     assert_eq!(b.reveal(id).unwrap(), payload);
 
-    // A change from the removed device is refused by B on ingest.
+    // The conditional revocation also removes C from the relay allowlist.
     c.create_item(&item("from-c", "x").0, &item("from-c", "x").1)
         .unwrap();
-    let _ = syncer.push(&mut c);
-    let out_b3 = syncer.sync(&mut b).unwrap();
-    assert!(
-        out_b3.rejected >= 1,
-        "B accepted a change from the revoked device"
-    );
+    assert!(matches!(syncer.push(&mut c), Err(Error::Refused { .. })));
 
-    // Defence in depth: once C is removed at the relay, its sync is refused.
+    // Removing it again is harmless and remains defence in depth.
     syncer.remove_device(&a, &c_id).unwrap();
     c.create_item(&item("from-c-again", "y").0, &item("from-c-again", "y").1)
         .unwrap();
