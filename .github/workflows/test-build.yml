@@ -1,0 +1,154 @@
+name: macOS Test Build
+
+# This is deliberately separate from both release.yml and pull-request CI.
+# It publishes no release, reads no secrets and only runs when someone asks
+# for an installable build from the Actions tab.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-test-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAURI_CLI_VERSION: "2.12.4"
+
+jobs:
+  build:
+    name: Universal ad-hoc-signed app
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Rust toolchain and macOS targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-test-build-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-test-build-
+
+      - name: Build the UI
+        run: |
+          npm --prefix ui ci
+          npm --prefix ui run build
+
+      # The browser extension launches this helper. The ordinary Tauri config
+      # does not bundle it, so make one universal binary for the test-only
+      # config overlay below.
+      - name: Build the browser helper
+        run: |
+          cargo build --release --locked -p mortise-proxy --target aarch64-apple-darwin
+          cargo build --release --locked -p mortise-proxy --target x86_64-apple-darwin
+          mkdir -p target/test-sidecars
+          lipo -create \
+            target/aarch64-apple-darwin/release/mortise-proxy \
+            target/x86_64-apple-darwin/release/mortise-proxy \
+            -output target/test-sidecars/mortise-proxy-universal-apple-darwin
+          chmod 755 target/test-sidecars/mortise-proxy-universal-apple-darwin
+          lipo -archs target/test-sidecars/mortise-proxy-universal-apple-darwin
+
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --locked --version "$TAURI_CLI_VERSION"
+
+      # "-" is Apple's ad-hoc identity. It needs no certificate or account,
+      # gives the downloaded app an internally verifiable code signature,
+      # and does not pretend to be Developer ID signing or notarisation. The
+      # test config disables the base build hook because the UI was built above.
+      - name: Build the app and DMG
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: >-
+          cargo tauri build --ci
+          --target universal-apple-darwin
+          --config .github/tauri.test-build.json
+
+      - name: Package the browser extension
+        run: extension/tools/package.sh
+
+      - name: Verify and stage the tester bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="target/universal-apple-darwin/release/bundle/macos/Mortise.app"
+          main="$app/Contents/MacOS/mortise-app"
+          proxy="$app/Contents/MacOS/mortise-proxy"
+          dmgs=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+
+          test -d "$app"
+          test -x "$main"
+          test -x "$proxy"
+          test "${#dmgs[@]}" -eq 1
+          test -f "${dmgs[0]}"
+          dmg="${dmgs[0]}"
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | tee /tmp/mortise-codesign.txt
+          grep -q '^Signature=adhoc$' /tmp/mortise-codesign.txt
+
+          for binary in "$main" "$proxy"; do
+            lipo -archs "$binary" | grep -qw aarch64
+            lipo -archs "$binary" | grep -qw x86_64
+          done
+
+          mkdir -p dist
+          cp "$dmg" dist/
+          cp target/extension/*.zip dist/
+          cp TESTING.md sample-data.csv dist/
+
+          {
+            printf 'Mortise macOS test build\n'
+            printf 'Commit: %s\n' "$GITHUB_SHA"
+            printf 'Ref: %s\n' "$GITHUB_REF"
+            printf 'Run: https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf 'Architecture: universal (Apple silicon + Intel)\n'
+            printf 'Minimum macOS: 11.0\n'
+            printf 'Signature: ad hoc; no Apple Developer identity; not notarized\n'
+            printf 'Tauri CLI: %s\n' "$TAURI_CLI_VERSION"
+          } > dist/BUILD.txt
+
+          (
+            cd dist
+            shasum -a 256 BUILD.txt TESTING.md sample-data.csv ./*.dmg ./*.zip > SHA256SUMS
+            shasum -a 256 -c SHA256SUMS
+          )
+
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mortise-macos-test-${{ github.run_number }}-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Tester handoff
+        run: |
+          {
+            echo '### Test build ready'
+            echo
+            echo "Download the \`mortise-macos-test-…\` artifact from this run."
+            echo "Its \`TESTING.md\` covers checksum verification, Gatekeeper, first run and the browser extension."
+          } >> "$GITHUB_STEP_SUMMARY"
