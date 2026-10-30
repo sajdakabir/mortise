@@ -14,8 +14,8 @@
 //! transcription confusions cannot arise. The checksum catches the rest before
 //! the user sits through a 64 MiB Argon2 run that was never going to succeed.
 
-use zeroize::Zeroizing;
 use data_encoding::BASE32_NOPAD;
+use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use crate::secret::Key32;

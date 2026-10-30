@@ -29,13 +29,13 @@
 //! The cost is that changes cannot be materialized while locked. Changes pulled
 //! during a locked session sit in the log until the next unlock.
 
-use rusqlite::{OptionalExtension, params};
-use serde::{Deserialize, Serialize};
 use mortise_crypto::aead;
 use mortise_crypto::change::{Change, ChangeId, Hlc, UnsignedChange};
 use mortise_crypto::identity::DeviceId;
 use mortise_crypto::item::{ITEM_ID_LEN, ItemId};
 use mortise_crypto::vault::{Epoch, VaultId};
+use rusqlite::{OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
@@ -327,8 +327,7 @@ impl Vault {
         let mut report = IngestReport::default();
         // Ids accepted in this batch, so a change can be parented on one that
         // arrived alongside it rather than only on one already stored.
-        let mut accepted: std::collections::HashSet<[u8; 32]> =
-            std::collections::HashSet::new();
+        let mut accepted: std::collections::HashSet<[u8; 32]> = std::collections::HashSet::new();
 
         for change in changes {
             if change.vault() != vault_id {

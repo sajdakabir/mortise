@@ -12,10 +12,10 @@
 //! other members, so it cannot back a cache that must survive locking and must
 //! never leave this machine.
 
-use rusqlite::{OptionalExtension, params};
 use mortise_crypto::aead;
 use mortise_crypto::item::{ItemId, SealedItem};
 use mortise_crypto::vault::{Epoch, VaultId};
+use rusqlite::{OptionalExtension, params};
 use zeroize::Zeroizing;
 
 use crate::changelog::{ItemRecord, Mutation};
