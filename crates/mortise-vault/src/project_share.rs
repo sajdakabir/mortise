@@ -258,6 +258,14 @@ impl Vault {
             ],
         )?;
         conn.execute(
+            "INSERT OR IGNORE INTO known_device (device_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
+            params![
+                owner.id().as_bytes().as_slice(),
+                owner.signing_public().as_slice(),
+                owner.kex_public_bytes().as_slice()
+            ],
+        )?;
+        conn.execute(
             "INSERT INTO vault_genesis (vault_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
             params![
                 vault_id.as_bytes().as_slice(),
