@@ -240,6 +240,40 @@ fn the_last_owner_cannot_revoke_themselves() {
     assert_eq!(p.a.acl().unwrap().role(owner), Some(Role::Owner));
 }
 
+#[test]
+fn acl_replay_keeps_its_genesis_anchor_after_the_genesis_owner_leaves() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("v.db");
+    let (mut vault, account_key) = Vault::create(&path, PASSWORD, FAST).unwrap();
+    let genesis = vault.device().unwrap().id();
+    let successor = Device::generate().unwrap();
+
+    vault
+        .issue_acl_op(AclOp::AddMember {
+            device: successor.public().clone(),
+            role: Role::Owner,
+        })
+        .unwrap();
+    vault
+        .issue_acl_op(AclOp::RemoveMember { device: genesis })
+        .unwrap();
+
+    assert_eq!(vault.acl().unwrap().role(genesis), None);
+    assert_eq!(
+        vault.acl().unwrap().role(successor.public().id()),
+        Some(Role::Owner)
+    );
+    drop(vault);
+
+    let mut reopened = Vault::open(&path).unwrap();
+    reopened.unlock(PASSWORD, &account_key).unwrap();
+    assert_eq!(reopened.acl().unwrap().role(genesis), None);
+    assert_eq!(
+        reopened.acl().unwrap().role(successor.public().id()),
+        Some(Role::Owner)
+    );
+}
+
 // --- the log itself ---
 
 #[test]

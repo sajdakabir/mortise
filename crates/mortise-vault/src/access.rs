@@ -215,18 +215,17 @@ impl Vault {
     ///
     /// On the device that created the vault this is itself. An enrolled device
     /// learns it from the known-device rows the enrolment bundle carried.
-    fn owner_device(&self) -> Result<DevicePublic> {
+    pub(crate) fn owner_device(&self) -> Result<DevicePublic> {
         let row: Option<(Vec<u8>, Vec<u8>)> = self
             .conn()
             .query_row(
-                "SELECT signing_key, kex_key FROM known_device
-                 ORDER BY rowid LIMIT 1",
-                [],
+                "SELECT signing_key, kex_key FROM vault_genesis WHERE vault_id = ?1",
+                params![self.meta().vault_id.as_bytes().as_slice()],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
 
-        let (signing, kex) = row.ok_or(Error::Corrupt("vault has no known devices"))?;
+        let (signing, kex) = row.ok_or(Error::Corrupt("vault has no genesis owner"))?;
         let signing: [u8; 32] = signing
             .try_into()
             .map_err(|_| Error::Corrupt("signing key is the wrong length"))?;
