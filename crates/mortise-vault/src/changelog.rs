@@ -53,6 +53,25 @@ pub enum Mutation {
         /// When, for display only — ordering uses the HLC.
         at_ms: u64,
     },
+    /// Replace a shared project's name and description (§6.6).
+    ProjectSetInfo {
+        /// Display name.
+        name: String,
+        /// Optional prose description.
+        description: String,
+    },
+    /// Add one environment to the shared project (§6.6).
+    ProjectAddEnvironment {
+        /// Display spelling; comparison is ASCII-case-insensitive.
+        name: String,
+    },
+    /// Record the label and certificate shown for one member (§6.6).
+    ProjectSetMemberLabel {
+        /// Certificate bytes, verified during materialization.
+        cert: Vec<u8>,
+        /// Self-chosen display name.
+        name: String,
+    },
 }
 
 /// An item as it travels in the log. Mirrors the `item` table's row.
@@ -688,6 +707,11 @@ impl Vault {
                     params![item_id.as_slice()],
                 )?;
                 tx.commit()?;
+            }
+            Mutation::ProjectSetInfo { .. }
+            | Mutation::ProjectAddEnvironment { .. }
+            | Mutation::ProjectSetMemberLabel { .. } => {
+                self.apply_project_manifest_mutation(mutation, hlc, author)?;
             }
         }
         Ok(())
