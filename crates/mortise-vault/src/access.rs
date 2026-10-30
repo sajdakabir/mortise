@@ -54,6 +54,24 @@ pub struct Revocation {
     pub items_the_removed_device_retains: u32,
 }
 
+/// A revocation built against the current ACL head but not applied locally.
+///
+/// The sync layer first submits both entries to the relay as one conditional
+/// batch, then calls [`Vault::commit_revocation`] only after acceptance. The
+/// fresh key remains memory-only until that point (crypto-spec §6.3).
+pub struct PreparedRevocation {
+    remove: AclEntry,
+    rotate: AclEntry,
+    key: VaultKey,
+}
+
+impl PreparedRevocation {
+    /// The two entries the relay must accept atomically, in sequence order.
+    pub fn entries(&self) -> [&AclEntry; 2] {
+        [&self.remove, &self.rotate]
+    }
+}
+
 /// Discriminants for the stored op. **Never renumber**: these are the only
 /// link between a stored row and how to read its body.
 mod kind {
@@ -335,10 +353,21 @@ impl Vault {
 
     /// Issue a signed ACL operation from this device.
     pub fn issue_acl_op(&mut self, op: AclOp) -> Result<AclEntry> {
+        let entry = self.prepare_acl_op(op)?;
+
+        self.apply_acl_entry(&entry, true)?;
+        Ok(entry)
+    }
+
+    /// Build and sign an ACL operation without changing local state.
+    ///
+    /// Networked membership changes use this before the relay's conditional
+    /// commit. Keeping preparation side-effect free prevents a losing admin in
+    /// a concurrent edit from forking its local ACL.
+    pub fn prepare_acl_op(&self, op: AclOp) -> Result<AclEntry> {
         let acl = self.acl()?;
         let device = self.device()?;
-
-        let entry = UnsignedAclEntry::new(
+        Ok(UnsignedAclEntry::new(
             self.meta().vault_id,
             acl.next_seq(),
             acl.head(),
@@ -346,10 +375,7 @@ impl Vault {
             device.id(),
             now_ms(),
         )
-        .sign(device);
-
-        self.apply_acl_entry(&entry, true)?;
-        Ok(entry)
+        .sign(device))
     }
 
     /// Whether `device` may write to this vault.
@@ -373,6 +399,13 @@ impl Vault {
     /// the caller must tell the user to rotate the actual credentials — the
     /// returned list of affected item ids is there for exactly that message.
     pub fn revoke_member(&mut self, device: DeviceId) -> Result<Revocation> {
+        let prepared = self.prepare_revocation(device)?;
+        self.commit_revocation(prepared)
+    }
+
+    /// Prepare the remove-and-rotate pair without writing either entry or the
+    /// new vault key to disk.
+    pub fn prepare_revocation(&self, device: DeviceId) -> Result<PreparedRevocation> {
         let before = self.acl()?;
         if before.role(device).is_none() {
             return Err(Error::Crypto(mortise_crypto::Error::AclRejected(
@@ -380,15 +413,46 @@ impl Vault {
             )));
         }
 
-        self.issue_acl_op(AclOp::RemoveMember { device })?;
+        let signing = self.device()?;
+        let remove = UnsignedAclEntry::new(
+            self.meta().vault_id,
+            before.next_seq(),
+            before.head(),
+            AclOp::RemoveMember { device },
+            signing.id(),
+            now_ms(),
+        )
+        .sign(signing);
+        let mut after_remove = before;
+        after_remove.apply(&remove)?;
 
-        // Order matters here. The RotateKey entry advances the vault's current
-        // epoch, so the new key has to exist *before* it is issued — otherwise
-        // the next lookup asks for an epoch whose key has not been generated.
-        let rotated = self.current_vault_key()?.rotate()?;
-        let new_epoch = rotated.epoch();
-        self.store_vault_key(rotated)?;
-        self.issue_acl_op(AclOp::RotateKey { epoch: new_epoch })?;
+        let key = self.current_vault_key()?.rotate()?;
+        let rotate = UnsignedAclEntry::new(
+            self.meta().vault_id,
+            after_remove.next_seq(),
+            after_remove.head(),
+            AclOp::RotateKey { epoch: key.epoch() },
+            signing.id(),
+            now_ms(),
+        )
+        .sign(signing);
+        after_remove.apply(&rotate)?;
+
+        Ok(PreparedRevocation {
+            remove,
+            rotate,
+            key,
+        })
+    }
+
+    /// Apply a prepared revocation after the relay accepted its two entries.
+    pub fn commit_revocation(&mut self, prepared: PreparedRevocation) -> Result<Revocation> {
+        // Revalidation against the current head happens inside each apply. If
+        // local state moved since preparation, nothing is silently reissued.
+        self.apply_acl_entry(&prepared.remove, true)?;
+        let new_epoch = prepared.key.epoch();
+        self.store_vault_key(prepared.key)?;
+        self.apply_acl_entry(&prepared.rotate, true)?;
 
         // Re-wrap for everyone who remains and queue the sealed copies for the
         // relay. Each gets the new key sealed to their own device key, which is

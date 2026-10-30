@@ -177,6 +177,22 @@ fn revocation_removes_the_member_and_advances_the_epoch() {
     assert!(!p.a.may_write(p.b_device.public().id()).unwrap());
 }
 
+#[test]
+fn preparing_a_revocation_does_not_change_local_state() {
+    let p = Pair::new();
+    let member = p.b_device.public().id();
+    let epoch = p.a.meta().epoch;
+    let head = p.a.acl().unwrap().head();
+
+    let prepared = p.a.prepare_revocation(member).unwrap();
+
+    assert_eq!(prepared.entries()[0].seq() + 1, prepared.entries()[1].seq());
+    assert_eq!(p.a.meta().epoch, epoch);
+    assert_eq!(p.a.acl().unwrap().head(), head);
+    assert_eq!(p.a.acl().unwrap().role(member), Some(Role::Member));
+    assert_eq!(p.a.known_epochs().unwrap(), vec![epoch.value()]);
+}
+
 /// The threat model's A8 made concrete: revocation is forward secrecy only.
 /// The report exists so the UI can tell the user how much to rotate by hand,
 /// rather than implying the data was somehow clawed back.
