@@ -57,3 +57,32 @@ fn project_manifest_plaintext_is_not_written_to_the_database() {
             .any(|w| w == b"super secret system")
     );
 }
+
+#[test]
+fn a_project_vault_is_an_independent_file_with_the_accounts_device_identity() {
+    let dir = TempDir::new().unwrap();
+    let (account, _) = Vault::create(dir.path().join("personal.db"), b"password", FAST).unwrap();
+    let account_vault = account.meta().vault_id;
+    let account_device = account.device_id().unwrap();
+
+    let project = Vault::create_project_vault(
+        dir.path().join("payments.db"),
+        &account,
+        "Payments",
+        "Shared deploy keys",
+    )
+    .unwrap();
+
+    assert_ne!(project.meta().vault_id, account_vault);
+    assert_eq!(project.device_id().unwrap(), account_device);
+    assert_eq!(
+        project.acl().unwrap().role(account_device),
+        Some(mortise_crypto::acl::Role::Owner)
+    );
+    assert_eq!(project.known_epochs().unwrap(), [0]);
+    assert_eq!(
+        project.shared_project_manifest().unwrap().unwrap().name,
+        "Payments"
+    );
+    assert!(account.shared_project_manifest().unwrap().is_none());
+}

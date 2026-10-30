@@ -4,15 +4,19 @@
 //! module materializes them into one META-key-sealed cache row so the app can
 //! still name projects while locked without leaking those names on disk.
 
+use std::path::Path;
+
 use mortise_crypto::aead;
 use mortise_crypto::change::Hlc;
 use mortise_crypto::identity::{DEVICE_CERT_LEN, DeviceCert, DeviceId};
-use rusqlite::{OptionalExtension, params};
+use mortise_crypto::vault::{VaultId, VaultKey};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::changelog::Mutation;
 use crate::error::{Error, Result};
-use crate::vault::Vault;
+use crate::schema;
+use crate::vault::{KEY_FORMAT_AUTH, Vault, now_ms};
 
 /// A member label as shown to people. The certificate is retained so the UI
 /// can always put the identity fingerprint beside the self-chosen name.
@@ -92,6 +96,106 @@ fn valid_name(name: &str, max: usize) -> bool {
 }
 
 impl Vault {
+    /// Promote a local project into its own vault file.
+    ///
+    /// The new file copies the account identity and this machine's device keys
+    /// still sealed under the same MUK, but generates an independent vault id,
+    /// ACL, key epoch and change log (crypto-spec §6.1).
+    pub fn create_project_vault(
+        path: impl AsRef<Path>,
+        account: &Vault,
+        name: &str,
+        description: &str,
+    ) -> Result<Self> {
+        if !account.is_unlocked() {
+            return Err(Error::Locked);
+        }
+        let path = path.as_ref();
+        let conn = Connection::open(path)?;
+        schema::apply_pragmas(&conn)?;
+        if schema::is_initialized(&conn)? {
+            return Err(Error::Corrupt("a vault already exists at this path"));
+        }
+        schema::initialize(&conn)?;
+
+        let meta = account.meta();
+        let device = account.device()?;
+        let identity = account.identity()?;
+        let vault_id = VaultId::generate()?;
+        let key = VaultKey::generate()?;
+        let created = now_ms();
+        let identity_wrapped: Vec<u8> =
+            account
+                .conn()
+                .query_row("SELECT wrapped FROM identity WHERE id = 1", [], |row| {
+                    row.get(0)
+                })?;
+        let device_wrapped: Vec<u8> =
+            account
+                .conn()
+                .query_row("SELECT wrapped FROM device WHERE id = 1", [], |row| {
+                    row.get(0)
+                })?;
+
+        conn.execute(
+            "INSERT INTO account
+               (id, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                meta.salt.as_slice(),
+                meta.params.m_cost_kib,
+                meta.params.t_cost,
+                meta.params.p_cost,
+                schema::SCHEMA_VERSION,
+                created as i64
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO vault (vault_id, name, kind, epoch, created_at_ms) VALUES (?1, '', 1, ?2, ?3)",
+            params![vault_id.as_bytes().as_slice(), key.epoch().value(), created as i64],
+        )?;
+        conn.execute(
+            "INSERT INTO identity (id, public_key, wrapped) VALUES (1, ?1, ?2)",
+            params![identity.public().as_bytes().as_slice(), identity_wrapped],
+        )?;
+        conn.execute(
+            "INSERT INTO device (id, device_id, wrapped) VALUES (1, ?1, ?2)",
+            params![device.id().as_bytes().as_slice(), device_wrapped],
+        )?;
+        conn.execute(
+            "INSERT INTO vault_key (vault_id, epoch, wrapped, format) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                vault_id.as_bytes().as_slice(),
+                key.epoch().value(),
+                key.wrap_for(device, device.public(), vault_id)?.to_bytes(),
+                KEY_FORMAT_AUTH
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO known_device (device_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
+            params![
+                device.id().as_bytes().as_slice(),
+                device.public().signing_public().as_slice(),
+                device.public().kex_public_bytes().as_slice()
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO vault_genesis (vault_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
+            params![
+                vault_id.as_bytes().as_slice(),
+                device.public().signing_public().as_slice(),
+                device.public().kex_public_bytes().as_slice()
+            ],
+        )?;
+        drop(conn);
+
+        let token = account.unlock_token()?;
+        let mut project = Vault::open(path)?;
+        project.unlock_with_token(&token)?;
+        project.set_shared_project_info(name, description)?;
+        Ok(project)
+    }
+
     /// Read the shared-project cache. Available after idle lock, like search.
     pub fn shared_project_manifest(&self) -> Result<Option<SharedProjectManifest>> {
         let Some(sealed) = self
