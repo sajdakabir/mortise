@@ -2,13 +2,17 @@
 
 use data_encoding::BASE64;
 use mortise_crypto::identity::Device;
+use mortise_crypto::identity::DeviceId;
+use mortise_crypto::invite::{Invite, MailboxId};
 use mortise_relay::auth::sign;
 use mortise_relay::protocol::{
-    AddDevice, ClaimVault, ErrorBody, HEADER_DEVICE, HEADER_SIGNATURE, HEADER_TIMESTAMP,
-    PullAclResponse, PullKeysResponse, PullResponse, PushAclRequest, PushAclResponse,
-    PushKeysRequest, PushKeysResponse, PushRequest, PushResponse, WireKey,
+    AclPushResult, AddDevice, ClaimVault, ErrorBody, HEADER_DEVICE, HEADER_SIGNATURE,
+    HEADER_TIMESTAMP, MailboxRequest, PullAclResponse, PullKeysResponse, PullResponse,
+    PushAclRequest, PushAclResponse, PushKeysRequest, PushKeysResponse, PushRequest, PushResponse,
+    RegisterMailbox, WireKey,
 };
 use mortise_vault::Vault;
+use mortise_vault::access::Revocation;
 
 use crate::error::{Error, Result};
 use crate::transport::Transport;
@@ -59,6 +63,110 @@ fn now_ms() -> i64 {
 }
 
 impl<T: Transport> Syncer<T> {
+    /// Register the one-request mailbox for an invite.
+    pub fn register_invite(&self, vault: &Vault, invite: &Invite) -> Result<()> {
+        let mailbox = invite.mailbox_id()?;
+        let path = format!(
+            "/v1/vaults/{}/mailboxes",
+            hex(vault.meta().vault_id.as_bytes())
+        );
+        let body = serde_json::to_vec(&RegisterMailbox {
+            mailbox_id: hex(mailbox.as_bytes()),
+            expires_at_ms: invite.expires_at_ms(),
+        })?;
+        match self.call(vault.device()?, "POST", &path, &body)? {
+            (201, _) => Ok(()),
+            (status, body) => Err(Self::refuse(status, &body)),
+        }
+    }
+
+    /// Post the opaque join request. Possession of the mailbox id is the only
+    /// relay-side authority; HPKE AuthPSK authenticates the contents.
+    pub fn post_join_request(&self, mailbox: MailboxId, request: &[u8]) -> Result<()> {
+        let path = format!("/v1/mailboxes/{}", hex(mailbox.as_bytes()));
+        let body = serde_json::to_vec(&MailboxRequest {
+            body: BASE64.encode(request),
+        })?;
+        match self.transport.send("POST", &path, &[], &body)? {
+            (201, _) => Ok(()),
+            (status, body) => Err(Self::refuse(status, &body)),
+        }
+    }
+
+    /// Fetch the first request left in an invite mailbox.
+    pub fn get_join_request(&self, vault: &Vault, mailbox: MailboxId) -> Result<Option<Vec<u8>>> {
+        let path = format!(
+            "/v1/vaults/{}/mailboxes/{}",
+            hex(vault.meta().vault_id.as_bytes()),
+            hex(mailbox.as_bytes())
+        );
+        match self.call(vault.device()?, "GET", &path, b"")? {
+            (204, _) => Ok(None),
+            (200, body) => {
+                let request: MailboxRequest =
+                    serde_json::from_slice(&body).map_err(|_| Error::BadResponse)?;
+                Ok(Some(
+                    BASE64
+                        .decode(request.body.as_bytes())
+                        .map_err(|_| Error::BadResponse)?,
+                ))
+            }
+            (status, body) => Err(Self::refuse(status, &body)),
+        }
+    }
+
+    /// Close an invite mailbox after grant, denial, or cancellation.
+    pub fn close_invite(&self, vault: &Vault, mailbox: MailboxId) -> Result<()> {
+        let path = format!(
+            "/v1/vaults/{}/mailboxes/{}",
+            hex(vault.meta().vault_id.as_bytes()),
+            hex(mailbox.as_bytes())
+        );
+        match self.call(vault.device()?, "DELETE", &path, b"")? {
+            (204, _) => Ok(()),
+            (status, body) => Err(Self::refuse(status, &body)),
+        }
+    }
+
+    /// Conditionally remove a member and rotate in one relay-serialized ACL
+    /// commit. A conflict is pulled, re-checked and reissued once (§6.3).
+    pub fn revoke_member(&self, vault: &mut Vault, removed: DeviceId) -> Result<Revocation> {
+        for attempt in 0..2 {
+            self.pull_acl(vault)?;
+            let prepared = vault.prepare_revocation(removed)?;
+            let entries = prepared.entries();
+            let path = format!("/v1/vaults/{}/acl", hex(vault.meta().vault_id.as_bytes()));
+            let body = serde_json::to_vec(&PushAclRequest {
+                entries: entries.iter().map(|entry| acl_to_wire(entry)).collect(),
+            })?;
+            let (status, response) = self.call(vault.device()?, "POST", &path, &body)?;
+            if status != 200 {
+                return Err(Self::refuse(status, &response));
+            }
+            let response: PushAclResponse =
+                serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
+            let conflict = response.results.len() != entries.len()
+                || response.results.contains(&AclPushResult::Conflict);
+            if conflict {
+                if attempt == 0 {
+                    continue;
+                }
+                return Err(Error::Refused {
+                    code: "acl_conflict".into(),
+                    message: "someone else changed membership".into(),
+                });
+            }
+
+            let last_seq = entries[1].seq();
+            let outcome = vault.commit_revocation(prepared)?;
+            vault.mark_acl_pushed(last_seq)?;
+            self.remove_device(vault, removed.as_bytes())?;
+            self.push_keys(vault)?;
+            return Ok(outcome);
+        }
+        unreachable!("the retry loop always returns")
+    }
+
     /// Build a syncer over `transport`.
     pub fn new(transport: T) -> Self {
         Self { transport }
@@ -272,8 +380,16 @@ impl<T: Transport> Syncer<T> {
         if status != 200 {
             return Err(Self::refuse(status, &response));
         }
-        let _: PushAclResponse =
+        let result: PushAclResponse =
             serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
+        if result.results.len() != entries.len()
+            || result.results.contains(&AclPushResult::Conflict)
+        {
+            return Err(Error::Refused {
+                code: "acl_conflict".into(),
+                message: "someone else changed membership".into(),
+            });
+        }
 
         let max_seq = entries.iter().map(|e| e.seq()).max().unwrap_or(0);
         vault.mark_acl_pushed(max_seq)?;
@@ -306,6 +422,22 @@ impl<T: Transport> Syncer<T> {
                 break;
             }
 
+            // The relay includes our current head. Requiring it to match before
+            // applying the suffix detects a fork instead of silently joining it.
+            if after > 0 {
+                let first = parsed
+                    .entries
+                    .first()
+                    .and_then(|wire| acl_from_wire(wire, vault_id))
+                    .ok_or(Error::BadResponse)?;
+                if first.seq() != after || first.id() != vault.acl()?.head() {
+                    return Err(Error::Refused {
+                        code: "acl_fork".into(),
+                        message: "the relay served a different membership history".into(),
+                    });
+                }
+            }
+
             for wire in &parsed.entries {
                 let Some(entry) = acl_from_wire(wire, vault_id) else {
                     continue;
@@ -319,6 +451,11 @@ impl<T: Transport> Syncer<T> {
                     Ok(()) => applied += 1,
                     Err(_) => return Ok(applied),
                 }
+            }
+
+            if vault.acl()?.role(vault.device_id()?).is_none() {
+                vault.mark_access_removed()?;
+                break;
             }
 
             if !parsed.more {
@@ -342,6 +479,8 @@ impl<T: Transport> Syncer<T> {
                 .map(|(id, epoch, wrapped)| WireKey {
                     recipient_device_id: hex(id.as_bytes()),
                     epoch: *epoch,
+                    // The relay replaces this with the authenticated caller.
+                    pusher_device_id: String::new(),
                     body: BASE64.encode(wrapped),
                 })
                 .collect(),
