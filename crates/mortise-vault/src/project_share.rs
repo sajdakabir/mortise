@@ -196,6 +196,82 @@ impl Vault {
         Ok(project)
     }
 
+    /// Create the keyless local project used while an invite request awaits
+    /// approval. The invite's genesis owner is pinned before any relay data is
+    /// accepted; keys can only be installed after that ACL admits this device.
+    pub fn create_waiting_project_vault(
+        path: impl AsRef<Path>,
+        account: &Vault,
+        vault_id: VaultId,
+        owner: &mortise_crypto::identity::DevicePublic,
+    ) -> Result<Self> {
+        if !account.is_unlocked() {
+            return Err(Error::Locked);
+        }
+        let path = path.as_ref();
+        let conn = Connection::open(path)?;
+        schema::apply_pragmas(&conn)?;
+        if schema::is_initialized(&conn)? {
+            return Err(Error::Corrupt("a vault already exists at this path"));
+        }
+        schema::initialize(&conn)?;
+        let meta = account.meta();
+        let device = account.device()?;
+        let identity = account.identity()?;
+        let created = now_ms();
+        let identity_wrapped: Vec<u8> =
+            account
+                .conn()
+                .query_row("SELECT wrapped FROM identity WHERE id = 1", [], |row| {
+                    row.get(0)
+                })?;
+        let device_wrapped: Vec<u8> =
+            account
+                .conn()
+                .query_row("SELECT wrapped FROM device WHERE id = 1", [], |row| {
+                    row.get(0)
+                })?;
+        conn.execute(
+            "INSERT INTO account (id, salt, argon2_m_kib, argon2_t, argon2_p, schema_version, created_at_ms)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+            params![meta.salt.as_slice(), meta.params.m_cost_kib, meta.params.t_cost,
+                meta.params.p_cost, schema::SCHEMA_VERSION, created as i64],
+        )?;
+        conn.execute(
+            "INSERT INTO vault (vault_id, name, kind, epoch, created_at_ms) VALUES (?1, '', 1, 0, ?2)",
+            params![vault_id.as_bytes().as_slice(), created as i64],
+        )?;
+        conn.execute(
+            "INSERT INTO identity (id, public_key, wrapped) VALUES (1, ?1, ?2)",
+            params![identity.public().as_bytes().as_slice(), identity_wrapped],
+        )?;
+        conn.execute(
+            "INSERT INTO device (id, device_id, wrapped) VALUES (1, ?1, ?2)",
+            params![device.id().as_bytes().as_slice(), device_wrapped],
+        )?;
+        conn.execute(
+            "INSERT INTO known_device (device_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
+            params![
+                device.id().as_bytes().as_slice(),
+                device.public().signing_public().as_slice(),
+                device.public().kex_public_bytes().as_slice()
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO vault_genesis (vault_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
+            params![
+                vault_id.as_bytes().as_slice(),
+                owner.signing_public().as_slice(),
+                owner.kex_public_bytes().as_slice()
+            ],
+        )?;
+        drop(conn);
+        let token = account.unlock_token()?;
+        let mut project = Vault::open(path)?;
+        project.unlock_with_token(&token)?;
+        Ok(project)
+    }
+
     /// Read the shared-project cache. Available after idle lock, like search.
     pub fn shared_project_manifest(&self) -> Result<Option<SharedProjectManifest>> {
         let Some(sealed) = self
@@ -259,6 +335,32 @@ impl Vault {
     pub fn set_own_project_member_label(&mut self, cert: &DeviceCert, name: &str) -> Result<()> {
         if cert.device().id() != self.device()?.id() {
             return Err(Error::Invalid("the certificate is for another device"));
+        }
+        let name = name.trim();
+        if !valid_name(name, 64) {
+            return Err(Error::Invalid("a member needs a printable name"));
+        }
+        self.record_mutation(&Mutation::ProjectSetMemberLabel {
+            cert: cert.to_bytes(),
+            name: name.to_string(),
+        })?;
+        self.apply_pending()?;
+        Ok(())
+    }
+
+    /// Set a label for a member as an ACL manager during an explicit grant.
+    pub fn set_project_member_label(&mut self, cert: &DeviceCert, name: &str) -> Result<()> {
+        if !self
+            .acl()?
+            .role(self.device()?.id())
+            .is_some_and(|role| role.can_manage_acl())
+        {
+            return Err(Error::Invalid(
+                "only an owner or admin may label another member",
+            ));
+        }
+        if self.acl()?.role(cert.device().id()).is_none() {
+            return Err(Error::Invalid("the certificate is not an admitted member"));
         }
         let name = name.trim();
         if !valid_name(name, 64) {

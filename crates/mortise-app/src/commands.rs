@@ -1243,6 +1243,138 @@ pub fn inspect_project_invite(link: String) -> CmdResult<InvitePreview> {
     })
 }
 
+fn invited_project_path(
+    state: &AppState,
+    invite: &mortise_crypto::invite::Invite,
+) -> CmdResult<std::path::PathBuf> {
+    let dir = state
+        .vault_path()
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("projects");
+    for entry in std::fs::read_dir(dir)
+        .map_err(|_| CmdError::bad_request("The shared project vault was not found."))?
+    {
+        let path = entry
+            .map_err(|_| CmdError::bad_request("The shared project vault was not found."))?
+            .path();
+        if let Ok(vault) = Vault::open(&path)
+            && vault.meta().vault_id == invite.vault()
+        {
+            return Ok(path);
+        }
+    }
+    Err(CmdError::bad_request(
+        "The shared project vault was not found.",
+    ))
+}
+
+/// A verified request waiting for the inviter's explicit decision.
+#[derive(Debug, serde::Serialize)]
+pub struct PendingProjectJoin {
+    pub name: String,
+    pub fingerprint: String,
+}
+
+/// Fetch and authenticate the one request addressed by this invite.
+#[tauri::command]
+pub async fn pending_project_join(
+    app: tauri::AppHandle,
+    link: String,
+) -> CmdResult<Option<PendingProjectJoin>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = mortise_vault::vault::now_ms();
+        let invite = mortise_crypto::invite::Invite::from_link(&link, now)?;
+        let state = app.state::<AppState>();
+        let path = invited_project_path(&state, &invite)?;
+        state.with_vault(|account| {
+            let account = account.ok_or_else(|| state.no_vault_error())?;
+            let token = account.unlock_token()?;
+            let mut project = Vault::open(path)?;
+            project.unlock_with_token(&token)?;
+            let syncer =
+                mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(invite.relay_url()));
+            let Some(sealed) = syncer
+                .get_join_request(&project, invite.mailbox_id()?)
+                .map_err(sync_error)?
+            else {
+                return Ok(None);
+            };
+            let request = mortise_crypto::invite::JoinRequest::open(
+                project.device()?,
+                invite.vault(),
+                invite.secret(),
+                &sealed,
+            )?;
+            Ok(Some(PendingProjectJoin {
+                name: request.name().to_string(),
+                fingerprint: request.cert().identity().fingerprint().to_string(),
+            }))
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("Checking the invite was interrupted."))?
+}
+
+/// Grant the authenticated pending request and deliver the complete history.
+#[tauri::command]
+pub async fn grant_project_join(
+    app: tauri::AppHandle,
+    link: String,
+    role: String,
+) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = mortise_vault::vault::now_ms();
+        let invite = mortise_crypto::invite::Invite::from_link(&link, now)?;
+        let role = match role.as_str() {
+            "viewer" => mortise_crypto::acl::Role::Viewer,
+            "member" => mortise_crypto::acl::Role::Member,
+            "admin" => mortise_crypto::acl::Role::Admin,
+            _ => return Err(CmdError::bad_request("Choose viewer, member, or admin.")),
+        };
+        let state = app.state::<AppState>();
+        let path = invited_project_path(&state, &invite)?;
+        state.with_vault(|account| {
+            let account = account.ok_or_else(|| state.no_vault_error())?;
+            let token = account.unlock_token()?;
+            let mut project = Vault::open(path)?;
+            project.unlock_with_token(&token)?;
+            let syncer =
+                mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(invite.relay_url()));
+            let sealed = syncer
+                .get_join_request(&project, invite.mailbox_id()?)
+                .map_err(sync_error)?
+                .ok_or_else(|| CmdError::bad_request("No join request is waiting."))?;
+            let request = mortise_crypto::invite::JoinRequest::open(
+                project.device()?,
+                invite.vault(),
+                invite.secret(),
+                &sealed,
+            )?;
+            let cert = request.cert().clone();
+            let name = request.name().to_string();
+            syncer
+                .add_member(&mut project, cert.device().clone(), role)
+                .map_err(sync_error)?;
+            project.queue_all_keys_for(cert.device())?;
+            project.set_project_member_label(&cert, &name)?;
+            syncer
+                .authorize_device(
+                    &project,
+                    cert.device().id().as_bytes(),
+                    cert.device().signing_public(),
+                )
+                .map_err(sync_error)?;
+            syncer.sync(&mut project).map_err(sync_error)?;
+            syncer
+                .close_invite(&project, invite.mailbox_id()?)
+                .map_err(sync_error)
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("Granting access was interrupted."))?
+}
+
 /// Send this device's authenticated request through the invite mailbox.
 #[tauri::command]
 pub async fn request_project_access(
@@ -1259,6 +1391,29 @@ pub async fn request_project_access(
         let state = app.state::<AppState>();
         state.with_vault(|vault| {
             let account = vault.ok_or_else(|| state.no_vault_error())?;
+            let project_dir = state
+                .vault_path()
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("projects");
+            std::fs::create_dir_all(&project_dir)
+                .map_err(|_| CmdError::bad_request("Could not create the project vault."))?;
+            let vault_name: String = invite
+                .vault()
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            let project_path = project_dir.join(format!("join-{vault_name}.vault"));
+            if !project_path.exists() {
+                let mut waiting = Vault::create_waiting_project_vault(
+                    &project_path,
+                    account,
+                    invite.vault(),
+                    invite.owner(),
+                )?;
+                waiting.set_relay_url(Some(invite.relay_url()))?;
+            }
             let cert = account.identity()?.certify(account.device()?.public(), now);
             let request = mortise_crypto::invite::JoinRequest::seal(
                 &invite,
@@ -1275,6 +1430,48 @@ pub async fn request_project_access(
     })
     .await
     .map_err(|_| CmdError::bad_request("The join request was interrupted."))?
+}
+
+/// Finish a requested join after the owner grants it. ACL is pulled before
+/// keys and changes; success therefore means this device's grant verified from
+/// the owner pinned in the invite-created waiting vault.
+#[tauri::command]
+pub async fn complete_project_join(app: tauri::AppHandle, link: String) -> CmdResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let invite =
+            mortise_crypto::invite::Invite::from_link(&link, mortise_vault::vault::now_ms())?;
+        let state = app.state::<AppState>();
+        let project_dir = state
+            .vault_path()
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("projects");
+        let vault_name: String = invite
+            .vault()
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let path = project_dir.join(format!("join-{vault_name}.vault"));
+        state.with_vault(|account| {
+            let account = account.ok_or_else(|| state.no_vault_error())?;
+            let token = account.unlock_token()?;
+            let mut project = Vault::open(path)
+                .map_err(|_| CmdError::bad_request("No join request exists on this device."))?;
+            project.unlock_with_token(&token)?;
+            let syncer =
+                mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(invite.relay_url()));
+            match syncer.sync(&mut project) {
+                Ok(_) => Ok(project.acl()?.role(project.device_id()?).is_some()),
+                Err(mortise_sync::Error::Refused { ref code, .. }) if code == "unauthorized" => {
+                    Ok(false)
+                }
+                Err(error) => Err(sync_error(error)),
+            }
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("Checking access was interrupted."))?
 }
 
 /// What one sync round did.

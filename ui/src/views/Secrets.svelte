@@ -66,11 +66,15 @@
   let inviterName = $state("");
   let inviteLink = $state("");
   let inviteCopied = $state(false);
+  let pendingJoin = $state<{ name: string; fingerprint: string } | null>(null);
+  let grantRole = $state<"viewer" | "member" | "admin">("member");
+  let grantComplete = $state(false);
   let joining = $state(false);
   let joinLink = $state("");
   let joinerName = $state("");
   let joinPreview = $state<{ project_name: string; inviter_name: string; fingerprint: string } | null>(null);
   let joinRequested = $state(false);
+  let joinComplete = $state(false);
 
   /// Inline add-an-environment field, shown from the segmented control.
   let addingEnv = $state(false);
@@ -177,6 +181,27 @@
     setTimeout(() => (inviteCopied = false), 1800);
   }
 
+  async function checkJoinRequest() {
+    busy = true;
+    try {
+      error = "";
+      pendingJoin = await ipc.pendingProjectJoin(inviteLink);
+    } catch (e) { error = errorMessage(e); }
+    finally { busy = false; }
+  }
+
+  async function grantJoin() {
+    if (!pendingJoin) return;
+    busy = true;
+    try {
+      error = "";
+      await ipc.grantProjectJoin(inviteLink, grantRole);
+      grantComplete = true;
+      pendingJoin = null;
+    } catch (e) { error = errorMessage(e); }
+    finally { busy = false; }
+  }
+
   async function inspectInvite() {
     try {
       error = "";
@@ -190,6 +215,15 @@
     try {
       await ipc.requestProjectAccess(joinLink.trim(), joinerName.trim());
       joinRequested = true;
+    } catch (e) { error = errorMessage(e); }
+    finally { busy = false; }
+  }
+
+  async function checkJoinAccess() {
+    busy = true;
+    try {
+      error = "";
+      joinComplete = await ipc.completeProjectJoin(joinLink.trim());
     } catch (e) { error = errorMessage(e); }
     finally { busy = false; }
   }
@@ -336,7 +370,7 @@
     </div>
 
     <button class="ghost tiny" disabled={!unlocked}
-      onclick={() => { joining = true; joinPreview = null; joinRequested = false; error = ""; }}>
+      onclick={() => { joining = true; joinPreview = null; joinRequested = false; joinComplete = false; error = ""; }}>
       Join with invite</button>
     <div class="railfoot">{@render foot()}</div>
   </aside>
@@ -381,7 +415,7 @@
         </div>
         <div class="row">
           <button class="ghost tiny" disabled={!unlocked}
-            onclick={() => { sharing = true; inviteLink = ""; inviteCopied = false; error = ""; }}>
+            onclick={() => { sharing = true; inviteLink = ""; inviteCopied = false; pendingJoin = null; grantComplete = false; error = ""; }}>
             Share</button>
           <button class="ghost tiny" disabled={!unlocked}
             onclick={() => { adding = true; newKey = ""; newValue = ""; }}>+ Secret</button>
@@ -455,7 +489,12 @@
     <div class="spread sheethead"><strong>Join a project</strong><button class="ghost tiny" onclick={() => (joining = false)}>Close</button></div>
     {#if error}<div class="error">{error}</div>{/if}
     {#if joinRequested}
-      <p>Your request was sent. Access is not granted until the owner checks your fingerprint and approves it.</p>
+      {#if joinComplete}
+        <p>Access granted and the project history is synced to this device.</p>
+      {:else}
+        <p>Your request was sent. Access is not granted until the owner checks your fingerprint and approves it.</p>
+        <div class="row end"><button disabled={busy} onclick={checkJoinAccess}>{busy ? "Checking…" : "Check access"}</button></div>
+      {/if}
     {:else if joinPreview}
       <p>Join <strong>{joinPreview.project_name}</strong>, invited by {joinPreview.inviter_name}?</p>
       <p class="hint">Compare this identity fingerprint with the inviter before continuing:</p>
@@ -487,6 +526,22 @@
       <div class="row end">
         <button class="primary" onclick={copyInvite}>{inviteCopied ? "Copied" : "Copy invite link"}</button>
       </div>
+      {#if grantComplete}
+        <p>Access granted. The teammate can now sync this project.</p>
+      {:else if pendingJoin}
+        <hr />
+        <p><strong>{pendingJoin.name}</strong> is asking to join.</p>
+        <p class="hint">Compare this identity fingerprint with them before granting access:</p>
+        <code>{pendingJoin.fingerprint}</code>
+        <div class="field"><label for="grant-role">Role</label>
+          <select id="grant-role" bind:value={grantRole}>
+            <option value="viewer">Viewer</option><option value="member">Member</option><option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="row end"><button class="primary" disabled={busy} onclick={grantJoin}>{busy ? "Granting…" : "Grant access"}</button></div>
+      {:else}
+        <div class="row end"><button disabled={busy} onclick={checkJoinRequest}>{busy ? "Checking…" : "Check for request"}</button></div>
+      {/if}
     {:else}
       <p class="hint">This moves the project into its own encrypted vault. Originals are removed only after the new vault is registered and synced.</p>
       <div class="field">

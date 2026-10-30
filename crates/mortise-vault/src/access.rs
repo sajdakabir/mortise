@@ -558,6 +558,26 @@ impl Vault {
         Ok(())
     }
 
+    /// Seal every retained epoch to a newly admitted device and queue the
+    /// results for relay delivery. History remains readable after joining.
+    pub fn queue_all_keys_for(
+        &self,
+        recipient: &mortise_crypto::identity::DevicePublic,
+    ) -> Result<u32> {
+        let mut queued = 0;
+        for epoch in self.known_epochs()? {
+            let epoch = Epoch(epoch);
+            let wrapped = self.vault_key_at(epoch)?.wrap_for(
+                self.device()?,
+                recipient,
+                self.meta().vault_id,
+            )?;
+            self.queue_rewrapped_key(recipient.id(), epoch, &wrapped.to_bytes())?;
+            queued += 1;
+        }
+        Ok(queued)
+    }
+
     /// Re-wrapped keys not yet pushed: `(recipient, epoch, wrapped bytes)`.
     pub fn unpushed_keys(&self) -> Result<Vec<(DeviceId, u32, Vec<u8>)>> {
         let conn = self.conn();
