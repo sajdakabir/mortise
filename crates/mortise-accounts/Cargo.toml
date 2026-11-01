@@ -1,0 +1,39 @@
+[package]
+name = "mortise-accounts"
+version = "0.1.0"
+description = "Accounts, trusted devices and team invitations; no vault content"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["server"]
+server = ["dep:axum", "dep:tokio", "dep:rusqlite", "oidc"]
+client = ["oidc"]
+oidc = ["dep:openidconnect", "dep:ureq"]
+
+[[bin]]
+name = "mortise-accounts"
+required-features = ["server"]
+
+[dependencies]
+mortise-crypto = { path = "../mortise-crypto" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+blake3 = "1"
+base64 = "0.22"
+zeroize = "1"
+url = "2"
+axum = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"], optional = true }
+rusqlite = { version = "0.40", features = ["bundled"], optional = true }
+openidconnect = { version = "=4.0.1", default-features = false, optional = true }
+ureq = { version = "3", features = ["json"], optional = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"
+signature = "3"
