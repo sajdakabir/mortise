@@ -323,6 +323,37 @@ p { margin: 0; }
 
 .foot { padding-block: 54px 40px; }
 
+/* A quiet outline, drawn once when it enters view. SVG paths keep the
+   lettering identical without downloading a font or animation library. */
+.footer-wordmark {
+  margin-top: clamp(52px, 8vw, 112px);
+  padding-inline: var(--gutter);
+  color: var(--text-dim);
+  overflow: hidden;
+}
+.footer-wordmark svg { display: block; width: 100%; height: auto; }
+.footer-wordmark path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.footer-wordmark.is-ready path { stroke-dashoffset: 1; }
+.footer-wordmark.is-drawing path {
+  animation: wordmark-draw 2.4s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: calc(var(--letter) * 85ms);
+}
+@keyframes wordmark-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .footer-wordmark.is-ready path,
+  .footer-wordmark.is-drawing path { animation: none; stroke-dashoffset: 0; }
+}
+
 .foot-top {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
