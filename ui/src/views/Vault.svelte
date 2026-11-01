@@ -8,10 +8,13 @@
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
   import Secrets from "./Secrets.svelte";
 
-  let { status = $bindable(), dataRevision = 0, onStatus, onUnlock }: {
+  let { status = $bindable(), dataRevision = 0, settingsRequest = 0, onStatus, onUnlock, onShare, onJoin }: {
     status: VaultStatus;
     /// Bumped by the shell when an item was written from outside this view.
     dataRevision?: number;
+    settingsRequest?: number;
+    onShare: (project: { id: string; name: string }) => void;
+    onJoin: () => void;
     onStatus: (s: VaultStatus) => void;
     /// Ask the shell to show the unlock screen. Locking drops the keys that
     /// decrypt secrets but keeps search working, so this view stays up — which
@@ -64,6 +67,7 @@
   let rows = $state<ItemRow[]>([]);
   let selectedId = $state<string | null>(null);
   let editing = $state<"none" | "new" | "existing" | "settings">("none");
+  $effect(() => { if (settingsRequest) editing = "settings"; });
   let error = $state("");
   /// Bumped when Settings closes, because approving a browser pairing happens
   /// in there and the getting-started panel has no other way to learn about it.
@@ -249,7 +253,7 @@
      second column with nothing in it. The switcher and the footer are
      snippets, so one definition serves both layouts. -->
 {#if mode === "secrets" && editing !== "settings" && status.exists}
-  <Secrets unlocked={status.unlocked} {onUnlock} onSettings={() => (editing = "settings")} switcher={switcherUi} foot={footUi} />
+  <Secrets unlocked={status.unlocked} {onUnlock} {onShare} {onJoin} {dataRevision} switcher={switcherUi} foot={footUi} />
 {:else}
 <div class="shell">
   <aside>

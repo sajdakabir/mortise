@@ -4,10 +4,25 @@
   import Vault from "./views/Vault.svelte";
   import PairingPrompt from "./lib/PairingPrompt.svelte";
   import CaptureToast from "./lib/CaptureToast.svelte";
-  import { ipc, isMock, onVaultLocked } from "./lib/ipc";
+  import ProjectSharing from "./lib/ProjectSharing.svelte";
+  import { ipc, isMock, onVaultLocked, onProjectInvite } from "./lib/ipc";
   import type { VaultStatus } from "./lib/types";
 
   let status = $state<VaultStatus | null>(null);
+  let shareTarget = $state<{ id: string; name: string } | null>(null);
+  let joinLink = $state<string | null>(null);
+  let settingsRequest = $state(0);
+
+  $effect(() => {
+    const stop = onProjectInvite((link) => {
+      // Only display confirmation. Unlock and requesting access are explicit.
+      if (joinLink === null) { shareTarget = null; joinLink = link; }
+    }).catch(() => {
+      console.error("Mortise could not listen for invitation links.");
+      return () => {};
+    });
+    return () => { void stop.then((f) => f()); };
+  });
 
   /// Set when the user asks to unlock from inside the vault view.
   ///
@@ -63,6 +78,9 @@
     <Vault
       {status}
       {dataRevision}
+      {settingsRequest}
+      onShare={(project) => { joinLink = null; shareTarget = { id: project.id, name: project.name }; }}
+      onJoin={() => { shareTarget = null; joinLink = ""; }}
       onStatus={(s) => (status = s)}
       onUnlock={() => (unlocking = true)} />
   {/if}
@@ -73,6 +91,10 @@
      answer has to be reachable from wherever the user happens to be. -->
 <PairingPrompt onPaired={refreshStatus} />
 <CaptureToast onChanged={() => { dataRevision += 1; refreshStatus(); }} />
+<ProjectSharing bind:target={shareTarget} bind:join={joinLink}
+  unlocked={status?.unlocked ?? false} hidden={!status?.searchable || unlocking}
+  onUnlock={() => (unlocking = true)} onSettings={() => { settingsRequest += 1; }}
+  onChanged={() => { dataRevision += 1; refreshStatus(); }} />
 
 <style>
   .root { height: 100%; }
