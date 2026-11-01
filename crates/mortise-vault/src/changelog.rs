@@ -53,6 +53,25 @@ pub enum Mutation {
         /// When, for display only — ordering uses the HLC.
         at_ms: u64,
     },
+    /// Replace a shared project's name and description (§6.6).
+    ProjectSetInfo {
+        /// Display name.
+        name: String,
+        /// Optional prose description.
+        description: String,
+    },
+    /// Add one environment to the shared project (§6.6).
+    ProjectAddEnvironment {
+        /// Display spelling; comparison is ASCII-case-insensitive.
+        name: String,
+    },
+    /// Record the label and certificate shown for one member (§6.6).
+    ProjectSetMemberLabel {
+        /// Certificate bytes, verified during materialization.
+        cert: Vec<u8>,
+        /// Self-chosen display name.
+        name: String,
+    },
 }
 
 /// An item as it travels in the log. Mirrors the `item` table's row.
@@ -100,6 +119,15 @@ fn seal_aad(vault: VaultId, epoch: Epoch) -> Vec<u8> {
 impl Vault {
     /// Append a signed change for `mutation` and return its id.
     pub(crate) fn record_mutation(&mut self, mutation: &Mutation) -> Result<ChangeId> {
+        if self.access_removed()? {
+            return Err(Error::Invalid("access to this project was removed"));
+        }
+        // Enforce the same role on local edits as on incoming changes. A
+        // viewer must not see a successful save that every peer will reject.
+        // Check before advancing the clock or writing to the change log.
+        if !self.may_write(self.device()?.id())? {
+            return Err(Error::Invalid("this project is read-only for your role"));
+        }
         let vault_id = self.meta().vault_id;
         let key = self.current_vault_key()?;
         let epoch = key.epoch();
@@ -688,6 +716,11 @@ impl Vault {
                     params![item_id.as_slice()],
                 )?;
                 tx.commit()?;
+            }
+            Mutation::ProjectSetInfo { .. }
+            | Mutation::ProjectAddEnvironment { .. }
+            | Mutation::ProjectSetMemberLabel { .. } => {
+                self.apply_project_manifest_mutation(mutation, hlc, author)?;
             }
         }
         Ok(())

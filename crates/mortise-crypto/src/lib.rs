@@ -28,6 +28,7 @@ pub mod error;
 pub mod generate;
 pub mod guard;
 pub mod identity;
+pub mod invite;
 pub mod item;
 pub mod kdf;
 pub mod rand;

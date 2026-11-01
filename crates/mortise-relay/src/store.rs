@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::protocol::{WireAclEntry, WireChange, WireKey};
+use crate::protocol::{AclPushResult, WireAclEntry, WireChange, WireKey};
 
 const SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
@@ -60,9 +60,17 @@ CREATE TABLE IF NOT EXISTS wrapped_key (
     vault_id            TEXT    NOT NULL REFERENCES vault (vault_id) ON DELETE CASCADE,
     recipient_device_id TEXT    NOT NULL,
     epoch               INTEGER NOT NULL,
+    pusher_device_id    TEXT    NOT NULL,
     body                TEXT    NOT NULL,
     stored_at_ms        INTEGER NOT NULL,
-    PRIMARY KEY (vault_id, recipient_device_id, epoch)
+    PRIMARY KEY (vault_id, recipient_device_id, epoch, pusher_device_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS invite_mailbox (
+    mailbox_id   TEXT PRIMARY KEY,
+    vault_id     TEXT NOT NULL REFERENCES vault (vault_id) ON DELETE CASCADE,
+    expires_at_ms INTEGER NOT NULL,
+    request_body TEXT
 ) STRICT;
 "#;
 
@@ -76,6 +84,67 @@ pub struct Store {
     conn: Arc<Mutex<Connection>>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn acl(seq: u64, id: &str, prev: &str) -> WireAclEntry {
+        WireAclEntry {
+            seq,
+            id: id.repeat(64 / id.len()),
+            prev: prev.repeat(64 / prev.len()),
+            op_kind: 1,
+            op_body: String::new(),
+            author: "11".repeat(16),
+            issued_at_ms: 1,
+            signature: "22".repeat(64),
+        }
+    }
+
+    #[test]
+    fn acl_push_is_conditional_and_atomic() {
+        let store = Store::open(":memory:").unwrap();
+        store.claim("vault", "device", "key", 1).unwrap();
+        let first = acl(1, "aa", "01");
+        assert_eq!(
+            store
+                .push_acl("vault", std::slice::from_ref(&first), 2)
+                .unwrap(),
+            [AclPushResult::Accepted]
+        );
+
+        let conflicting = acl(1, "bb", "01");
+        let successor = acl(2, "cc", "bb");
+        assert_eq!(
+            store
+                .push_acl("vault", &[conflicting, successor], 3)
+                .unwrap(),
+            [AclPushResult::Conflict, AclPushResult::Conflict]
+        );
+        assert_eq!(store.pull_acl("vault", 0, 10).unwrap().0, [first]);
+    }
+
+    #[test]
+    fn wrapped_key_candidates_from_different_pushers_do_not_overwrite() {
+        let store = Store::open(":memory:").unwrap();
+        store.claim("vault", "device", "key", 1).unwrap();
+        let key = WireKey {
+            recipient_device_id: "recipient".into(),
+            epoch: 4,
+            pusher_device_id: String::new(),
+            body: "opaque".into(),
+        };
+        store
+            .push_keys("vault", "pusher-a", std::slice::from_ref(&key), 2)
+            .unwrap();
+        store.push_keys("vault", "pusher-b", &[key], 3).unwrap();
+        let candidates = store.pull_keys("vault", "recipient").unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].pusher_device_id, "pusher-a");
+        assert_eq!(candidates[1].pusher_device_id, "pusher-b");
+    }
+}
+
 /// What a push did.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StoreReport {
@@ -86,6 +155,62 @@ pub struct StoreReport {
 }
 
 impl Store {
+    /// Register a fresh invite mailbox for a vault.
+    pub fn register_mailbox(
+        &self,
+        vault_id: &str,
+        mailbox_id: &str,
+        expires_at_ms: i64,
+    ) -> rusqlite::Result<bool> {
+        self.with(|conn| {
+            Ok(conn.execute(
+                "INSERT OR IGNORE INTO invite_mailbox (mailbox_id, vault_id, expires_at_ms) VALUES (?1, ?2, ?3)",
+                params![mailbox_id, vault_id, expires_at_ms],
+            )? > 0)
+        })
+    }
+
+    /// Store the first request only. Expired and already-filled boxes refuse.
+    pub fn post_mailbox(
+        &self,
+        mailbox_id: &str,
+        body: &str,
+        now_ms: i64,
+    ) -> rusqlite::Result<bool> {
+        self.with(|conn| {
+            Ok(conn.execute(
+                "UPDATE invite_mailbox SET request_body = ?1
+                 WHERE mailbox_id = ?2 AND request_body IS NULL AND expires_at_ms > ?3",
+                params![body, mailbox_id, now_ms],
+            )? > 0)
+        })
+    }
+
+    /// Read a request only through the mailbox's owning vault.
+    pub fn get_mailbox(
+        &self,
+        vault_id: &str,
+        mailbox_id: &str,
+        now_ms: i64,
+    ) -> rusqlite::Result<Option<String>> {
+        self.with(|conn| conn.query_row(
+            "SELECT request_body FROM invite_mailbox WHERE vault_id = ?1 AND mailbox_id = ?2 AND expires_at_ms > ?3",
+            params![vault_id, mailbox_id, now_ms],
+            |row| row.get(0),
+        ).optional().map(Option::flatten))
+    }
+
+    /// Close a mailbox after grant, denial, or cancellation.
+    pub fn delete_mailbox(&self, vault_id: &str, mailbox_id: &str) -> rusqlite::Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "DELETE FROM invite_mailbox WHERE vault_id = ?1 AND mailbox_id = ?2",
+                params![vault_id, mailbox_id],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Open or create the database at `path`, or in memory for `:memory:`.
     pub fn open(path: &str) -> rusqlite::Result<Self> {
         let conn = if path == ":memory:" {
@@ -94,6 +219,33 @@ impl Store {
             Connection::open(path)?
         };
         conn.execute_batch(SCHEMA)?;
+        let has_pusher = {
+            let mut columns = conn.prepare("PRAGMA table_info(wrapped_key)")?;
+            let names = columns.query_map([], |row| row.get::<_, String>(1))?;
+            names
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .iter()
+                .any(|name| name == "pusher_device_id")
+        };
+        if !has_pusher {
+            conn.execute_batch(
+                "ALTER TABLE wrapped_key RENAME TO wrapped_key_legacy;
+                 CREATE TABLE wrapped_key (
+                    vault_id TEXT NOT NULL REFERENCES vault (vault_id) ON DELETE CASCADE,
+                    recipient_device_id TEXT NOT NULL,
+                    epoch INTEGER NOT NULL,
+                    pusher_device_id TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    stored_at_ms INTEGER NOT NULL,
+                    PRIMARY KEY (vault_id, recipient_device_id, epoch, pusher_device_id)
+                 ) STRICT;
+                 INSERT INTO wrapped_key
+                    (vault_id, recipient_device_id, epoch, pusher_device_id, body, stored_at_ms)
+                 SELECT vault_id, recipient_device_id, epoch, '', body, stored_at_ms
+                 FROM wrapped_key_legacy;
+                 DROP TABLE wrapped_key_legacy;",
+            )?;
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -280,21 +432,60 @@ impl Store {
         vault_id: &str,
         entries: &[WireAclEntry],
         now_ms: i64,
-    ) -> rusqlite::Result<u32> {
+    ) -> rusqlite::Result<Vec<AclPushResult>> {
         self.with(|conn| {
             let tx = conn.unchecked_transaction()?;
-            let mut accepted = 0;
+            let mut results = Vec::with_capacity(entries.len());
             for entry in entries {
+                let existing: Option<String> = tx
+                    .query_row(
+                        "SELECT body FROM acl_entry WHERE vault_id = ?1 AND seq = ?2",
+                        params![vault_id, entry.seq as i64],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(body) = existing {
+                    let same = serde_json::from_str::<WireAclEntry>(&body)
+                        .is_ok_and(|held| held.id == entry.id);
+                    results.push(if same {
+                        AclPushResult::Duplicate
+                    } else {
+                        AclPushResult::Conflict
+                    });
+                    if !same {
+                        return Ok(vec![AclPushResult::Conflict; entries.len()]);
+                    }
+                    continue;
+                }
+
+                let head: Option<String> = tx
+                    .query_row(
+                        "SELECT body FROM acl_entry WHERE vault_id = ?1 ORDER BY seq DESC LIMIT 1",
+                        params![vault_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let held = head
+                    .as_deref()
+                    .and_then(|body| serde_json::from_str::<WireAclEntry>(body).ok());
+                let expected_seq = held.as_ref().map_or(1, |entry| entry.seq + 1);
+                let wrong_prev = held.is_some_and(|held| entry.prev != held.id);
+                // Entry 1 chains from the client's genesis anchor, which the
+                // relay deliberately does not hold. From entry 2 onward it can
+                // and must enforce the exact predecessor id.
+                if entry.seq != expected_seq || wrong_prev {
+                    return Ok(vec![AclPushResult::Conflict; entries.len()]);
+                }
                 let body = serde_json::to_string(entry).unwrap_or_default();
-                let inserted = tx.execute(
-                    "INSERT OR IGNORE INTO acl_entry (vault_id, seq, body, stored_at_ms)
+                tx.execute(
+                    "INSERT INTO acl_entry (vault_id, seq, body, stored_at_ms)
                      VALUES (?1, ?2, ?3, ?4)",
                     params![vault_id, entry.seq as i64, body, now_ms],
                 )?;
-                accepted += inserted as u32;
+                results.push(AclPushResult::Accepted);
             }
             tx.commit()?;
-            Ok(accepted)
+            Ok(results)
         })
     }
 
@@ -308,7 +499,7 @@ impl Store {
         self.with(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT body FROM acl_entry
-                 WHERE vault_id = ?1 AND seq > ?2
+                 WHERE vault_id = ?1 AND seq >= CASE WHEN ?2 = 0 THEN 1 ELSE ?2 END
                  ORDER BY seq LIMIT ?3",
             )?;
             let rows = stmt
@@ -335,6 +526,7 @@ impl Store {
     pub fn push_keys(
         &self,
         vault_id: &str,
+        pusher_device_id: &str,
         keys: &[WireKey],
         now_ms: i64,
     ) -> rusqlite::Result<u32> {
@@ -344,14 +536,15 @@ impl Store {
             for key in keys {
                 tx.execute(
                     "INSERT INTO wrapped_key
-                       (vault_id, recipient_device_id, epoch, body, stored_at_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5)
-                     ON CONFLICT (vault_id, recipient_device_id, epoch)
-                       DO UPDATE SET body = ?4, stored_at_ms = ?5",
+                       (vault_id, recipient_device_id, epoch, pusher_device_id, body, stored_at_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT (vault_id, recipient_device_id, epoch, pusher_device_id)
+                       DO UPDATE SET body = ?5, stored_at_ms = ?6",
                     params![
                         vault_id,
                         key.recipient_device_id,
                         key.epoch,
+                        pusher_device_id,
                         key.body,
                         now_ms
                     ],
@@ -371,7 +564,7 @@ impl Store {
     ) -> rusqlite::Result<Vec<WireKey>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT epoch, body FROM wrapped_key
+                "SELECT epoch, pusher_device_id, body FROM wrapped_key
                  WHERE vault_id = ?1 AND recipient_device_id = ?2
                  ORDER BY epoch",
             )?;
@@ -379,7 +572,8 @@ impl Store {
                 Ok(WireKey {
                     recipient_device_id: recipient_device_id.to_string(),
                     epoch: r.get::<_, u32>(0)?,
-                    body: r.get::<_, String>(1)?,
+                    pusher_device_id: r.get::<_, String>(1)?,
+                    body: r.get::<_, String>(2)?,
                 })
             })?;
             rows.collect()

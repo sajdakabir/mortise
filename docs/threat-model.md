@@ -70,16 +70,33 @@ change frequency. Minimize; do not claim to eliminate.
 **Defence:** TLS, plus the same signature/hash-chain verification as A1 — so even
 a TLS break degrades to A1 rather than to compromise.
 
-### A3 — Malicious key directory (**the hard one**)
-**Capability:** we run the directory. If it serves a wrong X25519 public key for
-a recipient, the sender seals to an attacker and E2EE buys nothing.
+### A3 — Malicious key directory, or a leaked invite (**the hard one**)
+**Capability:** we run the relay that brokers joining. If it could put a wrong
+X25519 public key in front of either side, that side would seal to an attacker
+and E2EE would buy nothing. Separately, an invite link is a bearer secret and can
+leak: pasted into the wrong chat, forwarded, or read off a screen.
 **This is inherent to server-brokered key discovery.** Anytype has it too.
-**Defence, both required:**
-1. Invite links embed the recipient's public key directly (TOFU) so the common
-   sharing path never consults the directory.
-2. Signal-style fingerprints surfaced in the UI for out-of-band verification.
-**Residual:** a user who ignores fingerprints and relies on directory lookup is
-exposed to us. Accept and document.
+**Defence (crypto-spec §6.4, §6.5):**
+1. There is no directory. The inviter's device certificate and the genesis
+   owner's keys travel **inside the invite link**, so the joiner never asks us
+   for a key. The joiner's certificate comes back through a relay mailbox sealed
+   in HPKE AuthPSK mode under a key derived from the link's secret: the relay,
+   which sees only a mailbox id derived from that secret, cannot fabricate,
+   alter or replay a join request.
+2. **Nothing is granted automatically.** A join request only puts a name and a
+   fingerprint in front of the owner. Whoever redeems a leaked or forwarded link
+   still needs the owner to click Grant, and the owner sees the requester's
+   identity fingerprint — first, before the self-chosen name — when deciding.
+   The mailbox takes one request and expires within seven days, so a link that
+   leaks later is dead, and a link raced by a stranger shows the owner a
+   fingerprint they do not recognise rather than their teammate's.
+3. Signal-style fingerprints (twelve groups of five digits) are shown on both
+   sides: the joiner sees the owner's before sending anything, the owner sees the
+   joiner's before granting.
+**Residual:** an owner who grants without comparing fingerprints, to a request
+from whoever got the link first, has let that person in. A link altered in
+transit can point the joiner at someone else's keys; only the fingerprint
+catches it. Both are the same trade as Signal's, accepted and documented.
 
 ### A4 — Offline attacker holding the encrypted vault
 **Capability:** stolen laptop, leaked backup, or exfiltrated relay blobs; unlimited
@@ -94,6 +111,10 @@ encrypted, so the file yields nothing readable without the keys.
 2. Because the store is plain SQLite rather than SQLCipher (spec §4.2), the file
    reveals how many items exist, the table shape, and individual blob sizes.
    Minor, but real, and not something to claim otherwise.
+   Environment secrets in a shared project have deterministic item ids (so two
+   members writing the same `KEY` converge), but the id is keyed under the
+   vault's key (crypto-spec §6.7): the file does not confirm a guessed variable
+   name to someone without that key.
 
 ### A5 — Malicious web page
 **Capability:** full control of page content, scripts, and DOM; may impersonate a
@@ -134,6 +155,22 @@ our unix socket.
 **Defence:** clipboard auto-clear with a short timer; socket requires a paired
 association key so an arbitrary local process cannot impersonate the extension;
 keychain items scoped with access control.
+
+### Residual risks of team sharing
+
+Recorded here rather than under one adversary because they are properties of the
+design, not attacks on it.
+
+- **Display names can impersonate.** A name is chosen by its owner, recorded by
+  whoever granted them, and synced to every member. Anyone can call themselves
+  "Alice". The identity fingerprint is the authority, and the UI shows it beside
+  every name (crypto-spec §6.5).
+- **Membership is per device.** Access is granted to a device key, not to a
+  person. Someone with two Macs is two members, each granted separately, and
+  revoking one leaves the other. The members list shows the fingerprint, which
+  is per person, so two devices of one person are recognisable as such.
+- **A viewer can read everything.** Viewer means read-only, not "sees less".
+  The role picker says so.
 
 ## 4. Explicit non-goals
 

@@ -15,6 +15,9 @@
 //! | `GET    /v1/vaults/{id}/acl` | pull ACL entries |
 //! | `POST   /v1/vaults/{id}/keys` | push re-wrapped keys for other devices |
 //! | `GET    /v1/vaults/{id}/keys` | pull re-wrapped keys for this device |
+//! | `POST   /v1/vaults/{id}/mailboxes` | register an invite mailbox |
+//! | `POST   /v1/mailboxes/{id}` | post the one opaque join request |
+//! | `GET/DELETE /v1/vaults/{id}/mailboxes/{id}` | read or close a mailbox |
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
@@ -27,8 +30,8 @@ use serde::Deserialize;
 use crate::auth::{self, SignedRequest};
 use crate::protocol::{
     AddDevice, ClaimVault, ErrorBody, HEADER_DEVICE, HEADER_SIGNATURE, HEADER_TIMESTAMP,
-    PullAclResponse, PullKeysResponse, PullResponse, PushAclRequest, PushAclResponse,
-    PushKeysRequest, PushKeysResponse, PushRequest, PushResponse,
+    MailboxRequest, PullAclResponse, PullKeysResponse, PullResponse, PushAclRequest,
+    PushAclResponse, PushKeysRequest, PushKeysResponse, PushRequest, PushResponse, RegisterMailbox,
 };
 use crate::store::Store;
 
@@ -57,8 +60,120 @@ pub fn router(store: Store) -> Router {
         .route("/v1/vaults/{vault_id}/changes", post(push).get(pull))
         .route("/v1/vaults/{vault_id}/acl", post(push_acl).get(pull_acl))
         .route("/v1/vaults/{vault_id}/keys", post(push_keys).get(pull_keys))
+        .route("/v1/vaults/{vault_id}/mailboxes", post(register_mailbox))
+        .route("/v1/mailboxes/{mailbox_id}", post(post_mailbox))
+        .route(
+            "/v1/vaults/{vault_id}/mailboxes/{mailbox_id}",
+            get(get_mailbox).delete(delete_mailbox),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY))
         .with_state(store)
+}
+
+fn valid_mailbox_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+async fn register_mailbox(
+    State(store): State<Store>,
+    Path(vault_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/mailboxes");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "POST", &path, &body) {
+        return *response;
+    }
+    let Ok(request) = serde_json::from_slice::<RegisterMailbox>(&body) else {
+        return fail(StatusCode::BAD_REQUEST, "bad_request", "Malformed body.");
+    };
+    let now = now_ms();
+    let expires = request.expires_at_ms.min(i64::MAX as u64) as i64;
+    if !valid_mailbox_id(&request.mailbox_id)
+        || expires <= now
+        || expires - now > 7 * 24 * 60 * 60 * 1000
+    {
+        return fail(
+            StatusCode::BAD_REQUEST,
+            "invalid_mailbox",
+            "Invalid mailbox or expiry.",
+        );
+    }
+    match store.register_mailbox(&vault_id, &request.mailbox_id, expires) {
+        Ok(true) => StatusCode::CREATED.into_response(),
+        Ok(false) => fail(
+            StatusCode::CONFLICT,
+            "mailbox_exists",
+            "Mailbox already exists.",
+        ),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn post_mailbox(
+    State(store): State<Store>,
+    Path(mailbox_id): Path<String>,
+    Json(request): Json<MailboxRequest>,
+) -> Response {
+    if !valid_mailbox_id(&mailbox_id) {
+        return fail(StatusCode::NOT_FOUND, "not_found", "Mailbox not found.");
+    }
+    match store.post_mailbox(&mailbox_id, &request.body, now_ms()) {
+        Ok(true) => StatusCode::CREATED.into_response(),
+        Ok(false) => fail(
+            StatusCode::CONFLICT,
+            "mailbox_unavailable",
+            "Mailbox is unavailable.",
+        ),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn get_mailbox(
+    State(store): State<Store>,
+    Path((vault_id, mailbox_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/mailboxes/{mailbox_id}");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "GET", &path, b"") {
+        return *response;
+    }
+    match store.get_mailbox(&vault_id, &mailbox_id, now_ms()) {
+        Ok(Some(body)) => Json(MailboxRequest { body }).into_response(),
+        Ok(None) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
+}
+
+async fn delete_mailbox(
+    State(store): State<Store>,
+    Path((vault_id, mailbox_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let path = format!("/v1/vaults/{vault_id}/mailboxes/{mailbox_id}");
+    if let Err(response) = authorize(&store, &vault_id, &headers, "DELETE", &path, b"") {
+        return *response;
+    }
+    match store.delete_mailbox(&vault_id, &mailbox_id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "Storage error.",
+        ),
+    }
 }
 
 fn now_ms() -> i64 {
@@ -353,7 +468,7 @@ async fn push_acl(
     }
 
     match store.push_acl(&vault_id, &payload.entries, now_ms()) {
-        Ok(accepted) => Json(PushAclResponse { accepted }).into_response(),
+        Ok(results) => Json(PushAclResponse { results }).into_response(),
         Err(_) => fail(
             StatusCode::INTERNAL_SERVER_ERROR,
             "storage",
@@ -396,9 +511,10 @@ async fn push_keys(
     body: Bytes,
 ) -> Response {
     let path = format!("/v1/vaults/{vault_id}/keys");
-    if let Err(response) = authorize(&store, &vault_id, &headers, "POST", &path, &body) {
-        return *response;
-    }
+    let pusher = match authorize(&store, &vault_id, &headers, "POST", &path, &body) {
+        Ok(device) => device,
+        Err(response) => return *response,
+    };
 
     let Ok(payload) = serde_json::from_slice::<PushKeysRequest>(&body) else {
         return fail(StatusCode::BAD_REQUEST, "bad_request", "Malformed body.");
@@ -411,7 +527,7 @@ async fn push_keys(
         );
     }
 
-    match store.push_keys(&vault_id, &payload.keys, now_ms()) {
+    match store.push_keys(&vault_id, &pusher, &payload.keys, now_ms()) {
         Ok(accepted) => Json(PushKeysResponse { accepted }).into_response(),
         Err(_) => fail(
             StatusCode::INTERNAL_SERVER_ERROR,

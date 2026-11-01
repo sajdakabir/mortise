@@ -5,7 +5,7 @@
 //! from "truncated input" would hand an attacker an oracle, so we do not.
 
 /// Errors returned by this crate.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     /// Decryption or authentication failed. Deliberately carries no detail.
     #[error("decryption failed")]
@@ -54,6 +54,11 @@ pub enum Error {
     /// policy, not key material.
     #[error("acl entry rejected: {0}")]
     AclRejected(&'static str),
+
+    /// An invite link, or a join request, was refused. The reason is safe to
+    /// surface: it describes the link, never key material.
+    #[error("{0}")]
+    Invite(&'static str),
 
     /// A recovery kit string was malformed or failed its checksum.
     #[error("recovery kit is not valid")]

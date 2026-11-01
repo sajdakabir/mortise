@@ -169,8 +169,20 @@ pub struct PushAclRequest {
 /// Response to an ACL push.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PushAclResponse {
-    /// Entries newly stored.
-    pub accepted: u32,
+    /// Result for each submitted entry, in request order.
+    pub results: Vec<AclPushResult>,
+}
+
+/// Conditional result for one ACL sequence position.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AclPushResult {
+    /// Stored for the first time.
+    Accepted,
+    /// The exact entry was already stored.
+    Duplicate,
+    /// Another history occupies this position or its predecessor is absent.
+    Conflict,
 }
 
 /// Response to an ACL pull.
@@ -192,6 +204,8 @@ pub struct WireKey {
     pub recipient_device_id: String,
     /// Key epoch.
     pub epoch: u32,
+    /// Authenticated device that pushed this candidate.
+    pub pusher_device_id: String,
     /// Base64 sealed wrapped key. Opaque.
     pub body: String,
 }
@@ -215,4 +229,20 @@ pub struct PushKeysResponse {
 pub struct PullKeysResponse {
     /// Keys addressed to the calling device.
     pub keys: Vec<WireKey>,
+}
+
+/// Register the one-request mailbox derived from an invite secret.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterMailbox {
+    /// Hex 16-byte mailbox id.
+    pub mailbox_id: String,
+    /// Absolute expiry, no more than seven days away.
+    pub expires_at_ms: u64,
+}
+
+/// Opaque HPKE join request stored in a mailbox.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MailboxRequest {
+    /// Base64 request bytes; the relay cannot open them.
+    pub body: String,
 }
