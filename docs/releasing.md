@@ -1,8 +1,8 @@
 # Releasing Mortise
 
-Status: M4. Everything here except the final signing and notarization steps is
-done and committed; those two need an Apple Developer account, which nobody has
-set up yet.
+The `Release` workflow builds a universal macOS preview on GitHub Actions.
+Apple Developer ID signing and notarization are not configured yet. See
+[TESTING.md](../TESTING.md) for the public installation instructions.
 
 ## Why this matters more than usual
 
@@ -18,7 +18,7 @@ a security problem, and there are two distinct reasons:
    surfaces as "Touch ID needs a signed build". This is not a warning that can
    be ignored — the feature simply does not exist until the app is signed.
 
-## What you need
+## What you need for Apple signing
 
 | Thing | Where from | Cost |
 |---|---|---|
@@ -34,23 +34,38 @@ afternoon.
 
 ## Cutting a release
 
-Push a tag and the `Release` workflow does the rest on a clean macOS runner —
-tests, clippy and `svelte-check`, then the bundle, then a GitHub release with
-the `.dmg` and a `SHA256SUMS`:
+Keep the app version in the Tauri config, app Cargo package/lockfile and UI
+package/lockfile in step. Then either push a matching tag or run `Release`
+manually on the exact branch/commit you want to distribute:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+gh workflow run release.yml --ref master -f publish=true
 ```
 
-The tag must match `version` in `crates/mortise-app/tauri.conf.json` or the
-workflow stops before building. Run the workflow manually from the Actions tab
-to build without publishing.
+For a tag-triggered build, the tag must be `v` followed by `version` in
+`crates/mortise-app/tauri.conf.json`, or the workflow stops. A manual run defaults
+to `publish=false`: it uploads an Actions artifact without creating a release.
+With `publish=true`, the workflow creates the matching tag at its source commit.
+Do not reuse a published version; bump the version for a replacement installer.
+
+The workflow checks/builds the frontend, runs Rust formatting, clippy and tests,
+then builds the app **and browser helper** for Apple silicon and Intel. The
+release config bundles the helper so browser pairing works after installation.
+`scripts/stage-release.sh` verifies signatures, both binary architectures, the
+invitation URL scheme, the disk image and checksums before publication.
+
+The release contains the universal DMG, extension zip, `INSTALL.md`, fake sample
+CSV, `BUILD.txt` (source commit and workflow URL), and `SHA256SUMS`. Assets upload
+to a draft first, then the complete release becomes a public **prerelease**.
+The landing page links to the versioned asset because GitHub's `releases/latest`
+does not select prereleases.
 
 Signing uses repository secrets — `APPLE_SIGNING_IDENTITY`, `APPLE_CERTIFICATE`,
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
-Until they are set the workflow still succeeds and publishes an **unsigned**
-build, saying so in the release notes. That is deliberate: a silent unsigned
-release is worse than a loud one.
+Until they are set, `APPLE_SIGNING_IDENTITY=-` produces an **ad-hoc signed**
+preview. It has no Apple Developer identity and is not notarized. The release
+notes and download page say so and include installation instructions. When
+signing is configured, update that preview wording as part of the release.
 
 ## Building locally
 
@@ -58,9 +73,9 @@ release is worse than a loud one.
 cargo tauri build
 ```
 
-Unsigned, this produces a working `.app` and `.dmg` that Gatekeeper will refuse
-on any Mac but the one that built it. Fine for local testing, not for sending to
-anyone.
+This is a local, single-architecture build and does not bundle the browser
+helper. Use the release workflow for distributable universal installers; it
+explicitly builds the frontend and helper before packaging.
 
 ### Invitation links on macOS
 
@@ -122,10 +137,10 @@ two things:
 What it deliberately does **not** grant is the more interesting half, and each
 omission is load-bearing:
 
-- **no `network.client`** — v1 has no sync, so the app has no business opening a
-  socket. M6 will need this and should have to justify it then, rather than
-  inheriting it quietly.
-- **no `files.user-selected.read-write`** — no import or export yet. M7.
+- App Sandbox is not enabled. The absence of sandbox network/file entitlements
+  does **not** block network or filesystem access; the app supports sync and
+  import/export. Tauri capabilities and the native command implementations
+  must enforce their own boundaries.
 - **no `allow-unsigned-executable-memory`, no `disable-library-validation`** —
   both weaken the hardened runtime and nothing here needs them.
 
@@ -140,6 +155,6 @@ inherits if they get code execution in the process.
   compromised Developer ID. Not set up yet.
 - **Reproducible builds.** Would let someone verify a release binary matches this
   source. Worth doing for a password manager; not attempted yet.
-- **The build is not reproducible or signed in CI.** Releases are cut by hand
-  from a developer's Mac, which means the person cutting them is part of the
-  trusted set. Narrowing that is the point of the two items above.
+- **CI remains trusted.** GitHub Actions builds and publishes the preview.
+  Checksums detect damage, but are distributed by the same publisher and are
+  not independent evidence that a binary matches its source.
