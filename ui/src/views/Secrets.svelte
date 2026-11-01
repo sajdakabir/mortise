@@ -368,12 +368,32 @@
                 {:else}••••••••{/if}
               </span>
               <span class="acts">
-                <button class="ghost tiny" disabled={!unlocked}
+                <button class="ghost icon-button" disabled={!unlocked}
+                  title={row.id in shown ? "Hide value" : "Reveal value"}
+                  aria-label={`${row.id in shown ? "Hide" : "Reveal"} ${row.title}`}
+                  aria-pressed={row.id in shown}
                   onclick={() => { if (row.id in shown) { const n = { ...shown }; delete n[row.id]; shown = n; } else reveal(row.id); }}>
-                  {row.id in shown ? "Hide" : "Reveal"}
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    {#if row.id in shown}
+                      <path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A11 11 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 4M6.5 6.5A18 18 0 0 0 2 12s3.5 7 10 7a11 11 0 0 0 5.5-1.5" />
+                    {:else}
+                      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                      <circle cx="12" cy="12" r="3" />
+                    {/if}
+                  </svg>
                 </button>
-                <button class="ghost tiny" disabled={!unlocked} onclick={() => copyValue(row.id)}>
-                  {copiedId === row.id ? "Copied" : "Copy"}
+                <button class="ghost icon-button" class:confirmed={copiedId === row.id}
+                  disabled={!unlocked} onclick={() => copyValue(row.id)}
+                  title={copiedId === row.id ? "Copied" : "Copy value"}
+                  aria-label={copiedId === row.id ? `Copied ${row.title}` : `Copy ${row.title}`}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    {#if copiedId === row.id}
+                      <path d="m5 12 4 4L19 6" />
+                    {:else}
+                      <rect x="9" y="9" width="11" height="11" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    {/if}
+                  </svg>
                 </button>
               </span>
             </li>
@@ -547,15 +567,18 @@
   }
   .keys .k { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .keys .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* The row actions appear on hover or focus. Two buttons on every row at
-     rest turns a list of names into a wall of controls. */
-  .acts { display: flex; gap: var(--s1); opacity: 0; transition: opacity var(--fast); }
-  .keys li:hover .acts, .acts:focus-within { opacity: 1; }
+  .acts { display: flex; align-items: center; gap: var(--s1); }
+  .icon-button {
+    display: inline-grid; place-items: center; flex: 0 0 32px;
+    width: 32px; height: 32px; padding: 0; border-radius: var(--radius);
+    color: var(--text-faint);
+  }
+  .keys li:hover .icon-button, .icon-button:focus-visible,
+  .icon-button.confirmed { color: var(--text); }
   .addrow input {
     font: 400 12.5px/1 var(--mono);
     padding: 4px 6px;
   }
-  .addrow .acts { opacity: 1; }
 
   .blank { display: grid; place-items: center; gap: var(--s4); padding: var(--s6) 0; text-align: center; }
 
