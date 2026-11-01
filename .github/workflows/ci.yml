@@ -23,7 +23,7 @@ jobs:
   rust:
     # macOS because the app is macOS-only, and mortise-macos only runs its
     # keychain tests there. Everything else would pass on Linux and prove less.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
