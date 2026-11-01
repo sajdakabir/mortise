@@ -152,6 +152,28 @@ export interface ProjectSummary {
   secret_count: number;
 }
 
+export interface AccountStatus { configured: boolean; signed_in: boolean }
+export interface AccountDevice { id: string; name: string; certificate: string; fingerprint: string; status: "pending" | "trusted" | "revoked"; created_at: number }
+export interface AccountTeam { id: string; name: string; role: "owner" | "admin" | "member" }
+export interface AccountDashboard {
+  account: { id: string; email: string; name: string };
+  current_device_id: string; devices: AccountDevice[]; teams: AccountTeam[];
+}
+export interface TeamMember { account_id: string; email: string; name: string; role: string }
+export interface TeamRequest extends TeamMember { id: string }
+export interface TeamInvitePreview { team_name: string; team_id: string; role: string; status: string; expires_at: number }
+export type AccountAction =
+  | { kind: "dashboard" }
+  | { kind: "approve_device"; id: string; certificate: string }
+  | { kind: "revoke_device"; id: string }
+  | { kind: "create_team"; name: string }
+  | { kind: "members" | "requests"; team: string }
+  | { kind: "remove_member"; team: string; account: string }
+  | { kind: "invite"; team: string; email: string | null; role: string }
+  | { kind: "decide"; team: string; invitation: string; account_id: string; approve: boolean }
+  | { kind: "revoke_invite"; team: string; invitation: string }
+  | { kind: "preview_invite" | "request_invite"; link: string };
+
 /// What a pasted `.env` did.
 export interface EnvImportReport {
   added: number;
