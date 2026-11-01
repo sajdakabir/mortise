@@ -99,7 +99,7 @@ done
 # genuinely new runtime file silently missing from the package produces an
 # extension that breaks only once installed.
 echo "Not packaged (check nothing here is needed at runtime):"
-( cd "$SRC" && find . -type f ! -path '*/.*' | sed 's|^\./||' | sort ) \
+( cd "$SRC" && find . -type f ! -path '*/.*' ! -path './node_modules/*' ! -path './test-results/*' | sed 's|^\./||' | sort ) \
   | grep -vxF -f <(printf '%s\n' "${FILES[@]}") \
   | sed 's/^/  /' || true
 echo

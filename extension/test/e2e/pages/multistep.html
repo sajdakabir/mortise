@@ -1,0 +1,33 @@
+<!doctype html>
+<!--
+  Identifier first, then password: the username screen has no password field,
+  and by the time there is one the username field is gone.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Sign in, two steps</title></head>
+  <body>
+    <h1>Sign in</h1>
+    <form id="form" action="/signed-in" method="post">
+      <div id="step1">
+        <label>Email <input id="username" name="username" type="email" autocomplete="username" /></label>
+        <button id="next" type="button">Next</button>
+      </div>
+    </form>
+    <script>
+      document.getElementById("next").addEventListener("click", () => {
+        const name = document.getElementById("username").value;
+        document.getElementById("step1").remove();
+        const form = document.getElementById("form");
+        form.insertAdjacentHTML(
+          "beforeend",
+          `<p id="who"></p>
+           <input type="hidden" name="username" />
+           <label>Password <input id="password" name="password" type="password" autocomplete="current-password" /></label>
+           <button id="submit" type="submit">Sign in</button>`,
+        );
+        document.getElementById("who").textContent = name;
+        form.querySelector('input[type="hidden"]').value = name;
+      });
+    </script>
+  </body>
+</html>
