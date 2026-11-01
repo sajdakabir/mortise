@@ -7,12 +7,16 @@
 
 use std::sync::Mutex;
 
+use mortise_crypto::acl::Role;
 use mortise_crypto::identity::Device;
+use mortise_crypto::identity::Identity;
+use mortise_crypto::invite::{Invite, JoinRequest};
 use mortise_crypto::kdf::Argon2Params;
-use mortise_relay::protocol::{PullResponse, WireChange};
+use mortise_relay::protocol::{PullAclResponse, PullResponse, WireChange};
 use mortise_relay::server::router;
 use mortise_relay::store::Store;
 use mortise_sync::transport::Transport;
+use mortise_sync::wire::acl_to_wire;
 use mortise_sync::{Error, HttpTransport, Syncer};
 use mortise_vault::enroll;
 use mortise_vault::{ItemMeta, ItemPayload, Vault};
@@ -148,6 +152,110 @@ fn an_item_reaches_the_other_device_through_the_relay() {
 
     assert_eq!(titles(&f.b), vec!["GitHub"]);
     assert_eq!(f.b.reveal(id).unwrap(), payload);
+}
+
+#[test]
+fn one_invite_link_carries_a_join_request_through_a_single_use_mailbox() {
+    let f = Fixture::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let inviter_cert =
+        f.a.identity()
+            .unwrap()
+            .certify(f.a.device().unwrap().public(), now);
+    let invite = Invite::create(
+        f.a.meta().vault_id,
+        f.a.relay_url().unwrap().as_deref().unwrap(),
+        inviter_cert,
+        "Owner",
+        "Payments",
+        f.a.device().unwrap().public().clone(),
+        now,
+        now + 60_000,
+    )
+    .unwrap();
+    f.syncer.register_invite(&f.a, &invite).unwrap();
+
+    let joiner_identity = Identity::generate().unwrap();
+    let joiner = Device::generate().unwrap();
+    let joiner_cert = joiner_identity.certify(joiner.public(), now);
+    let sealed = JoinRequest::seal(&invite, &joiner, &joiner_cert, "New teammate").unwrap();
+    f.syncer
+        .post_join_request(invite.mailbox_id().unwrap(), &sealed)
+        .unwrap();
+    assert!(
+        f.syncer
+            .post_join_request(invite.mailbox_id().unwrap(), &sealed)
+            .is_err()
+    );
+
+    let received = f
+        .syncer
+        .get_join_request(&f.a, invite.mailbox_id().unwrap())
+        .unwrap()
+        .unwrap();
+    let opened = JoinRequest::open(
+        f.a.device().unwrap(),
+        f.a.meta().vault_id,
+        invite.secret(),
+        &received,
+    )
+    .unwrap();
+    assert_eq!(opened.name(), "New teammate");
+    assert_eq!(opened.cert(), &joiner_cert);
+    f.syncer
+        .close_invite(&f.a, invite.mailbox_id().unwrap())
+        .unwrap();
+    assert!(
+        f.syncer
+            .get_join_request(&f.a, invite.mailbox_id().unwrap())
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn granting_an_invite_delivers_acl_and_every_key_to_a_waiting_vault() {
+    let mut f = Fixture::new();
+    let (meta, payload) = item("Historic", "before-join");
+    let historic = f.a.create_item(&meta, &payload).unwrap();
+    f.syncer.sync(&mut f.a).unwrap();
+
+    let joiner_dir = TempDir::new().unwrap();
+    let (joiner_account, _) =
+        Vault::create(joiner_dir.path().join("account.db"), PASSWORD, FAST).unwrap();
+    let mut waiting = Vault::create_waiting_project_vault(
+        joiner_dir.path().join("waiting.db"),
+        &joiner_account,
+        f.a.meta().vault_id,
+        f.a.device().unwrap().public(),
+    )
+    .unwrap();
+    waiting
+        .set_relay_url(f.a.relay_url().unwrap().as_deref())
+        .unwrap();
+
+    let joiner = waiting.device().unwrap().public().clone();
+    f.syncer
+        .add_member(&mut f.a, joiner.clone(), Role::Member)
+        .unwrap();
+    assert_eq!(f.a.queue_all_keys_for(&joiner).unwrap(), 1);
+    f.syncer
+        .authorize_device(&f.a, joiner.id().as_bytes(), joiner.signing_public())
+        .unwrap();
+    f.syncer.sync(&mut f.a).unwrap();
+    let outcome = f.syncer.sync(&mut waiting).unwrap();
+
+    assert!(outcome.acl_pulled >= 1);
+    assert_eq!(waiting.acl().unwrap().role(joiner.id()), Some(Role::Member));
+    assert_eq!(waiting.known_epochs().unwrap(), [0]);
+    assert_eq!(
+        (outcome.pulled, outcome.applied, outcome.rejected),
+        (1, 1, 0)
+    );
+    assert_eq!(waiting.reveal(historic).unwrap(), payload);
 }
 
 #[test]
@@ -332,7 +440,9 @@ fn a_revocation_reaches_the_other_device_and_cuts_off_the_removed_one() {
 
     // A revokes C, then everyone syncs.
     let c_id = *device_c.public().id().as_bytes();
-    a.revoke_member(device_c.public().id()).unwrap();
+    syncer
+        .revoke_member(&mut a, device_c.public().id())
+        .unwrap();
     syncer.sync(&mut a).unwrap();
     let out_b = syncer.sync(&mut b).unwrap();
 
@@ -359,17 +469,12 @@ fn a_revocation_reaches_the_other_device_and_cuts_off_the_removed_one() {
     assert!(out_b2.pulled >= 1, "the post-rotation item did not reach B");
     assert_eq!(b.reveal(id).unwrap(), payload);
 
-    // A change from the removed device is refused by B on ingest.
+    // The conditional revocation also removes C from the relay allowlist.
     c.create_item(&item("from-c", "x").0, &item("from-c", "x").1)
         .unwrap();
-    let _ = syncer.push(&mut c);
-    let out_b3 = syncer.sync(&mut b).unwrap();
-    assert!(
-        out_b3.rejected >= 1,
-        "B accepted a change from the revoked device"
-    );
+    assert!(matches!(syncer.push(&mut c), Err(Error::Refused { .. })));
 
-    // Defence in depth: once C is removed at the relay, its sync is refused.
+    // Removing it again is harmless and remains defence in depth.
     syncer.remove_device(&a, &c_id).unwrap();
     c.create_item(&item("from-c-again", "y").0, &item("from-c-again", "y").1)
         .unwrap();
@@ -529,6 +634,122 @@ fn malformed_changes_from_the_relay_are_dropped() {
     assert_eq!(outcome.pulled, 0);
     assert_eq!(outcome.rejected, 1);
     assert_eq!(vault.item_count().unwrap(), 0);
+    assert_eq!(vault.sync_cursor().unwrap(), 0, "retry the refused page");
+}
+
+/// Membership verification must finish before sync accepts keys or content.
+/// A rejected ACL must never look like a successful, empty pull.
+#[test]
+fn malformed_membership_stops_sync_before_keys_or_changes_are_requested() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let peer = Device::generate().unwrap();
+    let entry = vault
+        .prepare_acl_op(mortise_crypto::acl::AclOp::AddMember {
+            device: peer.public().clone(),
+            role: Role::Member,
+        })
+        .unwrap();
+    let mut wire = acl_to_wire(&entry);
+    wire.signature = "malformed".into();
+    let relay = MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![wire],
+        more: false,
+    });
+    let syncer = Syncer::new(relay);
+    assert!(matches!(syncer.sync(&mut vault), Err(Error::BadResponse)));
+    assert_eq!(vault.acl_seq().unwrap(), 0);
+}
+
+#[test]
+fn invalid_membership_signature_is_an_error() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let peer = Device::generate().unwrap();
+    let entry = vault
+        .prepare_acl_op(mortise_crypto::acl::AclOp::AddMember {
+            device: peer.public().clone(),
+            role: Role::Member,
+        })
+        .unwrap();
+    let mut wire = acl_to_wire(&entry);
+    wire.signature = "00".repeat(64);
+    let syncer = Syncer::new(MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![wire],
+        more: false,
+    }));
+    assert!(syncer.pull_acl(&mut vault).is_err());
+    assert_eq!(vault.acl_seq().unwrap(), 0);
+}
+
+#[test]
+fn a_membership_page_claiming_more_must_make_progress() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let syncer = Syncer::new(MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![],
+        more: true,
+    }));
+    assert!(matches!(
+        syncer.pull_acl(&mut vault),
+        Err(Error::BadResponse)
+    ));
+}
+
+#[test]
+fn a_repeated_membership_head_with_more_does_not_loop() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let peer = Device::generate().unwrap();
+    let entry = vault
+        .issue_acl_op(mortise_crypto::acl::AclOp::AddMember {
+            device: peer.public().clone(),
+            role: Role::Member,
+        })
+        .unwrap();
+    let syncer = Syncer::new(MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![acl_to_wire(&entry)],
+        more: true,
+    }));
+    assert!(matches!(
+        syncer.pull_acl(&mut vault),
+        Err(Error::BadResponse)
+    ));
+}
+
+/// Fails immediately if sync continues past an invalid membership response,
+/// or repeatedly fetches the same page. No socket or user vault is involved.
+struct MembershipOnlyRelay {
+    response: Mutex<Option<Vec<u8>>>,
+}
+
+impl MembershipOnlyRelay {
+    fn new(response: PullAclResponse) -> Self {
+        Self {
+            response: Mutex::new(Some(serde_json::to_vec(&response).unwrap())),
+        }
+    }
+}
+
+impl Transport for MembershipOnlyRelay {
+    fn send(
+        &self,
+        method: &str,
+        path: &str,
+        _headers: &[(&str, String)],
+        _body: &[u8],
+    ) -> mortise_sync::Result<(u16, Vec<u8>)> {
+        assert_eq!(method, "GET");
+        assert!(path.contains("/acl?after="), "unexpected request: {path}");
+        Ok((
+            200,
+            self.response
+                .lock()
+                .unwrap()
+                .take()
+                .expect("retried a page without progress"),
+        ))
+    }
 }
 
 /// A relay replaying an old cursor must not be able to rewind this device, or

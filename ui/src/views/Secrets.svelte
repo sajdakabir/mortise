@@ -62,6 +62,19 @@
   let creating = $state(false);
   let newName = $state("");
   let newDescription = $state("");
+  let sharing = $state(false);
+  let inviterName = $state("");
+  let inviteLink = $state("");
+  let inviteCopied = $state(false);
+  let pendingJoin = $state<{ name: string; fingerprint: string } | null>(null);
+  let grantRole = $state<"viewer" | "member" | "admin">("member");
+  let grantComplete = $state(false);
+  let joining = $state(false);
+  let joinLink = $state("");
+  let joinerName = $state("");
+  let joinPreview = $state<{ project_name: string; inviter_name: string; fingerprint: string } | null>(null);
+  let joinRequested = $state(false);
+  let joinComplete = $state(false);
 
   /// Inline add-an-environment field, shown from the segmented control.
   let addingEnv = $state(false);
@@ -146,6 +159,73 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function createInvite() {
+    if (busy || !current || !inviterName.trim()) return;
+    busy = true;
+    try {
+      error = "";
+      inviteLink = await ipc.createProjectInvite(current.id, inviterName.trim());
+      await load();
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function copyInvite() {
+    await navigator.clipboard.writeText(inviteLink);
+    inviteCopied = true;
+    setTimeout(() => (inviteCopied = false), 1800);
+  }
+
+  async function checkJoinRequest() {
+    busy = true;
+    try {
+      error = "";
+      pendingJoin = await ipc.pendingProjectJoin(inviteLink);
+    } catch (e) { error = errorMessage(e); }
+    finally { busy = false; }
+  }
+
+  async function grantJoin() {
+    if (!pendingJoin) return;
+    busy = true;
+    try {
+      error = "";
+      await ipc.grantProjectJoin(inviteLink, grantRole);
+      grantComplete = true;
+      pendingJoin = null;
+    } catch (e) { error = errorMessage(e); }
+    finally { busy = false; }
+  }
+
+  async function inspectInvite() {
+    try {
+      error = "";
+      joinPreview = await ipc.inspectProjectInvite(joinLink.trim());
+    } catch (e) { error = errorMessage(e); }
+  }
+
+  async function requestAccess() {
+    if (!joinerName.trim()) return;
+    busy = true;
+    try {
+      await ipc.requestProjectAccess(joinLink.trim(), joinerName.trim());
+      joinRequested = true;
+    } catch (e) { error = errorMessage(e); }
+    finally { busy = false; }
+  }
+
+  async function checkJoinAccess() {
+    busy = true;
+    try {
+      error = "";
+      joinComplete = await ipc.completeProjectJoin(joinLink.trim());
+    } catch (e) { error = errorMessage(e); }
+    finally { busy = false; }
   }
 
   /// Reopen onto whatever was being written.
@@ -289,6 +369,9 @@
     {/if}
     </div>
 
+    <button class="ghost tiny" disabled={!unlocked}
+      onclick={() => { joining = true; joinPreview = null; joinRequested = false; joinComplete = false; error = ""; }}>
+      Join with invite</button>
     <div class="railfoot">{@render foot()}</div>
   </aside>
 
@@ -331,6 +414,9 @@
           {/if}
         </div>
         <div class="row">
+          <button class="ghost tiny" disabled={!unlocked}
+            onclick={() => { sharing = true; inviteLink = ""; inviteCopied = false; pendingJoin = null; grantComplete = false; error = ""; }}>
+            Share</button>
           <button class="ghost tiny" disabled={!unlocked}
             onclick={() => { adding = true; newKey = ""; newValue = ""; }}>+ Secret</button>
           <button class="ghost tiny" disabled={!unlocked} onclick={openPaste}>Paste .env</button>
@@ -396,6 +482,81 @@
     {/if}
   </section>
 </div>
+
+{#if joining}
+  <div class="scrim" role="presentation" onclick={() => (joining = false)}></div>
+  <div class="sheet" role="dialog" aria-label="Join project" tabindex="-1">
+    <div class="spread sheethead"><strong>Join a project</strong><button class="ghost tiny" onclick={() => (joining = false)}>Close</button></div>
+    {#if error}<div class="error">{error}</div>{/if}
+    {#if joinRequested}
+      {#if joinComplete}
+        <p>Access granted and the project history is synced to this device.</p>
+      {:else}
+        <p>Your request was sent. Access is not granted until the owner checks your fingerprint and approves it.</p>
+        <div class="row end"><button disabled={busy} onclick={checkJoinAccess}>{busy ? "Checking…" : "Check access"}</button></div>
+      {/if}
+    {:else if joinPreview}
+      <p>Join <strong>{joinPreview.project_name}</strong>, invited by {joinPreview.inviter_name}?</p>
+      <p class="hint">Compare this identity fingerprint with the inviter before continuing:</p>
+      <code>{joinPreview.fingerprint}</code>
+      <div class="field"><label for="join-name">Your name</label><input id="join-name" bind:value={joinerName} /></div>
+      <div class="row end"><button class="primary" disabled={busy || !joinerName.trim()} onclick={requestAccess}>Send request</button></div>
+    {:else}
+      <div class="field"><label for="join-link">Invite link</label><textarea id="join-link" bind:value={joinLink}></textarea></div>
+      <div class="row end"><button class="primary" disabled={!joinLink.trim()} onclick={inspectInvite}>Check invite</button></div>
+    {/if}
+  </div>
+{/if}
+
+{#if sharing}
+  <div class="scrim" role="presentation" onclick={() => (sharing = false)}></div>
+  <div class="sheet" role="dialog" aria-label="Share project" tabindex="-1"
+    onkeydown={(e) => { if (e.key === "Escape") sharing = false; }}>
+    <div class="spread sheethead">
+      <strong>Share {current?.name}</strong>
+      <button class="ghost tiny" onclick={() => (sharing = false)}>Close</button>
+    </div>
+    {#if error}<div class="error">{error}</div>{/if}
+    {#if inviteLink}
+      <p class="hint">Send this single-use link to your teammate. Compare the fingerprint Mortise shows before granting access.</p>
+      <div class="field">
+        <label for="invite-link">Invite link</label>
+        <textarea id="invite-link" readonly value={inviteLink}></textarea>
+      </div>
+      <div class="row end">
+        <button class="primary" onclick={copyInvite}>{inviteCopied ? "Copied" : "Copy invite link"}</button>
+      </div>
+      {#if grantComplete}
+        <p>Access granted. The teammate can now sync this project.</p>
+      {:else if pendingJoin}
+        <hr />
+        <p><strong>{pendingJoin.name}</strong> is asking to join.</p>
+        <p class="hint">Compare this identity fingerprint with them before granting access:</p>
+        <code>{pendingJoin.fingerprint}</code>
+        <div class="field"><label for="grant-role">Role</label>
+          <select id="grant-role" bind:value={grantRole}>
+            <option value="viewer">Viewer</option><option value="member">Member</option><option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="row end"><button class="primary" disabled={busy} onclick={grantJoin}>{busy ? "Granting…" : "Grant access"}</button></div>
+      {:else}
+        <div class="row end"><button disabled={busy} onclick={checkJoinRequest}>{busy ? "Checking…" : "Check for request"}</button></div>
+      {/if}
+    {:else}
+      <p class="hint">This moves the project into its own encrypted vault. Originals are removed only after the new vault is registered and synced.</p>
+      <div class="field">
+        <label for="inviter-name">Your name</label>
+        <input id="inviter-name" bind:value={inviterName} placeholder="Sajda"
+          onkeydown={(e) => { if (e.key === "Enter") createInvite(); }} />
+      </div>
+      <div class="row end">
+        <button class="primary" disabled={busy || !inviterName.trim()} onclick={createInvite}>
+          {busy ? "Preparing…" : "Create invite"}
+        </button>
+      </div>
+    {/if}
+  </div>
+{/if}
 
 {#if creating}
   <div class="scrim" role="presentation" onclick={() => (creating = false)}></div>

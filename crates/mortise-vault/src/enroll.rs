@@ -64,6 +64,10 @@ pub struct Enrollment {
     pub enroller_signing: [u8; 32],
     /// The enrolling device's X25519 key, to authenticate the sealed keys.
     pub enroller_kex: [u8; 32],
+    /// The immutable ACL replay anchor (crypto-spec §6.2).
+    pub owner_signing: [u8; 32],
+    /// The genesis owner's X25519 key.
+    pub owner_kex: [u8; 32],
     /// Devices the new one should accept changes from: id, signing key, and
     /// X25519 key. The X25519 key lets the new device authenticate a vault key
     /// one of them re-wraps after a rotation — the owner included.
@@ -96,6 +100,7 @@ impl Vault {
             ));
         }
         let enroller = self.device()?.public().clone();
+        let owner = self.owner_device()?;
 
         let identity_wrapped: Vec<u8> =
             self.conn()
@@ -134,6 +139,8 @@ impl Vault {
             vault_keys,
             enroller_signing: *enroller.signing_public(),
             enroller_kex: *enroller.kex_public_bytes(),
+            owner_signing: *owner.signing_public(),
+            owner_kex: *owner.kex_public_bytes(),
             known_devices,
             acl: self.acl_records()?,
         })
@@ -295,6 +302,14 @@ pub fn join(
             device.id().as_bytes().as_slice(),
             device.public().signing_public().as_slice(),
             device.public().kex_public_bytes().as_slice()
+        ],
+    )?;
+    conn.execute(
+        "INSERT INTO vault_genesis (vault_id, signing_key, kex_key) VALUES (?1, ?2, ?3)",
+        params![
+            enrollment.vault_id.as_slice(),
+            enrollment.owner_signing.as_slice(),
+            enrollment.owner_kex.as_slice()
         ],
     )?;
 
