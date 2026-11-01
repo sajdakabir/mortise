@@ -27,6 +27,7 @@ extension_version=$(python3 -c 'import json; print(json.load(open("extension/man
 cp "${dmgs[0]}" "$out/Mortise_${version}_universal.dmg"
 cp "target/extension/mortise-extension-${extension_version}.zip" "$out/"
 cp TESTING.md "$out/INSTALL.md"
+cp sample-data.csv "$out/"
 {
   printf 'Mortise %s\n' "$version"
   printf 'Commit: %s\n' "${GITHUB_SHA:-$(git rev-parse HEAD)}"
@@ -40,7 +41,7 @@ cp TESTING.md "$out/INSTALL.md"
 
 (
   cd "$out"
-  shasum -a 256 ./*.dmg ./*.zip BUILD.txt INSTALL.md > SHA256SUMS
+  shasum -a 256 ./*.dmg ./*.zip BUILD.txt INSTALL.md sample-data.csv > SHA256SUMS
   shasum -a 256 -c SHA256SUMS
 )
 ls -lh "$out"

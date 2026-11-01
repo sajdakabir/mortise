@@ -132,6 +132,14 @@ jobs:
           2. Open it and drag Mortise to Applications.
           3. Open Mortise from Applications. Follow `INSTALL.md` if Gatekeeper blocks this preview.
 
+          If macOS blocks the app after you verify the download, open Terminal and run:
+
+          ```sh
+          xattr -dr com.apple.quarantine "/Applications/Mortise.app"
+          ```
+
+          Then open Mortise from Applications. This removes the download quarantine flag from Mortise only; it does not sign or notarize the app.
+
           This preview is **ad-hoc signed, not Apple Developer ID signed or notarized**. macOS will warn on first launch; Touch ID is unavailable. Use test credentials while the app is in preview. `BUILD.txt` identifies the source and build.
 
           Passwords, browser autofill/capture, imports, local projects and `.env` management are included. Team sharing remains experimental and needs a relay; managed accounts are not included in this preview.
