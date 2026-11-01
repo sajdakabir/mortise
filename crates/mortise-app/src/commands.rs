@@ -1214,6 +1214,12 @@ pub async fn create_project_invite(
     .map_err(|_| CmdError::bad_request("Sharing was interrupted."))?
 }
 
+/// Drain an OS-delivered invite without taking any action on its contents.
+#[tauri::command]
+pub fn take_project_invite(state: State<'_, crate::invitations::IncomingInvite>) -> Option<String> {
+    state.take()
+}
+
 /// Safe, key-free details shown before a join request is sent.
 #[derive(Debug, serde::Serialize)]
 pub struct InvitePreview {
@@ -1234,7 +1240,9 @@ pub fn inspect_project_invite(link: String) -> CmdResult<InvitePreview> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    let invite = mortise_crypto::invite::Invite::from_link(&link, now)?;
+    let invite = mortise_crypto::invite::Invite::from_link(&link, now).map_err(|_| {
+        CmdError::bad_request("This invite is invalid or has expired. Ask for a new link.")
+    })?;
     Ok(InvitePreview {
         project_name: invite.project_name().to_string(),
         inviter_name: invite.inviter_name().to_string(),
@@ -1272,6 +1280,8 @@ fn invited_project_path(
 /// A verified request waiting for the inviter's explicit decision.
 #[derive(Debug, serde::Serialize)]
 pub struct PendingProjectJoin {
+    /// Digest of this exact sealed request, required again at approval.
+    pub request_token: String,
     /// Self-chosen name from the authenticated join request.
     pub name: String,
     /// Certified identity fingerprint to compare before granting access.
@@ -1309,6 +1319,7 @@ pub async fn pending_project_join(
                 &sealed,
             )?;
             Ok(Some(PendingProjectJoin {
+                request_token: crate::invitations::request_token(&sealed),
                 name: request.name().to_string(),
                 fingerprint: request.cert().identity().fingerprint().to_string(),
             }))
@@ -1324,6 +1335,7 @@ pub async fn grant_project_join(
     app: tauri::AppHandle,
     link: String,
     role: String,
+    request_token: String,
 ) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         let now = mortise_vault::vault::now_ms();
@@ -1347,6 +1359,7 @@ pub async fn grant_project_join(
                 .get_join_request(&project, invite.mailbox_id()?)
                 .map_err(sync_error)?
                 .ok_or_else(|| CmdError::bad_request("No join request is waiting."))?;
+            crate::invitations::verify_request(&sealed, &request_token)?;
             let request = mortise_crypto::invite::JoinRequest::open(
                 project.device()?,
                 invite.vault(),
@@ -1375,6 +1388,28 @@ pub async fn grant_project_join(
     })
     .await
     .map_err(|_| CmdError::bad_request("Granting access was interrupted."))?
+}
+
+/// Decline an invitation by closing its mailbox without granting access.
+#[tauri::command]
+pub async fn decline_project_join(app: tauri::AppHandle, link: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let invite =
+            mortise_crypto::invite::Invite::from_link(&link, mortise_vault::vault::now_ms())?;
+        let state = app.state::<AppState>();
+        let path = invited_project_path(&state, &invite)?;
+        state.with_vault(|account| {
+            let account = account.ok_or_else(|| state.no_vault_error())?;
+            let token = account.unlock_token()?;
+            let mut project = Vault::open(path)?;
+            project.unlock_with_token(&token)?;
+            mortise_sync::Syncer::new(mortise_sync::HttpTransport::new(invite.relay_url()))
+                .close_invite(&project, invite.mailbox_id()?)
+                .map_err(sync_error)
+        })
+    })
+    .await
+    .map_err(|_| CmdError::bad_request("Declining access was interrupted."))?
 }
 
 /// Send this device's authenticated request through the invite mailbox.

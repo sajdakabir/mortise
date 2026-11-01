@@ -62,6 +62,29 @@ Unsigned, this produces a working `.app` and `.dmg` that Gatekeeper will refuse
 on any Mac but the one that built it. Fine for local testing, not for sending to
 anyone.
 
+### Invitation links on macOS
+
+The packaged app registers `mortise://join#…` through
+`crates/mortise-app/Info.plist`. Its native `RunEvent::Opened` handler queues a
+bounded link in memory; the UI opens a confirmation after setup/unlock. Merely
+opening a link does not contact the relay or approve access. Do not log links:
+their fragments contain the invitation's bearer secret.
+
+Verify `CFBundleURLTypes` in the generated app's `Contents/Info.plist` and test
+opening a dummy invitation with the app both closed and already running.
+macOS URL registration requires a packaged `.app`; `cargo tauri dev` alone does
+not register the scheme. See [Tauri's desktop link testing notes](https://v2.tauri.app/plugin/deep-linking/#desktop-1).
+
+The link flow still requires a configured, reachable relay and Mortise on both
+Macs. Requests are checked while Mortise is open and unlocked, including when
+the share dialog is closed. Pending links are currently kept only for that app
+session. The shipping blockers in `docs/product-readiness.md` still apply;
+exercise sharing with dummy projects, not real credentials.
+
+UI regressions use mock IPC: `cd ui && npm ci && npx playwright install chromium
+&& npm test`. No real vault or relay is used. `PLAYWRIGHT_EXECUTABLE_PATH` may
+point to an already installed compatible Chromium for local checks.
+
 ### Signed and notarized
 
 ```bash

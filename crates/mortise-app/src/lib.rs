@@ -11,6 +11,7 @@ pub mod browser;
 pub mod commands;
 pub mod dto;
 pub mod error;
+pub mod invitations;
 pub mod keys;
 pub mod rebrand;
 pub mod state;
@@ -32,6 +33,7 @@ pub const KEYCHAIN_SERVICE: &str = "com.mortise.desktop";
 /// Build and run the app.
 pub fn run() {
     tauri::Builder::default()
+        .manage(invitations::IncomingInvite::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -124,9 +126,32 @@ pub fn run() {
             commands::request_project_access,
             commands::pending_project_join,
             commands::grant_project_join,
+            commands::decline_project_join,
             commands::complete_project_join,
+            commands::take_project_invite,
             commands::touch,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to start Mortise");
+        .build(tauri::generate_context!())
+        .expect("failed to start Mortise")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = event {
+                use tauri::Emitter;
+                for url in urls {
+                    if app
+                        .state::<invitations::IncomingInvite>()
+                        .receive(url.as_str())
+                    {
+                        // Signal only; the link is drained through the narrow IPC command.
+                        let _ = app.emit_to("main", "project-invite-opened", ());
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                        break;
+                    }
+                }
+            }
+        });
 }

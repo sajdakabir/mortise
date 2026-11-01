@@ -79,9 +79,11 @@ export const ipc = {
   requestProjectAccess: (link: string, joinerName: string) =>
     call<void>("request_project_access", { link, joinerName }),
   pendingProjectJoin: (link: string) =>
-    call<{ name: string; fingerprint: string } | null>("pending_project_join", { link }),
-  grantProjectJoin: (link: string, role: "viewer" | "member" | "admin") =>
-    call<void>("grant_project_join", { link, role }),
+    call<{ name: string; fingerprint: string; request_token: string } | null>("pending_project_join", { link }),
+  grantProjectJoin: (link: string, role: "viewer" | "member" | "admin", requestToken: string) =>
+    call<void>("grant_project_join", { link, role, requestToken }),
+  declineProjectJoin: (link: string) => call<void>("decline_project_join", { link }),
+  takeProjectInvite: () => call<string | null>("take_project_invite"),
   completeProjectJoin: (link: string) => call<boolean>("complete_project_join", { link }),
   importEnv: (project: string, environment: string, text: string) =>
     call<EnvImportReport>("import_env", { project, environment, text }),
@@ -118,6 +120,24 @@ export async function onVaultLocked(handler: () => void): Promise<() => void> {
 }
 
 export const isMock = !IN_TAURI;
+
+/** Listen before draining so links delivered during startup are not lost.
+ * No link is written to storage or logged, and receiving one performs no
+ * network operation. Inspection and joining remain separate user decisions. */
+export async function onProjectInvite(handler: (link: string) => void): Promise<() => void> {
+  if (!IN_TAURI) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  let stopped = false;
+  const drain = async () => {
+    const link = await ipc.takeProjectInvite();
+    if (link && !stopped) handler(link);
+  };
+  const stop = await listen("project-invite-opened", () => {
+    void drain().catch(() => console.error("Mortise could not receive an invitation."));
+  });
+  try { await drain(); } catch { stop(); throw new Error("Could not receive the invitation."); }
+  return () => { stopped = true; stop(); };
+}
 
 // --- browser-only mock ---------------------------------------------------
 
@@ -339,7 +359,16 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
     case "inspect_project_invite":
       return as({ project_name: "Payments", inviter_name: "Sajda", fingerprint: "12345 67890 12345 67890 12345 67890 12345 67890 12345 67890 12345 67890", expires_at_ms: Date.now() + 60_000 });
     case "pending_project_join":
-      return as({ name: "Grace", fingerprint: "54321 09876 54321 09876 54321 09876 54321 09876 54321 09876 54321 09876" });
+      return as({ name: "Grace", request_token: "mock-request-token", fingerprint: "54321 09876 54321 09876 54321 09876 54321 09876 54321 09876 54321 09876" });
+    case "grant_project_join":
+      if (args.requestToken !== "mock-request-token") throw { message: "The access request changed." };
+      return as(undefined);
+    case "decline_project_join":
+      return as(undefined);
+    case "complete_project_join":
+      return as(true);
+    case "take_project_invite":
+      return as(null);
     case "request_project_access":
       return as(undefined);
     case "import_env_file":
