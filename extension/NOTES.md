@@ -36,6 +36,20 @@ origin instead, a hostile page could claim to be `github.com` and the vault
 would believe it. Everything in `mortise-vault::origin` is pointless if the
 origin is attacker-controlled by the time it arrives.
 
+## A credential goes to one document, checked twice
+
+A fill asks the vault for a credential matched against origin X, and that
+takes a round trip — long enough for the page to navigate. A frame keeps its
+id when it navigates, so "inject into frame 4" can land on a different site
+than the one the vault matched. The fill is therefore pinned to a *document*:
+`sender.documentId` for the inline button, the main frame's current document
+for the popup. Just before injecting, `webNavigation.getFrame` is asked again
+whether that document is still live and still on X, and the injection targets
+`documentIds` so the browser itself refuses if it was replaced in between.
+Anything else answers `page_changed` and nothing is filled.
+
+`webNavigation` costs no extra install warning: `<all_urls>` already covers it.
+
 ## The proof must match the Rust exactly
 
 `proof.js` reimplements `mortise_app_lib::browser::protocol::proof_payload`.
