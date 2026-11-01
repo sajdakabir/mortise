@@ -11,7 +11,8 @@ ciphertext it has no key for.
 **Not shipped yet.** The vault, sync, the browser extension and import from other
 managers all work. There is no signed build to download, which means no Touch ID
 and no Chrome Web Store listing until there is. Everything is in the open while
-it gets there.
+it gets there. Owners and invited testers can use the manual
+[macOS test-build path](TESTING.md) in the meantime.
 
 ## Why
 
