@@ -12,7 +12,7 @@ test -f "${dmgs[0]}"
 codesign --verify --deep --strict --verbose=2 "$app"
 for binary in mortise-app mortise-proxy; do
   test -x "$app/Contents/MacOS/$binary"
-  lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/$binary"
+  lipo "$app/Contents/MacOS/$binary" -verify_arch arm64 x86_64
 done
 plutil -extract CFBundleURLTypes xml1 -o - "$app/Contents/Info.plist" | grep -q '<string>mortise</string>'
 hdiutil verify "${dmgs[0]}"
