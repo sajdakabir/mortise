@@ -49,6 +49,12 @@ through a relay. Every change is sealed before it leaves and hash-chained on
 arrival, so a relay that is compromised — or compelled — can withhold data but
 cannot read or forge it.
 
+**Accounts are separate from the vault.** An optional service manages sign-in,
+trusted devices, teams and invitation links. It stores account metadata, not
+passwords, `.env` contents or private vault keys. Team membership does not yet
+grant encrypted project access. See [account setup and current limits](docs/accounts.md)
+to configure an OIDC provider and connect a desktop build.
+
 **The extension runs on no page until you ask.** Most managers request access to
 every site you visit, forever. This one asks the browser for the page only when
 you invoke it, and the origin it matches against comes from the browser rather
