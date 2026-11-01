@@ -163,7 +163,9 @@ pub fn lock(state: State<'_, AppState>) -> VaultStatus {
 /// handed-on Mac expects nothing of theirs to remain, and leaving the account
 /// key behind would quietly defeat that.
 #[tauri::command]
-pub fn sign_out(state: State<'_, AppState>) -> VaultStatus {
+pub async fn sign_out(app: tauri::AppHandle) -> CmdResult<VaultStatus> {
+    let account_result = crate::accounts::account_sign_out(app.clone()).await;
+    let state = app.state::<AppState>();
     state.with_vault(|vault| {
         if let Some(v) = vault {
             v.lock_fully();
@@ -171,7 +173,9 @@ pub fn sign_out(state: State<'_, AppState>) -> VaultStatus {
     });
     keys::forget_everything();
     crate::browser::associations::clear();
-    status(state)
+    let locked = status(state);
+    account_result?;
+    Ok(locked)
 }
 
 /// Unlock using Touch ID or the device passcode.

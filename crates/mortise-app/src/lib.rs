@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+mod accounts;
 pub mod browser;
 pub mod commands;
 pub mod dto;
@@ -34,6 +35,7 @@ pub const KEYCHAIN_SERVICE: &str = "com.mortise.desktop";
 pub fn run() {
     tauri::Builder::default()
         .manage(invitations::IncomingInvite::default())
+        .manage(accounts::AccountState::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -84,6 +86,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::status,
+            accounts::account_status,
+            accounts::account_sign_in,
+            accounts::account_sign_out,
+            accounts::account_action,
             commands::create_vault,
             commands::unlock,
             commands::lock,
