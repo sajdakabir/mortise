@@ -5,7 +5,7 @@
   "description": "Fill passwords from your local Mortise vault. Nothing leaves your Mac.",
   "minimum_chrome_version": "116",
 
-  "permissions": ["nativeMessaging", "activeTab", "scripting", "storage"],
+  "permissions": ["nativeMessaging", "activeTab", "scripting", "storage", "webNavigation"],
 
   "host_permissions": ["<all_urls>"],
 

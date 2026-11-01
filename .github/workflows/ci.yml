@@ -1,0 +1,79 @@
+name: CI
+
+# Every pull request, and every push to master, gets the same checks the
+# release runs before it builds anything. Until this existed the tests only ran
+# when a tag was pushed, which is the worst moment to find out they fail.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# A new push to a PR makes the run for the previous one moot.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    # macOS because the app is macOS-only, and mortise-macos only runs its
+    # keychain tests there. Everything else would pass on Linux and prove less.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          # Its own key: the release job caches a release-profile target dir,
+          # which is no help to a debug build and would only bloat this one.
+          key: ${{ runner.os }}-cargo-ci-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-ci-
+
+      - run: cargo fmt --all --check
+
+      # tauri::generate_context! embeds ui/dist at compile time, so the
+      # frontend has to exist before anything in mortise-app will build.
+      - run: npm --prefix ui ci
+      - run: npm --prefix ui run build
+
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - run: npm ci
+        working-directory: ui
+      - run: npm run check
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
