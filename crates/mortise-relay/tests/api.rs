@@ -3,8 +3,6 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::Value;
-use tower::ServiceExt;
 use mortise_crypto::identity::Device;
 use mortise_relay::auth::{hex, sign};
 use mortise_relay::protocol::{
@@ -13,6 +11,8 @@ use mortise_relay::protocol::{
 };
 use mortise_relay::server::router;
 use mortise_relay::store::Store;
+use serde_json::Value;
+use tower::ServiceExt;
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()

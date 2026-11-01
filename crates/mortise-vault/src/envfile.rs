@@ -196,13 +196,34 @@ mod tests {
     #[test]
     fn writing_then_reading_returns_the_same_values() {
         let original = vec![
-            EnvVar { key: "PLAIN".into(), value: "simple".into() },
-            EnvVar { key: "SPACED".into(), value: "two words".into() },
-            EnvVar { key: "EMPTY".into(), value: String::new() },
-            EnvVar { key: "HASH".into(), value: "hunter2#4".into() },
-            EnvVar { key: "QUOTE".into(), value: "say \"hi\"".into() },
-            EnvVar { key: "LINES".into(), value: "one\ntwo".into() },
-            EnvVar { key: "TRAILING".into(), value: "pad ".into() },
+            EnvVar {
+                key: "PLAIN".into(),
+                value: "simple".into(),
+            },
+            EnvVar {
+                key: "SPACED".into(),
+                value: "two words".into(),
+            },
+            EnvVar {
+                key: "EMPTY".into(),
+                value: String::new(),
+            },
+            EnvVar {
+                key: "HASH".into(),
+                value: "hunter2#4".into(),
+            },
+            EnvVar {
+                key: "QUOTE".into(),
+                value: "say \"hi\"".into(),
+            },
+            EnvVar {
+                key: "LINES".into(),
+                value: "one\ntwo".into(),
+            },
+            EnvVar {
+                key: "TRAILING".into(),
+                value: "pad ".into(),
+            },
         ];
         let (round_tripped, report) = parse(&format(&original));
         assert_eq!(round_tripped, original);
@@ -212,8 +233,14 @@ mod tests {
     #[test]
     fn only_values_that_need_quoting_get_quoted() {
         let text = format(&[
-            EnvVar { key: "A".into(), value: "plain".into() },
-            EnvVar { key: "B".into(), value: "two words".into() },
+            EnvVar {
+                key: "A".into(),
+                value: "plain".into(),
+            },
+            EnvVar {
+                key: "B".into(),
+                value: "two words".into(),
+            },
         ]);
         assert_eq!(text, "A=plain\nB=\"two words\"\n");
     }

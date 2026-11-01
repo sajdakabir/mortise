@@ -3,13 +3,13 @@
 //! The log is the source of truth; the item table is a view of it. These tests
 //! are mostly about what happens when two devices disagree.
 
-use tempfile::TempDir;
 use mortise_crypto::change::{Change, Hlc};
 use mortise_crypto::identity::Device;
 use mortise_crypto::kdf::Argon2Params;
 use mortise_crypto::secret::Key32;
 use mortise_vault::enroll;
 use mortise_vault::{Error, ItemMeta, ItemPayload, Vault};
+use tempfile::TempDir;
 
 const FAST: Argon2Params = Argon2Params {
     m_cost_kib: 64,
@@ -438,10 +438,9 @@ fn hlc_ordering_is_total_across_devices() {
 #[test]
 fn a_change_whose_parent_is_missing_is_rejected_until_it_arrives() {
     let mut p = Pair::new();
-    let id = p
-        .a
-        .create_item(&item("Leaked", "x").0, &item("Leaked", "x").1)
-        .unwrap();
+    let id =
+        p.a.create_item(&item("Leaked", "x").0, &item("Leaked", "x").1)
+            .unwrap();
     p.a.delete_item(id).unwrap();
 
     let changes = p.a.unpushed_changes(1000).unwrap();
@@ -460,7 +459,10 @@ fn a_change_whose_parent_is_missing_is_rejected_until_it_arrives() {
 
     // And the delete, re-pulled because the cursor never passed it.
     let report = p.b.ingest(delete).unwrap();
-    assert_eq!(report.rejected, 0, "the delete should apply once its parent is here");
+    assert_eq!(
+        report.rejected, 0,
+        "the delete should apply once its parent is here"
+    );
     p.b.apply_pending().unwrap();
 
     assert_eq!(p.b.item_count().unwrap(), 0, "a deleted secret came back");

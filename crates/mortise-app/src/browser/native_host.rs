@@ -112,8 +112,10 @@ fn support_dir() -> Option<PathBuf> {
 /// leaves litter and tells the user we registered something we did not.
 fn manifest_path(relative: &str) -> Option<PathBuf> {
     let base = support_dir()?.join(relative);
-    base.is_dir()
-        .then(|| base.join("NativeMessagingHosts").join(format!("{HOST_NAME}.json")))
+    base.is_dir().then(|| {
+        base.join("NativeMessagingHosts")
+            .join(format!("{HOST_NAME}.json"))
+    })
 }
 
 /// The proxy ships beside the app binary — `target/debug` in development,
@@ -123,7 +125,9 @@ fn manifest_path(relative: &str) -> Option<PathBuf> {
 fn proxy_path() -> Result<PathBuf, Error> {
     let exe = std::env::current_exe()?;
     let dir = exe.parent().ok_or_else(|| {
-        Error::Io(std::io::Error::other("the running binary has no parent directory"))
+        Error::Io(std::io::Error::other(
+            "the running binary has no parent directory",
+        ))
     })?;
     let proxy = dir.join("mortise-proxy");
     if !proxy.is_file() {

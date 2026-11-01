@@ -8,10 +8,10 @@
 use std::collections::BTreeMap;
 
 use hmac::{Hmac, KeyInit, Mac};
+use mortise_macos::{Error as KeychainError, Protection};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
-use mortise_macos::{Error as KeychainError, Protection};
 
 use super::protocol::{Request, proof_payload};
 

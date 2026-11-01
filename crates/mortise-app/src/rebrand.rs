@@ -26,7 +26,11 @@ const LEGACY_KEYCHAIN_ITEMS: &[&str] = &["account-key", "browser-associations"];
 
 fn legacy_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support").join(LEGACY_BUNDLE))
+    Some(
+        PathBuf::from(home)
+            .join("Library/Application Support")
+            .join(LEGACY_BUNDLE),
+    )
 }
 
 /// Carry the vault across, if an old one is there.

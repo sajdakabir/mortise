@@ -35,7 +35,10 @@ impl CmdError {
     pub fn vault_unopenable(reason: impl Into<String>) -> Self {
         Self::new(
             "vault_unopenable",
-            format!("The vault is on this Mac but will not open: {}", reason.into()),
+            format!(
+                "The vault is on this Mac but will not open: {}",
+                reason.into()
+            ),
         )
     }
 

@@ -3,12 +3,12 @@
 //! The relay cannot enforce roles — they live in a log it cannot read — so
 //! every one of these properties has to hold on the client or not at all.
 
-use tempfile::TempDir;
 use mortise_crypto::acl::{AclOp, Role};
 use mortise_crypto::identity::Device;
 use mortise_crypto::kdf::Argon2Params;
 use mortise_vault::enroll;
 use mortise_vault::{ItemMeta, ItemPayload, Vault};
+use tempfile::TempDir;
 
 const FAST: Argon2Params = Argon2Params {
     m_cost_kib: 64,

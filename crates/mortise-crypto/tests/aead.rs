@@ -4,10 +4,10 @@
 //! that encryption round-trips. Each negative test names the adversary it
 //! stands in for.
 
-use proptest::prelude::*;
 use mortise_crypto::aead::{self, MIN_SEALED_LEN, NONCE_LEN};
 use mortise_crypto::error::Error;
 use mortise_crypto::secret::Key32;
+use proptest::prelude::*;
 
 fn key(b: u8) -> Key32 {
     Key32::new([b; 32])

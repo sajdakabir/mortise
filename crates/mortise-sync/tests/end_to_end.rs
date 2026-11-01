@@ -7,7 +7,6 @@
 
 use std::sync::Mutex;
 
-use tempfile::TempDir;
 use mortise_crypto::identity::Device;
 use mortise_crypto::kdf::Argon2Params;
 use mortise_relay::protocol::{PullResponse, WireChange};
@@ -17,6 +16,7 @@ use mortise_sync::transport::Transport;
 use mortise_sync::{Error, HttpTransport, Syncer};
 use mortise_vault::enroll;
 use mortise_vault::{ItemMeta, ItemPayload, Vault};
+use tempfile::TempDir;
 
 const FAST: Argon2Params = Argon2Params {
     m_cost_kib: 64,
