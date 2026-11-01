@@ -1272,7 +1272,9 @@ fn invited_project_path(
 /// A verified request waiting for the inviter's explicit decision.
 #[derive(Debug, serde::Serialize)]
 pub struct PendingProjectJoin {
+    /// Self-chosen name from the authenticated join request.
     pub name: String,
+    /// Certified identity fingerprint to compare before granting access.
     pub fingerprint: String,
 }
 
@@ -1406,7 +1408,7 @@ pub async fn request_project_access(
                 .collect();
             let project_path = project_dir.join(format!("join-{vault_name}.vault"));
             if !project_path.exists() {
-                let mut waiting = Vault::create_waiting_project_vault(
+                let waiting = Vault::create_waiting_project_vault(
                     &project_path,
                     account,
                     invite.vault(),

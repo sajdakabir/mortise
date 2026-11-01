@@ -122,6 +122,12 @@ impl Vault {
         if self.access_removed()? {
             return Err(Error::Invalid("access to this project was removed"));
         }
+        // Enforce the same role on local edits as on incoming changes. A
+        // viewer must not see a successful save that every peer will reject.
+        // Check before advancing the clock or writing to the change log.
+        if !self.may_write(self.device()?.id())? {
+            return Err(Error::Invalid("this project is read-only for your role"));
+        }
         let vault_id = self.meta().vault_id;
         let key = self.current_vault_key()?;
         let epoch = key.epoch();

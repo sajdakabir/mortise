@@ -130,6 +130,51 @@ fn a_viewers_changes_are_refused() {
     assert_eq!(p.a.item_count().unwrap(), 0);
 }
 
+#[test]
+fn a_known_viewer_cannot_edit_items_or_project_metadata_locally() {
+    let mut p = Pair::new();
+    let (meta, payload) = item("Retained");
+    let id = p.b.create_item(&meta, &payload).unwrap();
+    p.b.set_shared_project_info("Payments", "Original").unwrap();
+    p.b.add_shared_project_environment("dev").unwrap();
+    let before = p.b.unpushed_changes(1000).unwrap().len();
+    let manifest = p.b.shared_project_manifest().unwrap();
+
+    let demotion =
+        p.a.issue_acl_op(AclOp::ChangeRole {
+            device: p.b_device.id(),
+            role: Role::Viewer,
+        })
+        .unwrap();
+    p.b.apply_acl_entry(&demotion, false).unwrap();
+
+    assert!(p.b.create_item(&meta, &payload).is_err());
+    assert!(p.b.update_item(id, &item("Changed").0, &payload).is_err());
+    assert!(p.b.delete_item(id).is_err());
+    assert!(
+        p.b.upsert_project_env_secret("dev", "TOKEN", "new")
+            .is_err()
+    );
+    assert!(p.b.set_shared_project_info("Changed", "").is_err());
+    assert!(p.b.add_shared_project_environment("prod").is_err());
+    assert_eq!(p.b.unpushed_changes(1000).unwrap().len(), before);
+    assert_eq!(p.b.item_meta(id).unwrap(), meta);
+    assert_eq!(p.b.reveal(id).unwrap(), payload);
+    assert_eq!(p.b.shared_project_manifest().unwrap(), manifest);
+
+    // Learning a later promotion restores writes; a rejected attempt did not
+    // poison the log or materialized items.
+    let promotion =
+        p.a.issue_acl_op(AclOp::ChangeRole {
+            device: p.b_device.id(),
+            role: Role::Member,
+        })
+        .unwrap();
+    p.b.apply_acl_entry(&promotion, false).unwrap();
+    p.b.upsert_project_env_secret("dev", "TOKEN", "new")
+        .unwrap();
+}
+
 /// Demotion stops future writes without unwinding past ones. That is the
 /// practical reading, and it is a deliberate choice rather than an oversight.
 #[test]

@@ -358,6 +358,7 @@ impl<T: Transport> Syncer<T> {
 
             // A change the relay mangled is dropped here rather than handed on
             // as something that merely looks well formed.
+            let rejected_before = outcome.rejected;
             let changes: Vec<_> = parsed
                 .changes
                 .iter()
@@ -365,7 +366,6 @@ impl<T: Transport> Syncer<T> {
                 .collect();
             outcome.rejected += (parsed.changes.len() - changes.len()) as u32;
 
-            let rejected_before = outcome.rejected;
             let report = vault.ingest(&changes)?;
             outcome.pulled += report.accepted;
             outcome.rejected += report.rejected;
@@ -460,6 +460,9 @@ impl<T: Transport> Syncer<T> {
                 serde_json::from_slice(&response).map_err(|_| Error::BadResponse)?;
 
             if parsed.entries.is_empty() {
+                if parsed.more {
+                    return Err(Error::BadResponse);
+                }
                 break;
             }
 
@@ -480,18 +483,16 @@ impl<T: Transport> Syncer<T> {
             }
 
             for wire in &parsed.entries {
-                let Some(entry) = acl_from_wire(wire, vault_id) else {
-                    continue;
-                };
+                let entry = acl_from_wire(wire, vault_id).ok_or(Error::BadResponse)?;
                 // Skip anything already held — our own entries, or ones applied
                 // on an earlier page.
                 if entry.seq() <= vault.acl_seq()? {
                     continue;
                 }
-                match vault.apply_acl_entry(&entry, false) {
-                    Ok(()) => applied += 1,
-                    Err(_) => return Ok(applied),
-                }
+                // A failed membership check must stop sync before it consumes
+                // keys or changes under an incomplete view of permissions.
+                vault.apply_acl_entry(&entry, false)?;
+                applied += 1;
             }
 
             if vault.acl()?.role(vault.device_id()?).is_none() {
@@ -501,6 +502,12 @@ impl<T: Transport> Syncer<T> {
 
             if !parsed.more {
                 break;
+            }
+            // A relay may repeat our head as the first row, but a page that
+            // promises a suffix must actually advance. Otherwise this loop
+            // can run forever, including on a head-only response.
+            if vault.acl_seq()? <= after {
+                return Err(Error::BadResponse);
             }
         }
         Ok(applied)

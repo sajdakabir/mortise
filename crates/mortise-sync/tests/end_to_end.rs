@@ -12,10 +12,11 @@ use mortise_crypto::identity::Device;
 use mortise_crypto::identity::Identity;
 use mortise_crypto::invite::{Invite, JoinRequest};
 use mortise_crypto::kdf::Argon2Params;
-use mortise_relay::protocol::{PullResponse, WireChange};
+use mortise_relay::protocol::{PullAclResponse, PullResponse, WireChange};
 use mortise_relay::server::router;
 use mortise_relay::store::Store;
 use mortise_sync::transport::Transport;
+use mortise_sync::wire::acl_to_wire;
 use mortise_sync::{Error, HttpTransport, Syncer};
 use mortise_vault::enroll;
 use mortise_vault::{ItemMeta, ItemPayload, Vault};
@@ -633,6 +634,122 @@ fn malformed_changes_from_the_relay_are_dropped() {
     assert_eq!(outcome.pulled, 0);
     assert_eq!(outcome.rejected, 1);
     assert_eq!(vault.item_count().unwrap(), 0);
+    assert_eq!(vault.sync_cursor().unwrap(), 0, "retry the refused page");
+}
+
+/// Membership verification must finish before sync accepts keys or content.
+/// A rejected ACL must never look like a successful, empty pull.
+#[test]
+fn malformed_membership_stops_sync_before_keys_or_changes_are_requested() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let peer = Device::generate().unwrap();
+    let entry = vault
+        .prepare_acl_op(mortise_crypto::acl::AclOp::AddMember {
+            device: peer.public().clone(),
+            role: Role::Member,
+        })
+        .unwrap();
+    let mut wire = acl_to_wire(&entry);
+    wire.signature = "malformed".into();
+    let relay = MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![wire],
+        more: false,
+    });
+    let syncer = Syncer::new(relay);
+    assert!(matches!(syncer.sync(&mut vault), Err(Error::BadResponse)));
+    assert_eq!(vault.acl_seq().unwrap(), 0);
+}
+
+#[test]
+fn invalid_membership_signature_is_an_error() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let peer = Device::generate().unwrap();
+    let entry = vault
+        .prepare_acl_op(mortise_crypto::acl::AclOp::AddMember {
+            device: peer.public().clone(),
+            role: Role::Member,
+        })
+        .unwrap();
+    let mut wire = acl_to_wire(&entry);
+    wire.signature = "00".repeat(64);
+    let syncer = Syncer::new(MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![wire],
+        more: false,
+    }));
+    assert!(syncer.pull_acl(&mut vault).is_err());
+    assert_eq!(vault.acl_seq().unwrap(), 0);
+}
+
+#[test]
+fn a_membership_page_claiming_more_must_make_progress() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let syncer = Syncer::new(MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![],
+        more: true,
+    }));
+    assert!(matches!(
+        syncer.pull_acl(&mut vault),
+        Err(Error::BadResponse)
+    ));
+}
+
+#[test]
+fn a_repeated_membership_head_with_more_does_not_loop() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = solo_vault(&dir, "v.db");
+    let peer = Device::generate().unwrap();
+    let entry = vault
+        .issue_acl_op(mortise_crypto::acl::AclOp::AddMember {
+            device: peer.public().clone(),
+            role: Role::Member,
+        })
+        .unwrap();
+    let syncer = Syncer::new(MembershipOnlyRelay::new(PullAclResponse {
+        entries: vec![acl_to_wire(&entry)],
+        more: true,
+    }));
+    assert!(matches!(
+        syncer.pull_acl(&mut vault),
+        Err(Error::BadResponse)
+    ));
+}
+
+/// Fails immediately if sync continues past an invalid membership response,
+/// or repeatedly fetches the same page. No socket or user vault is involved.
+struct MembershipOnlyRelay {
+    response: Mutex<Option<Vec<u8>>>,
+}
+
+impl MembershipOnlyRelay {
+    fn new(response: PullAclResponse) -> Self {
+        Self {
+            response: Mutex::new(Some(serde_json::to_vec(&response).unwrap())),
+        }
+    }
+}
+
+impl Transport for MembershipOnlyRelay {
+    fn send(
+        &self,
+        method: &str,
+        path: &str,
+        _headers: &[(&str, String)],
+        _body: &[u8],
+    ) -> mortise_sync::Result<(u16, Vec<u8>)> {
+        assert_eq!(method, "GET");
+        assert!(path.contains("/acl?after="), "unexpected request: {path}");
+        Ok((
+            200,
+            self.response
+                .lock()
+                .unwrap()
+                .take()
+                .expect("retried a page without progress"),
+        ))
+    }
 }
 
 /// A relay replaying an old cursor must not be able to rewind this device, or
