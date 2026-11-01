@@ -61,6 +61,11 @@ jobs:
           cargo build --release --locked -p mortise-proxy --target aarch64-apple-darwin
           cargo build --release --locked -p mortise-proxy --target x86_64-apple-darwin
           mkdir -p target/test-sidecars
+          # Each Rust compilation needs its target-suffixed helper too.
+          cp target/aarch64-apple-darwin/release/mortise-proxy \
+            target/test-sidecars/mortise-proxy-aarch64-apple-darwin
+          cp target/x86_64-apple-darwin/release/mortise-proxy \
+            target/test-sidecars/mortise-proxy-x86_64-apple-darwin
           lipo -create \
             target/aarch64-apple-darwin/release/mortise-proxy \
             target/x86_64-apple-darwin/release/mortise-proxy \
