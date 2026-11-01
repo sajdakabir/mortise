@@ -17,6 +17,7 @@
     switcher,
     foot,
     onUnlock,
+    onSettings,
   }: {
     unlocked: boolean;
     switcher: Snippet;
@@ -25,6 +26,7 @@
     /// names readable — the META key outlives it — so this view stays up and
     /// has to offer the way back itself.
     onUnlock: () => void;
+    onSettings: () => void;
   } = $props();
 
   let projects = $state<ProjectSummary[]>([]);
@@ -63,6 +65,9 @@
   let newName = $state("");
   let newDescription = $state("");
   let sharing = $state(false);
+  let sharingProjectId = $state<string | null>(null);
+  let sharingProjectName = $state("");
+  let shareRelay = $state<"checking" | "ready" | "missing">("checking");
   let inviterName = $state("");
   let inviteLink = $state("");
   let inviteCopied = $state(false);
@@ -76,7 +81,7 @@
   let joinRequested = $state(false);
   let joinComplete = $state(false);
 
-  /// Inline add-an-environment field, shown from the segmented control.
+  /// Inline add-an-environment field, opened from the environment dropdown.
   let addingEnv = $state(false);
   let newEnv = $state("");
   let environmentInput = $state<HTMLInputElement | null>(null);
@@ -210,12 +215,35 @@
     }
   }
 
+  async function openSharing() {
+    if (!current) return;
+    closeFileMenu();
+    if (sharingProjectId !== current.id) {
+      sharingProjectId = current.id;
+      inviteLink = "";
+      inviteCopied = false;
+      pendingJoin = null;
+      grantComplete = false;
+    }
+    sharingProjectName = current.name;
+    sharing = true;
+    error = "";
+    shareRelay = "checking";
+    try {
+      const status = await ipc.syncStatus();
+      shareRelay = status.relay_url ? "ready" : "missing";
+    } catch (e) {
+      shareRelay = "missing";
+      error = errorMessage(e);
+    }
+  }
+
   async function createInvite() {
-    if (busy || !current || !inviterName.trim()) return;
+    if (busy || !sharingProjectId || !inviterName.trim() || shareRelay !== "ready") return;
     busy = true;
     try {
       error = "";
-      inviteLink = await ipc.createProjectInvite(current.id, inviterName.trim());
+      inviteLink = await ipc.createProjectInvite(sharingProjectId, inviterName.trim());
       await load();
     } catch (e) {
       error = errorMessage(e);
@@ -225,9 +253,11 @@
   }
 
   async function copyInvite() {
-    await navigator.clipboard.writeText(inviteLink);
-    inviteCopied = true;
-    setTimeout(() => (inviteCopied = false), 1800);
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      inviteCopied = true;
+      setTimeout(() => (inviteCopied = false), 1800);
+    } catch (e) { error = errorMessage(e); }
   }
 
   async function checkJoinRequest() {
@@ -478,9 +508,11 @@
           {/if}
         </div>
         <div class="row">
-          <button class="ghost tiny" disabled={!unlocked}
-            onclick={() => { sharing = true; inviteLink = ""; inviteCopied = false; pendingJoin = null; grantComplete = false; error = ""; }}>
-            Share</button>
+          <button class="share-trigger tiny" disabled={!unlocked} onclick={openSharing}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="9" cy="8" r="3" /><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 20v-2a6 6 0 0 0-3-5.2" />
+            </svg>
+            Share project</button>
           <button class="ghost tiny" disabled={!unlocked}
             onclick={() => { adding = true; newKey = ""; newValue = ""; }}>+ Secret</button>
           <div class="file-actions" bind:this={fileActions}>
@@ -612,12 +644,12 @@
   <div class="sheet" role="dialog" aria-label="Share project" tabindex="-1"
     onkeydown={(e) => { if (e.key === "Escape") sharing = false; }}>
     <div class="spread sheethead">
-      <strong>Share {current?.name}</strong>
+      <strong>Share {sharingProjectName}</strong>
       <button class="ghost tiny" onclick={() => (sharing = false)}>Close</button>
     </div>
     {#if error}<div class="error">{error}</div>{/if}
     {#if inviteLink}
-      <p class="hint">Send this single-use link to your teammate. Compare the fingerprint Mortise shows before granting access.</p>
+      <p class="hint">Send this single-use link to a teammate or another person. They request access, then you choose their role and approve.</p>
       <div class="field">
         <label for="invite-link">Invite link</label>
         <textarea id="invite-link" readonly value={inviteLink}></textarea>
@@ -631,10 +663,12 @@
         <hr />
         <p><strong>{pendingJoin.name}</strong> is asking to join.</p>
         <p class="hint">Compare this identity fingerprint with them before granting access:</p>
-        <code>{pendingJoin.fingerprint}</code>
+        <code class="fingerprint">{pendingJoin.fingerprint}</code>
         <div class="field"><label for="grant-role">Role</label>
           <select id="grant-role" bind:value={grantRole}>
-            <option value="viewer">Viewer</option><option value="member">Member</option><option value="admin">Admin</option>
+            <option value="viewer">Viewer — read and copy</option>
+            <option value="member">Member — read and edit</option>
+            <option value="admin">Admin — manage access</option>
           </select>
         </div>
         <div class="row end"><button class="primary" disabled={busy} onclick={grantJoin}>{busy ? "Granting…" : "Grant access"}</button></div>
@@ -642,15 +676,22 @@
         <div class="row end"><button disabled={busy} onclick={checkJoinRequest}>{busy ? "Checking…" : "Check for request"}</button></div>
       {/if}
     {:else}
-      <p class="hint">This moves the project into its own encrypted vault. Originals are removed only after the new vault is registered and synced.</p>
+      <p class="hint">Invite someone to this project, including all its environments. You choose their access level when approving their request.</p>
+      <p class="sharing-preview">Sharing preview: shared projects do not appear in the project list yet. Use a test project for now.</p>
+      {#if shareRelay === "missing"}
+        <div class="sharing-setup">
+          <p>Connect a sync relay before creating an invite.</p>
+          <button class="tiny" onclick={() => { sharing = false; onSettings(); }}>Open settings</button>
+        </div>
+      {/if}
       <div class="field">
         <label for="inviter-name">Your name</label>
-        <input id="inviter-name" bind:value={inviterName} placeholder="Sajda"
+        <input id="inviter-name" bind:value={inviterName} placeholder="Your display name"
           onkeydown={(e) => { if (e.key === "Enter") createInvite(); }} />
       </div>
       <div class="row end">
-        <button class="primary" disabled={busy || !inviterName.trim()} onclick={createInvite}>
-          {busy ? "Preparing…" : "Create invite"}
+        <button class="primary" disabled={busy || !inviterName.trim() || shareRelay !== "ready"} onclick={createInvite}>
+          {busy ? "Preparing…" : shareRelay === "checking" ? "Checking setup…" : "Create invite link"}
         </button>
       </div>
     {/if}
@@ -792,7 +833,7 @@
   }
   .environment-select svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-dim); }
   .file-actions { position: relative; }
-  .file-trigger { display: inline-flex; align-items: center; gap: var(--s2); min-height: 32px; }
+  .file-trigger, .share-trigger { display: inline-flex; align-items: center; gap: var(--s2); min-height: 32px; }
   .file-menu {
     position: absolute; top: calc(100% + 6px); right: 0; z-index: 10;
     min-width: 184px; padding: 4px; background: var(--bg-raised);
@@ -861,6 +902,11 @@
   }
   .report { font-size: 12px; color: var(--text-dim); margin: 0 0 var(--s2); }
   .hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 var(--s4); line-height: 1.6; }
+  .sharing-preview { font-size: 12px; color: var(--text-dim); padding-left: var(--s3); border-left: 2px solid var(--border-strong); line-height: 1.6; margin: 0 0 var(--s4); }
+  .sharing-setup { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3); background: var(--bg-input); border-radius: var(--radius); margin-bottom: var(--s4); font-size: 12px; }
+  .sharing-setup p { margin: 0; }
+  .sharing-setup button { flex-shrink: 0; }
+  .fingerprint { display: block; padding: var(--s3); background: var(--bg-input); border-radius: var(--radius); margin-bottom: var(--s3); line-height: 1.8; font-size: 12px; overflow-wrap: anywhere; }
   .envinput {
     width: 140px; padding: 6px 10px; font-size: 12px;
   }
