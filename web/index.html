@@ -62,7 +62,7 @@
   <div class="wrap facts-grid">
     <div><p class="label">Vault</p><p class="fact">On your disk</p></div>
     <div><p class="label">Relay sees</p><p class="fact">Ciphertext</p></div>
-    <div><p class="label">Page access</p><p class="fact">On request</p></div>
+    <div><p class="label">Browser extension</p><p class="fact">Optional</p></div>
     <div><p class="label">Built with</p><p class="fact">Rust &amp; Tauri</p></div>
   </div>
 </section>
@@ -70,7 +70,7 @@
   <div class="wrap steps">
     <div class="steps-head">
       <p class="label">How it works</p>
-      <h2>Three things, and the third<br>is the unusual one.</h2>
+      <h2>Your vault, your devices,<br>your browser.</h2>
     </div>
 
     <ol class="step-list">
@@ -120,19 +120,19 @@ lose either one   <b>nothing opens, by anyone</b></pre>
       <li>
         <span class="num mono">03</span>
         <div class="step-body">
-          <h3>The extension runs on no page until you ask</h3>
+          <h3>Your browser connects to your local vault</h3>
           <p class="dim">
-            Most managers request access to every site you visit, forever. This
-            one asks the browser for the page only when you invoke it, and the
-            origin it matches against comes from the browser rather than from
-            the page &mdash; so a lookalike site cannot claim to be your bank.
+            The optional extension detects login forms, saves submitted
+            passwords, and offers to fill matching logins. It requests access
+            to HTTP and HTTPS pages for this. The origin used for matching
+            comes from the browser, not from a claim made by the page.
           </p>
         </div>
       <figure class="step-fig">
-          <pre class="mono">                 host access   granted
-typical manager  &lt;all_urls&gt;    on install
-<b>Mortise          activeTab     when you ask</b></pre>
-          <figcaption class="label">What the browser hands over</figcaption>
+          <pre class="mono">login form       detected on the page
+site origin      supplied by the browser
+<b>saved login      read from your Mac</b></pre>
+          <figcaption class="label">Browser to local vault</figcaption>
         </figure>
       </li>
     </ol>
