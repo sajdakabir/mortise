@@ -103,9 +103,16 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: >-
-          npx --yes @tauri-apps/cli@${TAURI_CLI_VERSION} build --ci
-          --target universal-apple-darwin --config .github/tauri.release.json
+        run: |
+          # GitHub expands absent secrets to empty strings. Tauri treats a
+          # present APPLE_CERTIFICATE as a certificate to import, even if empty.
+          for signing_var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!signing_var:-}" ]; then
+              unset "$signing_var"
+            fi
+          done
+          npx --yes @tauri-apps/cli@${TAURI_CLI_VERSION} build --ci \
+            --target universal-apple-darwin --config .github/tauri.release.json
 
       - name: Package the browser extension
         run: bash extension/tools/package.sh
@@ -160,3 +167,17 @@ jobs:
             --title "Mortise $RELEASE_VERSION" --draft --prerelease \
             --notes-file "$notes" "$RELEASE_DIR"/*
           gh release edit "$RELEASE_TAG" --draft=false --prerelease
+
+      # Preserve expensive compilation when packaging fails. The regular
+      # cache action saves only successful jobs; the restore prefix above
+      # also finds this fallback on a subsequent attempt.
+      - name: Preserve compilation after a failed release
+        if: failure()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-release-universal-${{ hashFiles('Cargo.lock') }}-partial-${{ github.run_id }}
