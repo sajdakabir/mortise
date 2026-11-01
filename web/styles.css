@@ -154,6 +154,12 @@ p { margin: 0; }
 .cta-note a { color: var(--text-dim); }
 .cta-note a:hover { color: var(--text); }
 
+.install-help { max-width: 62ch; margin-top: 14px; color: var(--text-dim); font-size: 13px; }
+.install-help summary { cursor: pointer; width: fit-content; }
+.install-help p { margin-top: 12px; }
+.install-help pre { padding: 14px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--bg-raised); overflow-x: auto; }
+.install-help code { color: var(--text); font: 12px/1.6 var(--mono); user-select: all; }
+
 /* The nav's only action. Outlined rather than filled: the hero carries the
    real call, and two solid buttons on one screen compete. */
 .nav-dl {
@@ -164,6 +170,7 @@ p { margin: 0; }
 .nav-dl:hover { border-color: var(--text-dim); }
 .btn {
   display: inline-flex;
+  gap: 10px;
   align-items: center;
   height: 38px;
   padding: 0 18px;

@@ -8,11 +8,12 @@ ciphertext it has no key for.
 > a recess cut into one piece of material so that another seats inside it,
 > joining the two without a fastening.
 
-**Not shipped yet.** The vault, sync, the browser extension and import from other
-managers all work. There is no signed build to download, which means no Touch ID
-and no Chrome Web Store listing until there is. Everything is in the open while
-it gets there. Owners and invited testers can use the manual
-[macOS test-build path](TESTING.md) in the meantime.
+**Mac preview available.** [Download the universal DMG](https://github.com/sajdakabir/mortise/releases/download/v0.1.0-preview.1/Mortise_0.1.0-preview.1_universal.dmg)
+for Apple silicon and Intel, macOS 11+. This is an ad-hoc-signed preview, not
+Apple Developer ID signed or notarized. Gatekeeper will warn; Touch ID is not
+available. Use test credentials while the app is in preview. The
+[release page](https://github.com/sajdakabir/mortise/releases/tag/v0.1.0-preview.1)
+includes checksums, the browser extension and the [installation guide](TESTING.md).
 
 ## Why
 

@@ -24,7 +24,7 @@
       <a href="#sharing">Sharing</a>
       <a href="#limits">Limits</a>
       <a href="https://github.com/sajdakabir/mortise">GitHub</a>
-      <a class="nav-dl" href="https://github.com/sajdakabir/mortise/releases/latest">Download</a>
+      <a class="nav-dl" href="https://github.com/sajdakabir/mortise/releases/download/v0.1.0-preview.1/Mortise_0.1.0-preview.1_universal.dmg">Download</a>
     </nav>
   </div>
 </header>
@@ -39,16 +39,21 @@
       has no key for &mdash; including when we are the ones running it.
     </p>
     <div class="cta">
-      <a class="btn" href="https://github.com/sajdakabir/mortise/releases/latest">Download for Mac</a>
+      <a class="btn" href="https://github.com/sajdakabir/mortise/releases/download/v0.1.0-preview.1/Mortise_0.1.0-preview.1_universal.dmg">Download for Mac <span aria-hidden="true">&darr;</span></a>
+      <a class="btn ghost" href="https://github.com/sajdakabir/mortise/releases/tag/v0.1.0-preview.1">Release notes</a>
       <a class="btn ghost" href="https://github.com/sajdakabir/mortise">Read the source</a>
-      <a class="btn ghost" href="https://github.com/sajdakabir/mortise/blob/master/docs/threat-model.md">Threat model &rarr;</a>
     </div>
     <p class="cta-note">
-      The build is not signed yet, so macOS will refuse it on first open &mdash;
-      right-click, Open, confirm. Checksums are on
-      <a href="https://github.com/sajdakabir/mortise/releases">every release</a>,
-      and building from source stays the better option until that changes.
+      Preview 0.1.0 &middot; Apple silicon + Intel &middot; macOS 11+<br>
+      Not Apple-notarized yet; macOS will warn on first launch. Use test credentials.
+      <a href="https://github.com/sajdakabir/mortise/releases/tag/v0.1.0-preview.1">Installation guide, browser extension &amp; checksums &rarr;</a>
     </p>
+    <details class="install-help">
+      <summary>macOS blocked the app?</summary>
+      <p>After checking the download and dragging Mortise to Applications, run this in Terminal, then open Mortise:</p>
+      <pre><code>xattr -dr com.apple.quarantine "/Applications/Mortise.app"</code></pre>
+      <p>This removes Mortise&rsquo;s download quarantine flag. The preview is still not Apple-signed or notarized.</p>
+    </details>
 
   </div>
 </section>
@@ -322,20 +327,21 @@ typical manager  &lt;all_urls&gt;    on install
   <div class="wrap status">
     <div>
       <p class="label">Status</p>
-      <h2>Not shipped yet.</h2>
+      <h2>Ready to try.</h2>
       <p class="lede">
-        The vault, sync, the browser extension and import from other managers
-        all work, and every tagged build is published with its checksums. None
-        of them is signed yet, which means Gatekeeper complains, there is no
-        Touch ID, and no Chrome Web Store listing until that changes.
-        Everything is in the open while it gets there.
+        The first Mac preview includes passwords, browser autofill, imports,
+        and local projects for your environment secrets. One installer works
+        on Apple silicon and Intel. Apple signing, Touch ID and the browser
+        store listing are still ahead; team sharing remains experimental.
       </p>
       <div class="cta">
-        <a class="btn" href="https://github.com/sajdakabir/mortise">Follow on GitHub</a>
+        <a class="btn" href="https://github.com/sajdakabir/mortise/releases/download/v0.1.0-preview.1/Mortise_0.1.0-preview.1_universal.dmg">Download Mac preview <span aria-hidden="true">&darr;</span></a>
       </div>
     </div>
     <ul class="ship-list mono">
       <li class="done">Encrypted local vault</li>
+      <li class="done">Universal Mac installer</li>
+      <li class="done">Projects &amp; environment secrets</li>
       <li class="done">Two-device sync</li>
       <li class="done">Browser autofill &amp; capture</li>
       <li class="done">Import from 1Password, Bitwarden, Chrome, LastPass, Safari</li>
