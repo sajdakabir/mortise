@@ -10,7 +10,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { errorMessage, type ProjectSummary, type EnvImportReport } from "../lib/types";
 
-  import type { Snippet } from "svelte";
+  import { tick, type Snippet } from "svelte";
 
   let {
     unlocked,
@@ -66,6 +66,55 @@
   /// Inline add-an-environment field, shown from the segmented control.
   let addingEnv = $state(false);
   let newEnv = $state("");
+  let environmentInput = $state<HTMLInputElement | null>(null);
+  let fileMenuOpen = $state(false);
+  let fileActions = $state<HTMLDivElement | null>(null);
+  let fileMenu = $state<HTMLDivElement | null>(null);
+  let fileMenuButton = $state<HTMLButtonElement | null>(null);
+  const componentId = $props.id();
+  const menuId = `${componentId}-env-actions`;
+
+  async function chooseEnvironment(event: Event) {
+    const select = event.currentTarget as HTMLSelectElement;
+    if (select.value === "new") {
+      select.value = String(current?.environments.indexOf(environment ?? "") ?? -1);
+      addingEnv = true;
+      newEnv = "";
+      await tick();
+      environmentInput?.focus();
+    } else {
+      environment = current?.environments[Number(select.value)] ?? null;
+      addingEnv = false;
+    }
+    fileMenuOpen = false;
+  }
+
+  async function toggleFileMenu() {
+    fileMenuOpen = !fileMenuOpen;
+    if (fileMenuOpen) {
+      await tick();
+      fileMenu?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    }
+  }
+
+  function closeFileMenu(restoreFocus = false) {
+    fileMenuOpen = false;
+    if (restoreFocus) fileMenuButton?.focus();
+  }
+
+  function fileMenuKeys(event: KeyboardEvent) {
+    if (event.key === "Tab") { closeFileMenu(true); return; }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = Array.from(fileMenu?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+    if (!buttons.length) return;
+    const currentIndex = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+      : (currentIndex + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  }
+
+  $effect(() => { if (!unlocked) fileMenuOpen = false; });
 
   const current = $derived(projects.find((p) => p.name === project) ?? null);
 
@@ -264,6 +313,17 @@
   }
 </script>
 
+<svelte:window
+  onpointerdown={(event) => {
+    if (fileMenuOpen && !fileActions?.contains(event.target as Node)) closeFileMenu();
+  }}
+  onkeydown={(event) => {
+    if (fileMenuOpen && event.key === "Escape") {
+      event.preventDefault();
+      closeFileMenu(true);
+    }
+  }} />
+
 <div class="secrets">
   <aside class="rail">
     <div class="railtop drag">
@@ -313,33 +373,52 @@
       </div>
     {:else}
       <header class="head">
-        <div class="envs" role="tablist">
-          {#each current.environments as e (e)}
-            <button role="tab" aria-selected={e === environment}
-              class="env" class:active={e === environment}
-              onclick={() => (environment = e)}>{e}</button>
-          {/each}
+        <div class="environment-controls">
+          <div class="environment-select">
+            <select aria-label="Environment" value={current.environments.indexOf(environment ?? "")}
+              onchange={chooseEnvironment}>
+              {#each current.environments as e, i (e)}
+                <option value={i}>{e}</option>
+              {/each}
+              <option value="new" disabled={!unlocked}>+ Add environment…</option>
+            </select>
+            <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 8 4 4 4-4" /></svg>
+          </div>
           {#if addingEnv}
-            <input class="envinput" bind:value={newEnv} placeholder="preview"
-              onkeydown={(e) => {
-                if (e.key === "Enter") addEnvironment();
-                if (e.key === "Escape") { addingEnv = false; newEnv = ""; }
-              }} />
-          {:else}
-            <button class="env add" title="Add an environment" disabled={!unlocked}
-              onclick={() => { addingEnv = true; newEnv = ""; }}>+</button>
+            <form class="environment-add" onsubmit={(event) => { event.preventDefault(); addEnvironment(); }}>
+              <input class="envinput" bind:this={environmentInput} bind:value={newEnv}
+                aria-label="New environment name" placeholder="e.g. preview" disabled={!unlocked || busy}
+                onkeydown={(event) => { if (event.key === "Escape") { addingEnv = false; newEnv = ""; } }} />
+              <button class="tiny" type="submit" disabled={!unlocked || busy || !newEnv.trim()}>Add</button>
+              <button class="ghost tiny" type="button" onclick={() => { addingEnv = false; newEnv = ""; }}>Cancel</button>
+            </form>
           {/if}
         </div>
         <div class="row">
           <button class="ghost tiny" disabled={!unlocked}
             onclick={() => { adding = true; newKey = ""; newValue = ""; }}>+ Secret</button>
-          <button class="ghost tiny" disabled={!unlocked} onclick={openPaste}>Paste .env</button>
-          <button class="ghost tiny" disabled={!unlocked} onclick={uploadEnv}>Upload</button>
-          <button class="ghost tiny" onclick={copyEnv} disabled={!unlocked || rows.length === 0}>
-            {copied ? copiedNote : "Copy as .env"}
-          </button>
+          <div class="file-actions" bind:this={fileActions}>
+            <button class="file-trigger tiny" bind:this={fileMenuButton} disabled={!unlocked}
+              aria-label="Environment file actions" aria-haspopup="menu" aria-expanded={fileMenuOpen}
+              aria-controls={menuId} onclick={toggleFileMenu}
+              onkeydown={(event) => { if (event.key === "ArrowDown" && !fileMenuOpen) { event.preventDefault(); toggleFileMenu(); } }}>
+              .env
+              <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 8 4 4 4-4" /></svg>
+            </button>
+            {#if fileMenuOpen}
+              <div class="file-menu" id={menuId} bind:this={fileMenu} role="menu"
+                aria-label="Environment file actions" tabindex="-1" onkeydown={fileMenuKeys}>
+                <button role="menuitem" onclick={() => { closeFileMenu(); openPaste(); }}>Paste .env</button>
+                <button role="menuitem" onclick={() => { closeFileMenu(true); uploadEnv(); }}>Upload .env file</button>
+                <div class="menu-divider" role="separator"></div>
+                <button role="menuitem" disabled={rows.length === 0}
+                  onclick={() => { closeFileMenu(true); copyEnv(); }}>Copy as .env</button>
+              </div>
+            {/if}
+          </div>
         </div>
       </header>
+      {#if copied}<p class="copy-note" role="status">{copiedNote}</p>{/if}
 
       {#if rows.length === 0 && !adding}
         <!-- An empty environment is the one place someone is certain to be
@@ -526,7 +605,7 @@
   .proj .n { font-variant-numeric: tabular-nums; font-size: 11px; }
 
   /* The body is a column, not a scroll box. Scrolling the whole thing took
-     the environment tabs and the file actions off screen as soon as a project
+     the environment selector and the file actions off screen as soon as a project
      had more than a dozen secrets — exactly when you most want to switch
      environment or paste a new file. Only the key list scrolls. */
   .body {
@@ -543,15 +622,29 @@
     flex-shrink: 0;
   }
 
-  /* A segmented control: the environments are a small fixed set and exactly
-     one is in view, which is the one case where this beats a list. */
-  .envs { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-  .env {
-    border: 0; border-left: 1px solid var(--border); border-radius: 0;
-    background: transparent; color: var(--text-dim); padding: 5px 13px; font-size: 12px;
+  .environment-controls, .environment-add { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+  .environment-select { position: relative; max-width: 220px; }
+  .environment-select select {
+    appearance: none; width: auto; min-width: 132px; max-width: 220px;
+    padding: 7px 32px 7px 12px; font-size: 12.5px; cursor: pointer;
+    text-overflow: ellipsis; background: var(--bg-raised);
   }
-  .env:first-child { border-left: 0; }
-  .env.active { background: var(--bg-active); color: var(--text); }
+  .environment-select svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-dim); }
+  .file-actions { position: relative; }
+  .file-trigger { display: inline-flex; align-items: center; gap: var(--s2); min-height: 32px; }
+  .file-menu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 10;
+    min-width: 184px; padding: 4px; background: var(--bg-raised);
+    border: 1px solid var(--border-strong); border-radius: var(--radius);
+    box-shadow: var(--shadow-3);
+  }
+  .file-menu button {
+    display: block; width: 100%; text-align: left; font-size: 12.5px;
+    padding: 8px 10px; background: transparent; border-color: transparent;
+  }
+  .file-menu button:hover:not(:disabled), .file-menu button:focus-visible { background: var(--bg-hover); }
+  .menu-divider { height: 1px; background: var(--border); margin: 4px 6px; }
+  .copy-note { margin: 0 0 var(--s2); color: var(--text-dim); font-size: 12px; flex-shrink: 0; }
 
   .keys {
     list-style: none; margin: 0; padding: 0;
@@ -607,11 +700,7 @@
   }
   .report { font-size: 12px; color: var(--text-dim); margin: 0 0 var(--s2); }
   .hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 var(--s4); line-height: 1.6; }
-  .env.add { padding: 5px 10px; color: var(--text-faint); }
-  .env.add:hover { color: var(--text); }
   .envinput {
-    width: 96px; border: 0; border-left: 1px solid var(--border); border-radius: 0;
-    background: transparent; padding: 4px 10px; font-size: 12px;
+    width: 140px; padding: 6px 10px; font-size: 12px;
   }
-  .envinput:focus { outline: none; box-shadow: none; }
 </style>
