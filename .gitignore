@@ -5,6 +5,8 @@
 # frontend
 node_modules/
 ui/dist/
+ui/test-results/
+ui/playwright-report/
 
 # tauri generated schemas
 crates/mortise-app/gen/
