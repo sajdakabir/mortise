@@ -401,8 +401,8 @@ impl Vault {
 
     /// Whether `device` may write to this vault.
     ///
-    /// Used on ingest. A viewer's changes are refused here, which is the only
-    /// place that can happen — the relay cannot read roles.
+    /// Used for local mutations and on ingest, so a viewer cannot make edits
+    /// that appear saved locally but are rejected by other members.
     pub fn may_write(&self, device: DeviceId) -> Result<bool> {
         Ok(matches!(
             self.acl()?.role(device),
