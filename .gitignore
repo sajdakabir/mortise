@@ -13,3 +13,14 @@ crates/mortise-app/gen/
 
 # Local account-service metadata (never commit sessions or invite records).
 /accounts.sqlite*
+
+# Local service credentials and Neon workspace links.
+.env
+.env.*
+!.env.example
+.neon
+/dist/
+
+# Agent tooling installed locally with `neon skills`.
+/.claude/skills/neon*/
+/skills-lock.json

@@ -1,0 +1,29 @@
+{
+  "dependencies": {
+    "@neon/auth": "^0.8.2",
+    "@neon/config": "^1.10.0",
+    "@neon/env": "^1.6.8"
+  },
+  "devDependencies": {
+    "@better-auth/oauth-provider": "1.7.15",
+    "@types/node": "^26.6.6",
+    "better-auth": "1.7.15",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "name": "mortise-services",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "npm run check:accounts && npm --prefix ui run check && npm --prefix ui run build && npm run build:accounts-web && cargo build -p mortise-accounts --features postgres,client --locked",
+    "check:accounts": "tsc -p tsconfig.accounts.json",
+    "build:accounts-web": "node scripts/build-accounts-web.mjs",
+    "build:api:linux": "docker build --platform linux/arm64 -f deploy/accounts.Dockerfile --output type=local,dest=dist/accounts/bin .",
+    "dev:accounts": "node --env-file=.env.local scripts/accounts-local.mjs",
+    "db:migrate": "node --env-file=.env.local scripts/accounts-command.mjs migrate",
+    "test:postgres": "node --env-file=.env.local scripts/accounts-command.mjs test-postgres"
+  }
+}
