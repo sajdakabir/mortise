@@ -4,6 +4,9 @@ This service stores account identities, device public certificates, hashed
 sessions, teams and invitation status. It has no vault-content, password, `.env`,
 master-key or private-key storage API. Billing is outside this milestone.
 
+For the hosted Postgres + Neon Auth setup, see [the Neon deployment guide](neon.md).
+The standalone SQLite mode below remains available for local development.
+
 ## Boundaries
 
 - Account identity is the configured OIDC issuer plus subject, not an email
