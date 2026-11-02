@@ -18,7 +18,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "npm run check:accounts && npm --prefix ui run check && npm --prefix ui run build && npm run build:accounts-web && cargo build -p mortise-accounts --features postgres,client --locked",
+    "build": "npm run check:accounts && npm --prefix ui run check && npm --prefix ui run build && npm run build:accounts-web && cargo build -p mortise-accounts --features postgres,client --locked && cargo build -p mortise-accounts-node --locked && node scripts/prepare-native-local.mjs",
     "check:accounts": "tsc -p tsconfig.accounts.json",
     "build:accounts-web": "node scripts/build-accounts-web.mjs",
     "build:api:linux": "docker build --platform linux/arm64 -f deploy/accounts.Dockerfile --output type=local,dest=dist/accounts/bin .",

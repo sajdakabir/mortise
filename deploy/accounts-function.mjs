@@ -1,35 +1,16 @@
-// Neon runs the existing Rust API behind this small Fetch adapter. All account
+// Neon loads the existing Rust API through Node-API. All account
 // authorization, signatures, nonce checks and database writes remain in Rust.
-import { spawn } from 'node:child_process';
-import { readFile, mkdir, copyFile, chmod } from 'node:fs/promises';
-
-let starting;
-const backend = 'http://127.0.0.1:8788';
-async function startBackend() {
-  if (!process.env.DATABASE_URL || !process.env.MORTISE_OIDC_CLIENT_ID) throw new Error('Account configuration missing');
-  let binary = process.env.MORTISE_ACCOUNTS_BINARY;
-  if (!binary) {
-    await mkdir('/run/mortise', { recursive: true });
-    binary = '/run/mortise/accounts';
-    await copyFile(new URL('./bin/mortise-accounts', import.meta.url), binary);
-    await chmod(binary, 0o700);
+import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
+const require = createRequire(import.meta.url);
+let native;
+function api() {
+  if (!native) {
+    const local = process.env.MORTISE_ACCOUNTS_NATIVE;
+    if (!local) process.env.SSL_CERT_FILE ??= new URL('./bin/ca-certificates.crt', import.meta.url).pathname;
+    native = require(local ?? new URL('./bin/accounts.node', import.meta.url).pathname);
   }
-  const child = spawn(binary, [], { stdio: ['ignore', 'ignore', 'pipe'], env: {
-    ...process.env, MORTISE_ACCOUNTS_BIND: '127.0.0.1:8788',
-    ...(process.env.MORTISE_ACCOUNTS_BINARY ? {} : { SSL_CERT_FILE: new URL('./bin/ca-certificates.crt', import.meta.url).pathname }),
-  }});
-  // Avoid forwarding arbitrary provider/DB error details into hosted logs.
-  child.stderr.resume();
-  let exited = false;
-  child.on('error', () => { exited = true; starting = undefined; });
-  child.on('exit', () => { exited = true; starting = undefined; });
-  const deadline = Date.now() + 25_000;
-  while (!exited && Date.now() < deadline) {
-    try { if ((await fetch(`${backend}/health`, { signal: AbortSignal.timeout(1000) })).ok) return; } catch {}
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  child.kill();
-  throw new Error('Account service did not start');
+  return native;
 }
 
 function headers(type = 'application/json') {
@@ -70,18 +51,15 @@ export default {
           chunks.push(Buffer.from(value));
         }
       }
-      starting ??= startBackend().catch(error => { starting = undefined; throw error; });
-      await starting;
       const forwarded = new Headers();
       for (const key of ['authorization', 'x-mortise-proof', 'content-type']) {
         if (request.headers.has(key)) forwarded.set(key, request.headers.get(key));
       }
-      const result = await fetch(backend + url.pathname + url.search, { method: request.method,
-        headers: forwarded, body: ['GET', 'HEAD'].includes(request.method) ? undefined : Buffer.concat(chunks),
-        redirect: 'manual', signal: AbortSignal.timeout(35_000),
-      });
+      const result = await api().handleRequest(request.method, url.pathname + url.search,
+        Object.fromEntries(forwarded), Buffer.concat(chunks));
       return new Response(result.body, { status: result.status, headers: result.headers });
-    } catch {
+    } catch (error) {
+      console.error('accounts: request failed', { type: error?.name, code: error?.code });
       return Response.json({ code: 'unavailable', message: 'Account service is temporarily unavailable.' }, { status: 503, headers: { 'cache-control': 'no-store' } });
     }
   },

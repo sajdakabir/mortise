@@ -1,10 +1,11 @@
-FROM rust:1.93-alpine AS build
-RUN apk add --no-cache musl-dev make perl
+FROM rust:1.93-bullseye AS build
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release --locked -p mortise-accounts --features postgres,vendored-tls
+RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/build/target \
+    cargo build --release --locked -p mortise-accounts-node --features vendored-tls && \
+    cp target/release/libmortise_accounts_node.so /accounts.node
 
 FROM scratch AS artifact
-COPY --from=build /build/target/release/mortise-accounts /mortise-accounts
-COPY --from=build /etc/ssl/cert.pem /ca-certificates.crt
+COPY --from=build /accounts.node /accounts.node
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
-process.env.MORTISE_ACCOUNTS_BINARY = resolve('target/debug/mortise-accounts');
+process.env.MORTISE_ACCOUNTS_NATIVE = resolve('target/debug/mortise-accounts.node');
 const { default: app } = await import('../dist/accounts/index.mjs');
 createServer(async (req, res) => {
   try {
