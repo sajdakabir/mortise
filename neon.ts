@@ -1,5 +1,12 @@
 import { defineConfig } from "@neon/config/v1";
 
+// Neon refreshes its own variables on checkout but retains application vars.
+// Never upload the previous branch's OAuth client/resource to another branch.
+if (process.env.MORTISE_OIDC_RESOURCE && process.env.NEON_FUNCTION_ACCOUNTS_BASE_URL &&
+    process.env.MORTISE_OIDC_RESOURCE !== process.env.NEON_FUNCTION_ACCOUNTS_BASE_URL.replace(/\/$/, "")) {
+  throw new Error("OAuth configuration belongs to another branch. Run scripts/configure-neon-auth.mjs with the current .env.local before deploying.");
+}
+
 export default defineConfig({
   // Declare your Neon services here
   auth: true,

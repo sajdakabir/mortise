@@ -95,7 +95,7 @@ async fn native_login_and_account_service_work_with_a_configured_provider() {
         issuer: issuer.clone(),
         client_id: "mortise-test".into(),
         callback_port: None,
-        resource: None,
+        resource: Some("https://accounts.example".into()),
     };
     let authorization = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     let token_authorization = authorization.clone();
@@ -112,6 +112,7 @@ async fn native_login_and_account_service_work_with_a_configured_provider() {
             assert_eq!(form["code"], "test-authorization-code");
             assert_eq!(form["client_id"], "mortise-test");
             assert_eq!(form["redirect_uri"], auth["redirect_uri"]);
+            assert_eq!(form["resource"], "https://accounts.example");
             let challenge = PkceCodeChallenge::from_code_verifier_sha256(&PkceCodeVerifier::new(form["code_verifier"].clone()));
             assert_eq!(challenge.as_str(), auth["code_challenge"]);
             let claims = json!({"iss":token_issuer,"sub":"test-alice","aud":"mortise-test","iat":now(),"exp":now()+300,"nonce":auth["nonce"],"email":"alice@example.com","email_verified":true,"name":"Alice"});
@@ -152,6 +153,7 @@ async fn native_login_and_account_service_work_with_a_configured_provider() {
                 .collect();
             assert_eq!(url.path(), "/authorize");
             assert_eq!(params["code_challenge_method"], "S256");
+            assert_eq!(params["resource"], "https://accounts.example");
             assert!(params["scope"].split(' ').any(|s| s == "openid"));
             let mut callback = url::Url::parse(&params["redirect_uri"]).unwrap();
             callback

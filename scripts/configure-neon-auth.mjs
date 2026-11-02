@@ -22,6 +22,11 @@ const clients = Array.isArray(listed) ? listed : listed.clients;
 if (!Array.isArray(clients)) throw new Error('Unexpected OAuth client list; no client was changed.');
 let client = clients.find(c => c.client_name === 'Mortise desktop' || c.name === 'Mortise desktop');
 if (!client) client = JSON.parse(neon(['neon-auth', 'oauth-client', 'create', '--name', 'Mortise desktop', '--type', 'public', '--redirect-uris', 'http://127.0.0.1:39817/callback', '--resources', base], true));
+if (client.type !== 'public' || client.disabled || client.skip_consent ||
+    client.redirect_uris?.length !== 1 || client.redirect_uris[0] !== 'http://127.0.0.1:39817/callback' ||
+    client.resources?.length !== 1 || client.resources[0] !== base) {
+  throw new Error('Existing desktop client differs from the expected public, consent-required configuration. Review it before deploying.');
+}
 const id = client.client_id;
 if (!id || typeof id !== 'string') throw new Error('Neon did not return a public client ID.');
 const values = { MORTISE_OIDC_CLIENT_ID: id, MORTISE_OIDC_CALLBACK_PORT: '39817', MORTISE_OIDC_RESOURCE: base, MORTISE_ACCOUNTS_URL: base };
