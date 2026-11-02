@@ -1,12 +1,13 @@
+use crate::database::{Database, Transaction, params};
 use crate::{Error, Result, protocol::*};
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension};
 use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
 
 #[derive(Clone)]
-pub struct Store(Arc<Mutex<Connection>>);
+pub struct Store(Arc<Database>);
 #[derive(Clone)]
 pub struct Actor {
     pub account_id: String,
@@ -78,14 +79,21 @@ impl Store {
             return Err(Error::Invalid("Not a supported accounts database."));
         }
         conn.execute_batch(SCHEMA)?;
-        Ok(Self(Arc::new(Mutex::new(conn))))
+        Ok(Self(Arc::new(Database::Sqlite(Mutex::new(conn)))))
     }
     fn tx<T>(&self, f: impl FnOnce(&Transaction<'_>) -> Result<T>) -> Result<T> {
-        let mut conn = self.0.lock().map_err(|_| Error::Storage)?;
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let value = f(&tx)?;
-        tx.commit()?;
-        Ok(value)
+        self.0.tx(f)
+    }
+
+    /// Connect to an already migrated, TLS-verified account Postgres database.
+    #[cfg(feature = "postgres")]
+    pub fn postgres(url: &str) -> Result<Self> {
+        Ok(Self(Arc::new(Database::postgres(url)?)))
+    }
+    /// Apply account-only migrations through a direct Postgres connection.
+    #[cfg(feature = "postgres")]
+    pub fn migrate_postgres(url: &str) -> Result<()> {
+        crate::database::migrate(url)
     }
 
     pub fn start_login(
@@ -99,11 +107,12 @@ impl Store {
         let cert = certificate(&input.certificate)?;
         proof.verify(&cert, "POST", "/v1/auth/start", "", body, now)?;
         self.tx(|tx| {
-            tx.execute("DELETE FROM logins WHERE expires_at<=?1", [now])?;
-            let total: i64 = tx.query_row("SELECT count(*) FROM logins", [], |r| r.get(0))?;
+            tx.execute("DELETE FROM logins WHERE expires_at<=?1", params![now])?;
+            let total: i64 =
+                tx.query_row("SELECT count(*) FROM logins", params![], |r| r.get(0))?;
             let own: i64 = tx.query_row(
                 "SELECT count(*) FROM logins WHERE device_id=?1",
-                [&proof.device_id],
+                params![&proof.device_id],
                 |r| r.get(0),
             )?;
             if total >= 1024 || own >= 5 {
@@ -218,7 +227,7 @@ impl Store {
             let registered: Option<(String, String, String)> = tx
                 .query_row(
                     "SELECT account_id,certificate,status FROM devices WHERE id=?1",
-                    [&proof.device_id],
+                    params![&proof.device_id],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()?;
@@ -249,12 +258,12 @@ impl Store {
             }
             let token = random()?;
             let expires_at = now + SESSION_LIFETIME;
-            tx.execute("DELETE FROM sessions WHERE expires_at<=?1", [now])?;
+            tx.execute("DELETE FROM sessions WHERE expires_at<=?1", params![now])?;
             tx.execute(
                 "INSERT INTO sessions VALUES(?1,?2,?3,?4)",
                 params![digest(&token), account_id, proof.device_id, expires_at],
             )?;
-            tx.execute("DELETE FROM logins WHERE id=?1", [id])?;
+            tx.execute("DELETE FROM logins WHERE id=?1", params![id])?;
             Ok(Session {
                 token,
                 expires_at,
@@ -287,17 +296,20 @@ impl Store {
     }
     pub fn logout(&self, token: &str) -> Result<()> {
         self.tx(|tx| {
-            tx.execute("DELETE FROM sessions WHERE token_hash=?1", [digest(token)])?;
+            tx.execute(
+                "DELETE FROM sessions WHERE token_hash=?1",
+                params![digest(token)],
+            )?;
             Ok(())
         })
     }
     pub fn dashboard(&self, actor: &Actor) -> Result<Dashboard> {
         self.tx(|tx| {
-            let account = tx.query_row("SELECT id,email,name FROM accounts WHERE id=?1", [&actor.account_id], |r| Ok(Account {id:r.get(0)?,email:r.get(1)?,name:r.get(2)?}))?;
+            let account = tx.query_row("SELECT id,email,name FROM accounts WHERE id=?1", params![&actor.account_id], |r| Ok(Account {id:r.get(0)?,email:r.get(1)?,name:r.get(2)?}))?;
             let mut query = tx.prepare("SELECT id,name,certificate,status,created_at FROM devices WHERE account_id=?1 ORDER BY created_at,id")?;
-            let devices = query.query_map([&actor.account_id], |r| Ok(DeviceInfo {id:r.get(0)?,name:r.get(1)?,certificate:r.get(2)?,status:r.get(3)?,created_at:r.get(4)?,fingerprint:String::new()}))?.collect::<std::result::Result<Vec<_>,_>>()?.into_iter().map(|mut d| { d.fingerprint = digest(&d.certificate); d }).collect();
+            let devices = query.query_map(params![&actor.account_id], |r| Ok(DeviceInfo {id:r.get(0)?,name:r.get(1)?,certificate:r.get(2)?,status:r.get(3)?,created_at:r.get(4)?,fingerprint:String::new()}))?.collect::<std::result::Result<Vec<_>,_>>()?.into_iter().map(|mut d| { d.fingerprint = digest(&d.certificate); d }).collect();
             let mut query = tx.prepare("SELECT t.id,t.name,m.role FROM teams t JOIN memberships m ON m.team_id=t.id WHERE m.account_id=?1 ORDER BY t.name")?;
-            let teams = query.query_map([&actor.account_id], |r| Ok(Team{id:r.get(0)?,name:r.get(1)?,role:r.get(2)?}))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            let teams = query.query_map(params![&actor.account_id], |r| Ok(Team{id:r.get(0)?,name:r.get(1)?,role:r.get(2)?}))?.collect::<std::result::Result<Vec<_>,_>>()?;
             Ok(Dashboard {account,current_device_id:actor.device_id.clone(),devices,teams})
         })
     }
@@ -317,7 +329,7 @@ impl Store {
             if remaining == 0 { return Err(Error::Conflict("Keep at least one trusted device.")); }
             let changed = tx.execute("UPDATE devices SET status='revoked' WHERE id=?1 AND account_id=?2 AND status!='revoked'", params![id,actor.account_id])?;
             if changed != 1 { return Err(Error::Forbidden); }
-            tx.execute("DELETE FROM sessions WHERE device_id=?1", [id])?;
+            tx.execute("DELETE FROM sessions WHERE device_id=?1", params![id])?;
             Ok(())
         })
     }
@@ -344,7 +356,7 @@ impl Store {
     pub fn members(&self, actor: &Actor, team: &str) -> Result<Vec<Member>> {
         self.tx(|tx| { trusted(tx,actor)?; role(tx,actor,team)?;
             let mut query=tx.prepare("SELECT a.id,a.email,a.name,m.role FROM memberships m JOIN accounts a ON a.id=m.account_id WHERE m.team_id=?1 ORDER BY a.name")?;
-            Ok(query.query_map([team],|r|Ok(Member{account_id:r.get(0)?,email:r.get(1)?,name:r.get(2)?,role:r.get(3)?}))?.collect::<std::result::Result<Vec<_>,_>>()?)
+            Ok(query.query_map(params![team],|r|Ok(Member{account_id:r.get(0)?,email:r.get(1)?,name:r.get(2)?,role:r.get(3)?}))?.collect::<std::result::Result<Vec<_>,_>>()?)
         })
     }
     pub fn remove_member(&self, actor: &Actor, team: &str, member: &str) -> Result<()> {
@@ -459,7 +471,7 @@ impl Store {
 }
 
 fn consume_nonce(tx: &Transaction<'_>, proof: &Proof, now: i64) -> Result<()> {
-    tx.execute("DELETE FROM nonces WHERE expires_at<=?1", [now])?;
+    tx.execute("DELETE FROM nonces WHERE expires_at<=?1", params![now])?;
     match tx.execute(
         "INSERT INTO nonces VALUES(?1,?2,?3)",
         params![
@@ -510,7 +522,7 @@ fn recipient(tx: &Transaction<'_>, actor: &Actor, email: Option<&str>) -> Result
     if let Some(expected) = email {
         let actual: String = tx.query_row(
             "SELECT email FROM accounts WHERE id=?1",
-            [&actor.account_id],
+            params![&actor.account_id],
             |r| r.get(0),
         )?;
         if expected != actual {

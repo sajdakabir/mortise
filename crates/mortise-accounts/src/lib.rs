@@ -1,6 +1,9 @@
 //! Online account metadata, separate from local vault encryption.
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "server")]
+mod database;
+
 #[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "oidc")]
