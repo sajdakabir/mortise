@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mortise account</title><link rel="stylesheet" href="/auth/style.css"><script type="module" src="/auth/app.js"></script></head>
 <body><main>
-  <a class="brand" href="https://mortise.sajdakabir.me">Mortise</a>
+  <a class="brand" href="/auth/sign-in">Mortise</a>
   <h1 id="heading">Sign in to Mortise</h1>
   <p id="intro">Your account connects your devices and team. Your vault stays on your Mac.</p>
   <p id="message" role="status" aria-live="polite"></p>
@@ -10,7 +10,7 @@
     <form id="code-form" hidden><label for="code">Code from your email</label><input id="code" autocomplete="one-time-code" inputmode="numeric" required maxlength="8"><button>Continue</button><button type="button" id="change-email" class="secondary">Use a different email</button></form>
   </section>
   <section id="consent" hidden>
-    <dl><dt>Application</dt><dd id="client-name"></dd><dt>Access requested</dt><dd id="scopes"></dd><dt>Return to</dt><dd id="redirects"></dd></dl>
+    <dl><dt>Application</dt><dd id="client-name"></dd><dt>Access requested</dt><dd id="scopes"></dd><dt>Account service</dt><dd id="resource"></dd><dt>Return to</dt><dd id="redirects"></dd></dl>
     <p>Only approve if you started this sign-in from Mortise on this Mac. This does not unlock or share your vault.</p>
     <div class="actions"><button id="allow">Allow sign-in</button><button id="deny" class="secondary">Cancel</button></div>
   </section>

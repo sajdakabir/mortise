@@ -42,6 +42,7 @@ async function main() {
       el('intro').textContent = `Signed in as ${data.user.email}.`;
       el('client-name').textContent = client.client_name ?? 'Unknown application';
       el('scopes').textContent = params.get('scope') ?? 'Profile and email';
+      el('resource').textContent = params.get('resource') ?? 'Mortise account service';
       el('redirects').textContent = (client.redirect_uris ?? []).map((uri: string) => new URL(uri).host).join(', ');
       el('consent').hidden = false;
       return;
