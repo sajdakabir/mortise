@@ -2560,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "mortise-app"
-version = "0.1.0"
+version = "0.1.0-preview.1"
 dependencies = [
  "base64 0.22.1",
  "hmac 0.13.0",

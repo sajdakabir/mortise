@@ -1,6 +1,6 @@
 # Testing Mortise on macOS
 
-This path is for short-lived owner and tester builds. The app is ad-hoc signed,
+This guide covers the public preview and short-lived tester builds. The app is ad-hoc signed,
 not signed with an Apple Developer identity and not notarized. Use test data,
 not real passwords or API keys.
 
@@ -9,7 +9,13 @@ and includes the helper used by the Chromium browser extension.
 
 ## Get a build
 
-After this workflow is on `master`:
+Download **Mortise_0.1.0-preview.1_universal.dmg** from the
+[GitHub preview release](https://github.com/sajdakabir/mortise/releases/tag/v0.1.0-preview.1).
+The same release includes the optional browser extension, `SHA256SUMS`,
+`BUILD.txt`, `INSTALL.md` (this guide), and `sample-data.csv` with fake data.
+Release assets are public; you do not need a GitHub account to download them.
+
+For a separate temporary build from a branch:
 
 1. Open the repository's **Actions** tab and choose **macOS Test Build**.
 2. Click **Run workflow**, choose the branch to test, and run it. The artifact
@@ -32,7 +38,7 @@ shasum -a 256 -c SHA256SUMS
 ```
 
 The checksum catches a damaged or mixed-up download; because the checksum is
-inside the same artifact, it is not an independent proof of who built it. Also
+distributed with the files, it is not an independent proof of who built it. Also
 compare `BUILD.txt` with the workflow run you intended to test.
 
 1. Open the `.dmg`, drag **Mortise** to **Applications**, then eject the disk

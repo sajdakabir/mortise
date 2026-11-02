@@ -1,6 +1,6 @@
 [package]
 name = "mortise-app"
-version = "0.1.0"
+version = "0.1.0-preview.1"
 description = "Mortise desktop app"
 edition.workspace = true
 rust-version.workspace = true

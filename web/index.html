@@ -24,7 +24,7 @@
       <a href="#sharing">Sharing</a>
       <a href="#limits">Limits</a>
       <a href="https://github.com/sajdakabir/mortise">GitHub</a>
-      <a class="nav-dl" href="https://github.com/sajdakabir/mortise/releases/latest">Download</a>
+      <a class="nav-dl" href="https://github.com/sajdakabir/mortise/releases/download/v0.1.0-preview.1/Mortise_0.1.0-preview.1_universal.dmg">Download</a>
     </nav>
   </div>
 </header>
@@ -39,16 +39,21 @@
       has no key for &mdash; including when we are the ones running it.
     </p>
     <div class="cta">
-      <a class="btn" href="https://github.com/sajdakabir/mortise/releases/latest">Download for Mac</a>
+      <a class="btn" href="https://github.com/sajdakabir/mortise/releases/download/v0.1.0-preview.1/Mortise_0.1.0-preview.1_universal.dmg">Download for Mac <span aria-hidden="true">&darr;</span></a>
+      <a class="btn ghost" href="https://github.com/sajdakabir/mortise/releases/tag/v0.1.0-preview.1">Release notes</a>
       <a class="btn ghost" href="https://github.com/sajdakabir/mortise">Read the source</a>
-      <a class="btn ghost" href="https://github.com/sajdakabir/mortise/blob/master/docs/threat-model.md">Threat model &rarr;</a>
     </div>
     <p class="cta-note">
-      The build is not signed yet, so macOS will refuse it on first open &mdash;
-      right-click, Open, confirm. Checksums are on
-      <a href="https://github.com/sajdakabir/mortise/releases">every release</a>,
-      and building from source stays the better option until that changes.
+      Preview 0.1.0 &middot; Apple silicon + Intel &middot; macOS 11+<br>
+      Not Apple-notarized yet; macOS will warn on first launch. Use test credentials.
+      <a href="https://github.com/sajdakabir/mortise/releases/tag/v0.1.0-preview.1">Installation guide, browser extension &amp; checksums &rarr;</a>
     </p>
+    <details class="install-help">
+      <summary>macOS blocked the app?</summary>
+      <p>After checking the download and dragging Mortise to Applications, run this in Terminal, then open Mortise:</p>
+      <pre><code>xattr -dr com.apple.quarantine "/Applications/Mortise.app"</code></pre>
+      <p>This removes Mortise&rsquo;s download quarantine flag. The preview is still not Apple-signed or notarized.</p>
+    </details>
 
   </div>
 </section>
@@ -57,7 +62,7 @@
   <div class="wrap facts-grid">
     <div><p class="label">Vault</p><p class="fact">On your disk</p></div>
     <div><p class="label">Relay sees</p><p class="fact">Ciphertext</p></div>
-    <div><p class="label">Page access</p><p class="fact">On request</p></div>
+    <div><p class="label">Browser extension</p><p class="fact">Optional</p></div>
     <div><p class="label">Built with</p><p class="fact">Rust &amp; Tauri</p></div>
   </div>
 </section>
@@ -65,7 +70,7 @@
   <div class="wrap steps">
     <div class="steps-head">
       <p class="label">How it works</p>
-      <h2>Three things, and the third<br>is the unusual one.</h2>
+      <h2>Your vault, your devices,<br>your browser.</h2>
     </div>
 
     <ol class="step-list">
@@ -115,19 +120,19 @@ lose either one   <b>nothing opens, by anyone</b></pre>
       <li>
         <span class="num mono">03</span>
         <div class="step-body">
-          <h3>The extension runs on no page until you ask</h3>
+          <h3>Your browser connects to your local vault</h3>
           <p class="dim">
-            Most managers request access to every site you visit, forever. This
-            one asks the browser for the page only when you invoke it, and the
-            origin it matches against comes from the browser rather than from
-            the page &mdash; so a lookalike site cannot claim to be your bank.
+            The optional extension detects login forms, saves submitted
+            passwords, and offers to fill matching logins. It requests access
+            to HTTP and HTTPS pages for this. The origin used for matching
+            comes from the browser, not from a claim made by the page.
           </p>
         </div>
       <figure class="step-fig">
-          <pre class="mono">                 host access   granted
-typical manager  &lt;all_urls&gt;    on install
-<b>Mortise          activeTab     when you ask</b></pre>
-          <figcaption class="label">What the browser hands over</figcaption>
+          <pre class="mono">login form       detected on the page
+site origin      supplied by the browser
+<b>saved login      read from your Mac</b></pre>
+          <figcaption class="label">Browser to local vault</figcaption>
         </figure>
       </li>
     </ol>
@@ -322,20 +327,21 @@ typical manager  &lt;all_urls&gt;    on install
   <div class="wrap status">
     <div>
       <p class="label">Status</p>
-      <h2>Not shipped yet.</h2>
+      <h2>Ready to try.</h2>
       <p class="lede">
-        The vault, sync, the browser extension and import from other managers
-        all work, and every tagged build is published with its checksums. None
-        of them is signed yet, which means Gatekeeper complains, there is no
-        Touch ID, and no Chrome Web Store listing until that changes.
-        Everything is in the open while it gets there.
+        The first Mac preview includes passwords, browser autofill, imports,
+        and local projects for your environment secrets. One installer works
+        on Apple silicon and Intel. Apple signing, Touch ID and the browser
+        store listing are still ahead; team sharing remains experimental.
       </p>
       <div class="cta">
-        <a class="btn" href="https://github.com/sajdakabir/mortise">Follow on GitHub</a>
+        <a class="btn" href="https://github.com/sajdakabir/mortise/releases/download/v0.1.0-preview.1/Mortise_0.1.0-preview.1_universal.dmg">Download Mac preview <span aria-hidden="true">&darr;</span></a>
       </div>
     </div>
     <ul class="ship-list mono">
       <li class="done">Encrypted local vault</li>
+      <li class="done">Universal Mac installer</li>
+      <li class="done">Projects &amp; environment secrets</li>
       <li class="done">Two-device sync</li>
       <li class="done">Browser autofill &amp; capture</li>
       <li class="done">Import from 1Password, Bitwarden, Chrome, LastPass, Safari</li>
@@ -384,11 +390,25 @@ typical manager  &lt;all_urls&gt;    on install
     </div>
   </div>
 
+  <!-- The outline wordmark is decorative; the brand above names the footer. -->
+  <div class="footer-wordmark" aria-hidden="true">
+    <svg viewBox="0 0 10275 1521" fill="none" xmlns="http://www.w3.org/2000/svg" focusable="false">
+      <path pathLength="1" style="--letter:0" d="M1996 1470H1227V1392Q1261 1389 1310.5 1382.0Q1360 1375 1378 1367Q1415 1352 1431.0 1326.0Q1447 1300 1447 1260V200L959 1447H833Q824 1414 788.5 1316.0Q753 1218 731 1159L372 184V1047Q372 1171 388.5 1235.5Q405 1300 442 1330Q467 1351 531.5 1370.0Q596 1389 622 1392V1470H12V1392Q37 1389 93.5 1378.5Q150 1368 186 1342Q226 1314 240.0 1247.5Q254 1181 254 1058V355Q254 291 238.0 248.5Q222 206 190 181Q150 150 108.0 141.0Q66 132 23 129V51H676L1026 988L1321 227Q1336 185 1350.0 127.0Q1364 69 1365 51H1994V129Q1962 131 1927.0 137.0Q1892 143 1860 153Q1821 166 1808.5 194.0Q1796 222 1796 256V1261Q1796 1297 1808.5 1321.5Q1821 1346 1860 1364Q1880 1373 1925.5 1381.0Q1971 1389 1996 1392Z"/>
+      <path pathLength="1" style="--letter:1" d="M3421 209Q3526 305 3587.5 441.0Q3649 577 3649 751Q3649 906 3597.0 1046.0Q3545 1186 3447 1287Q3344 1392 3205.0 1450.5Q3066 1509 2874 1509Q2719 1509 2581.0 1458.0Q2443 1407 2338 1310Q2234 1215 2173.0 1079.0Q2112 943 2112 776Q2112 602 2171.5 460.5Q2231 319 2335 218Q2438 119 2579.5 65.5Q2721 12 2881 12Q3040 12 3179.5 64.0Q3319 116 3421 209ZM3164 1224Q3209 1133 3229.0 1018.0Q3249 903 3249 758Q3249 635 3231.5 518.5Q3214 402 3172 311Q3129 220 3058.0 165.0Q2987 110 2881 110Q2700 110 2606.0 281.5Q2512 453 2512 766Q2512 899 2532.5 1017.0Q2553 1135 2597 1223Q2642 1312 2711.0 1361.5Q2780 1411 2881 1411Q2980 1411 3051.0 1361.0Q3122 1311 3164 1224Z"/>
+      <path pathLength="1" style="--letter:2" d="M5386 1470H4842Q4701 1254 4607.5 1126.0Q4514 998 4375 830H4320V1261Q4320 1297 4333.5 1322.0Q4347 1347 4385 1364Q4404 1372 4444.5 1380.5Q4485 1389 4514 1392V1470H3757V1392Q3786 1389 3833.5 1383.5Q3881 1378 3901 1370Q3939 1354 3952.0 1329.5Q3965 1305 3965 1267V266Q3965 230 3954.0 206.0Q3943 182 3901 164Q3869 151 3825.5 142.0Q3782 133 3757 129V51H4553Q4820 51 4958.5 134.5Q5097 218 5097 387Q5097 536 5011.5 626.5Q4926 717 4751 768Q4819 856 4909.5 972.0Q5000 1088 5098 1209Q5129 1248 5182.5 1304.5Q5236 1361 5277 1374Q5300 1381 5335.5 1386.0Q5371 1391 5386 1392ZM4705 415Q4705 273 4625.5 207.5Q4546 142 4399 142H4320V736H4396Q4543 736 4624.0 659.0Q4705 582 4705 415Z"/>
+      <path pathLength="1" style="--letter:3" d="M6677 457H6600Q6569 366 6500.5 262.0Q6432 158 6374 150Q6342 146 6295.0 143.0Q6248 140 6214 140H6167V1253Q6167 1289 6180.0 1316.5Q6193 1344 6231 1360Q6254 1369 6302.5 1378.5Q6351 1388 6385 1392V1470H5594V1392Q5623 1389 5675.5 1383.5Q5728 1378 5747 1370Q5786 1354 5799.0 1327.0Q5812 1300 5812 1263V140H5765Q5731 140 5684.0 143.0Q5637 146 5605 150Q5547 158 5478.5 262.0Q5410 366 5379 457H5302V51H6677Z"/>
+      <path pathLength="1" style="--letter:4" d="M7508 1470H6721V1392Q6748 1390 6800.5 1386.0Q6853 1382 6873 1374Q6910 1359 6923.5 1334.5Q6937 1310 6937 1272V266Q6937 232 6924.0 206.0Q6911 180 6873 164Q6849 154 6802.0 143.5Q6755 133 6721 129V51H7508V129Q7478 132 7433.0 137.5Q7388 143 7357 153Q7318 166 7305.0 193.5Q7292 221 7292 256V1261Q7292 1297 7305.5 1322.5Q7319 1348 7357 1364Q7378 1373 7426.5 1381.5Q7475 1390 7508 1392Z"/>
+      <path pathLength="1" style="--letter:5" d="M8203 1508Q8073 1508 7960.5 1476.0Q7848 1444 7770 1400L7701 1470H7616L7603 957H7689Q7718 1030 7763.0 1111.0Q7808 1192 7867 1256Q7928 1323 8003.5 1365.0Q8079 1407 8180 1407Q8316 1407 8388.5 1340.5Q8461 1274 8461 1173Q8461 1090 8399.5 1033.5Q8338 977 8209 936Q8125 909 8054.5 886.0Q7984 863 7922 839Q7779 782 7709.5 676.0Q7640 570 7640 439Q7640 356 7676.0 279.5Q7712 203 7781 142Q7847 85 7950.0 49.0Q8053 13 8174 13Q8292 13 8395.0 45.5Q8498 78 8557 111L8618 51H8705L8713 535H8627Q8597 457 8556.5 375.5Q8516 294 8471 240Q8422 182 8358.0 147.5Q8294 113 8208 113Q8100 113 8031.5 174.0Q7963 235 7963 325Q7963 410 8022.5 464.0Q8082 518 8208 559Q8282 584 8359.0 609.0Q8436 634 8496 657Q8641 713 8716.5 811.5Q8792 910 8792 1056Q8792 1148 8749.0 1234.0Q8706 1320 8633 1377Q8553 1440 8448.0 1474.0Q8343 1508 8203 1508Z"/>
+      <path pathLength="1" style="--letter:6" d="M10163 413H10087Q10058 332 9987.0 249.0Q9916 166 9846 151Q9816 144 9762.5 142.5Q9709 141 9674 141H9468V689H9614Q9669 689 9714.0 676.0Q9759 663 9796 626Q9819 603 9842.5 545.0Q9866 487 9873 444H9949V1036H9873Q9867 994 9842.5 930.5Q9818 867 9796 843Q9763 807 9718.0 793.5Q9673 780 9614 780H9468V1189Q9468 1253 9477.5 1290.5Q9487 1328 9513 1348Q9538 1367 9581.5 1373.0Q9625 1379 9700 1379Q9735 1379 9784.0 1378.0Q9833 1377 9870 1372Q9912 1367 9948.5 1357.0Q9985 1347 10003 1328Q10051 1279 10111.0 1178.5Q10171 1078 10190 1028H10263L10236 1470H8905V1392Q8933 1390 8981.0 1384.0Q9029 1378 9049 1370Q9087 1354 9100.0 1329.5Q9113 1305 9113 1267V266Q9113 230 9102.0 206.5Q9091 183 9049 164Q9023 152 8976.0 142.0Q8929 132 8905 129V51H10163Z"/>
+    </svg>
+  </div>
+
   <div class="wrap foot-base">
     <p class="label">Local-first &middot; macOS</p>
     <p class="label">AGPL-3.0 &middot; no account, no telemetry</p>
   </div>
 </footer>
 
+<script src="footer.js" defer></script>
 </body>
 </html>

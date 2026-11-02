@@ -154,6 +154,12 @@ p { margin: 0; }
 .cta-note a { color: var(--text-dim); }
 .cta-note a:hover { color: var(--text); }
 
+.install-help { max-width: 62ch; margin-top: 14px; color: var(--text-dim); font-size: 13px; }
+.install-help summary { cursor: pointer; width: fit-content; }
+.install-help p { margin-top: 12px; }
+.install-help pre { padding: 14px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--bg-raised); overflow-x: auto; }
+.install-help code { color: var(--text); font: 12px/1.6 var(--mono); user-select: all; }
+
 /* The nav's only action. Outlined rather than filled: the hero carries the
    real call, and two solid buttons on one screen compete. */
 .nav-dl {
@@ -164,6 +170,7 @@ p { margin: 0; }
 .nav-dl:hover { border-color: var(--text-dim); }
 .btn {
   display: inline-flex;
+  gap: 10px;
   align-items: center;
   height: 38px;
   padding: 0 18px;
@@ -322,6 +329,37 @@ p { margin: 0; }
 /* --- footer ------------------------------------------------------------ */
 
 .foot { padding-block: 54px 40px; }
+
+/* A quiet outline, drawn once when it enters view. SVG paths keep the
+   lettering identical without downloading a font or animation library. */
+.footer-wordmark {
+  margin-top: clamp(52px, 8vw, 112px);
+  padding-inline: var(--gutter);
+  color: var(--text-dim);
+  overflow: hidden;
+}
+.footer-wordmark svg { display: block; width: 100%; height: auto; }
+.footer-wordmark path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.footer-wordmark.is-ready path { stroke-dashoffset: 1; }
+.footer-wordmark.is-drawing path {
+  animation: wordmark-draw 2.4s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: calc(var(--letter) * 85ms);
+}
+@keyframes wordmark-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .footer-wordmark.is-ready path,
+  .footer-wordmark.is-drawing path { animation: none; stroke-dashoffset: 0; }
+}
 
 .foot-top {
   display: grid;
