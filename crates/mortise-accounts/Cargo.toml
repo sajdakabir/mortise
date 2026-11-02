@@ -19,6 +19,10 @@ oidc = ["dep:openidconnect", "dep:ureq"]
 name = "mortise-accounts"
 required-features = ["server"]
 
+[[example]]
+name = "neon_smoke"
+required-features = ["client"]
+
 [dependencies]
 mortise-crypto = { path = "../mortise-crypto" }
 serde = { version = "1", features = ["derive"] }

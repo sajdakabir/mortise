@@ -28,6 +28,8 @@ async fn http_routes_require_signed_sessions_and_reject_replay_and_secret_fields
         auth: AuthConfig {
             issuer: "https://issuer.example".into(),
             client_id: "mortise".into(),
+            callback_port: None,
+            resource: None,
         },
     });
     let response = router

@@ -12,6 +12,8 @@ fn fixture() -> (AuthConfig, CoreProviderMetadata, SigningKey, Value) {
     let config = AuthConfig {
         issuer: "https://issuer.example".into(),
         client_id: "mortise-desktop".into(),
+        callback_port: None,
+        resource: None,
     };
     let key = SigningKey::from_bytes(&[42; 32]);
     let jwks:CoreJsonWebKeySet=serde_json::from_value(json!({"keys":[{"kty":"OKP","crv":"Ed25519","x":B64.encode(key.verifying_key().to_bytes()),"kid":"test","use":"sig","alg":"EdDSA"}]})).unwrap();
@@ -92,6 +94,8 @@ async fn native_login_and_account_service_work_with_a_configured_provider() {
     let provider_config = AuthConfig {
         issuer: issuer.clone(),
         client_id: "mortise-test".into(),
+        callback_port: None,
+        resource: None,
     };
     let authorization = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     let token_authorization = authorization.clone();

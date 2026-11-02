@@ -174,16 +174,43 @@ fn dispatch(
 }
 
 pub async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "postgres")]
+    if std::env::args().nth(1).as_deref() == Some("--migrate") {
+        let url = std::env::var("DATABASE_URL_UNPOOLED")?;
+        tokio::task::spawn_blocking(move || Store::migrate_postgres(&url)).await??;
+        println!("Account metadata migrations applied (schema version 1).");
+        return Ok(());
+    }
     let auth = AuthConfig {
-        issuer: std::env::var("MORTISE_OIDC_ISSUER")?,
+        issuer: std::env::var("MORTISE_OIDC_ISSUER")
+            .or_else(|_| std::env::var("NEON_AUTH_BASE_URL"))?,
         client_id: std::env::var("MORTISE_OIDC_CLIENT_ID")?,
+        callback_port: std::env::var("MORTISE_OIDC_CALLBACK_PORT")
+            .ok()
+            .map(|p| p.parse())
+            .transpose()?,
+        resource: std::env::var("MORTISE_OIDC_RESOURCE").ok(),
     };
     service_url(&auth.issuer)?;
     let db = PathBuf::from(
         std::env::var("MORTISE_ACCOUNTS_DB").unwrap_or_else(|_| "accounts.sqlite".into()),
     );
     let bind = std::env::var("MORTISE_ACCOUNTS_BIND").unwrap_or_else(|_| "127.0.0.1:8788".into());
-    let store = Store::open(&db)?;
+    #[cfg(feature = "postgres")]
+    let store = if let Ok(url) = std::env::var("DATABASE_URL") {
+        tokio::task::spawn_blocking(move || Store::postgres(&url)).await??
+    } else {
+        Store::open(&db)?
+    };
+    #[cfg(not(feature = "postgres"))]
+    let store = {
+        if std::env::var_os("DATABASE_URL").is_some() {
+            return Err(
+                Error::Invalid("Build with --features postgres to use DATABASE_URL.").into(),
+            );
+        }
+        Store::open(&db)?
+    };
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     eprintln!("mortise-accounts listening on {}", listener.local_addr()?);
     axum::serve(listener, router(Service { store, auth }))

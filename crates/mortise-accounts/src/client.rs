@@ -145,7 +145,12 @@ pub fn browser_login(
     open: impl FnOnce(&str) -> Result<()>,
 ) -> Result<Zeroizing<String>> {
     let metadata = crate::oidc::discover(config)?;
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|_| Error::Unavailable)?;
+    let listener =
+        TcpListener::bind(("127.0.0.1", config.callback_port.unwrap_or(0))).map_err(|_| {
+            Error::Invalid(
+                "The sign-in callback port is busy. Close the other sign-in attempt and retry.",
+            )
+        })?;
     listener
         .set_nonblocking(true)
         .map_err(|_| Error::Unavailable)?;
@@ -161,7 +166,7 @@ pub fn browser_login(
             .set_redirect_uri(RedirectUrl::new(redirect.clone()).map_err(|_| Error::Unavailable)?);
     let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
     let login_nonce = nonce.to_string();
-    let (url, state, _) = client
+    let mut authorization = client
         .authorize_url(
             CoreAuthenticationFlow::AuthorizationCode,
             CsrfToken::new_random,
@@ -169,8 +174,12 @@ pub fn browser_login(
         )
         .add_scope(Scope::new("email".into()))
         .add_scope(Scope::new("profile".into()))
-        .set_pkce_challenge(challenge)
-        .url();
+        .set_pkce_challenge(challenge);
+    if let Some(resource) = &config.resource {
+        service_url(resource)?;
+        authorization = authorization.add_extra_param("resource", resource);
+    }
+    let (url, state, _) = authorization.url();
     open(url.as_str())?;
     let deadline = Instant::now() + Duration::from_secs(180);
     let code = loop {
@@ -214,10 +223,14 @@ pub fn browser_login(
             Err(_) => return Err(Error::Unavailable),
         }
     };
-    let response = client
+    let mut exchange = client
         .exchange_code(AuthorizationCode::new(code))
         .map_err(|_| Error::Unavailable)?
-        .set_pkce_verifier(verifier)
+        .set_pkce_verifier(verifier);
+    if let Some(resource) = &config.resource {
+        exchange = exchange.add_extra_param("resource", resource);
+    }
+    let response = exchange
         .request(&crate::oidc::http)
         .map_err(|_| Error::Unauthorized)?;
     let token = response.id_token().ok_or(Error::Unauthorized)?;
