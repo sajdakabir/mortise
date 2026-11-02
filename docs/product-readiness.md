@@ -4,6 +4,11 @@ Reviewed 2026-11-01. Passwords and developer secrets come first; Agent Guard
 comes after those workflows are dependable. This is a targeted readiness
 review, not a complete security audit.
 
+The new account service handles configurable OIDC sign-in, trusted devices and
+team invitation approval. It is separate from the encrypted project-sharing
+stack reviewed below; team membership does not resolve those key-distribution
+or shared-project navigation gaps. See [accounts.md](accounts.md) for setup.
+
 ## What we are building
 
 - A lightweight Tauri/Rust app with encrypted vault files on the user's Mac.

@@ -8,11 +8,13 @@
   import { errorMessage, KIND_LABEL, type ItemRow, type VaultStatus } from "../lib/types";
   import Secrets from "./Secrets.svelte";
 
-  let { status = $bindable(), dataRevision = 0, settingsRequest = 0, onStatus, onUnlock, onShare, onJoin }: {
+  let { status = $bindable(), dataRevision = 0, settingsRequest = 0, accountInvite = null, onInviteHandled, onStatus, onUnlock, onShare, onJoin }: {
     status: VaultStatus;
     /// Bumped by the shell when an item was written from outside this view.
     dataRevision?: number;
     settingsRequest?: number;
+    accountInvite?: string | null;
+    onInviteHandled: () => void;
     onShare: (project: { id: string; name: string }) => void;
     onJoin: () => void;
     onStatus: (s: VaultStatus) => void;
@@ -313,6 +315,7 @@
     {#if editing === "settings"}
       <Settings
         {status}
+        {accountInvite} {onInviteHandled} {onUnlock}
         onStatus={(s) => (status = s)}
         onClose={() => { editing = "none"; settingsRevision += 1; }} />
     {:else if !status.unlocked}

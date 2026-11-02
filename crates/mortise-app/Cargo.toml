@@ -20,6 +20,8 @@ mortise-crypto = { path = "../mortise-crypto" }
 mortise-vault = { path = "../mortise-vault" }
 mortise-macos = { path = "../mortise-macos" }
 mortise-proxy = { path = "../mortise-proxy" }
+mortise-accounts = { path = "../mortise-accounts", default-features = false, features = ["client"] }
+base64 = "0.22"
 tauri = { version = "2.12.1", features = [] }
 tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }

@@ -12,10 +12,14 @@
   let shareTarget = $state<{ id: string; name: string } | null>(null);
   let joinLink = $state<string | null>(null);
   let settingsRequest = $state(0);
+  let accountInvite = $state<string | null>(null);
 
   $effect(() => {
     const stop = onProjectInvite((link) => {
       // Only display confirmation. Unlock and requesting access are explicit.
+      if (link.startsWith("mortise://team-invite#")) {
+        accountInvite = link; settingsRequest += 1; return;
+      }
       if (joinLink === null) { shareTarget = null; joinLink = link; }
     }).catch(() => {
       console.error("Mortise could not listen for invitation links.");
@@ -79,6 +83,7 @@
       {status}
       {dataRevision}
       {settingsRequest}
+      {accountInvite} onInviteHandled={() => { accountInvite = null; }}
       onShare={(project) => { joinLink = null; shareTarget = { id: project.id, name: project.name }; }}
       onJoin={() => { shareTarget = null; joinLink = ""; }}
       onStatus={(s) => (status = s)}

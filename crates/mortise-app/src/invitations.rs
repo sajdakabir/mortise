@@ -31,7 +31,10 @@ impl IncomingInvite {
     /// Accept only the invitation route and its base64url payload. Full crypto
     /// validation happens when the recipient inspects the invitation.
     pub fn receive(&self, link: &str) -> bool {
-        let Some(payload) = link.strip_prefix(mortise_crypto::invite::LINK_PREFIX) else {
+        let Some(payload) = link
+            .strip_prefix(mortise_crypto::invite::LINK_PREFIX)
+            .or_else(|| link.strip_prefix("mortise://team-invite#"))
+        else {
             return false;
         };
         if payload.is_empty()
@@ -89,6 +92,18 @@ mod tests {
         assert_eq!(queue.take().as_deref(), Some("mortise://join#first_123"));
         assert!(queue.take().is_none());
         assert!(queue.receive("mortise://join#second-456"));
+    }
+
+    #[test]
+    fn account_invitation_is_delivered_without_granting_access() {
+        let queue = IncomingInvite::default();
+        assert!(queue.receive("mortise://team-invite#payload_123"));
+        assert_eq!(
+            queue.take().as_deref(),
+            Some("mortise://team-invite#payload_123")
+        );
+        assert!(queue.take().is_none());
+        assert!(!queue.receive("mortise://team-invite#"));
     }
 
     #[test]

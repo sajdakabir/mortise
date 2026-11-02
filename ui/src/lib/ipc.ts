@@ -16,6 +16,7 @@ import type {
   ProjectSummary,
   EnvImportReport,
   EnvCopyReport,
+  AccountStatus, AccountAction,
 } from "./types";
 
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -27,6 +28,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const ipc = {
+  accountStatus: () => call<AccountStatus>("account_status"),
+  accountSignIn: (deviceName: string) => call<void>("account_sign_in", { deviceName }),
+  accountSignOut: () => call<void>("account_sign_out"),
+  accountAction: <T>(action: AccountAction) => call<T>("account_action", { action }),
   status: () => call<VaultStatus>("status"),
   createVault: (masterPassword: string) =>
     call<{ recovery_kit: string }>("create_vault", { masterPassword }),
@@ -214,6 +219,8 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   });
 
   switch (cmd) {
+    case "account_status":
+      return as({ configured: false, signed_in: false });
     case "status":
       return as(status());
     case "create_vault":

@@ -10,3 +10,6 @@ ui/playwright-report/
 
 # tauri generated schemas
 crates/mortise-app/gen/
+
+# Local account-service metadata (never commit sessions or invite records).
+/accounts.sqlite*

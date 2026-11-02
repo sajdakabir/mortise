@@ -1,13 +1,15 @@
 <script lang="ts">
   import { ipc } from "../lib/ipc";
+  import Accounts from "../lib/Accounts.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import {
     errorMessage, isCmdError,
     type ImportReport, type PairedBrowser, type SyncStatus, type VaultStatus,
   } from "../lib/types";
 
-  let { status, onStatus, onClose }:
-    { status: VaultStatus; onStatus: (s: VaultStatus) => void; onClose: () => void } = $props();
+  let { status, onStatus, onClose, onUnlock, accountInvite = null, onInviteHandled }:
+    { status: VaultStatus; onStatus: (s: VaultStatus) => void; onClose: () => void;
+      onUnlock: () => void; accountInvite?: string | null; onInviteHandled: () => void } = $props();
 
   let error = $state("");
   let busy = $state(false);
@@ -156,9 +158,13 @@
 
   async function signOut() {
     busy = true;
+    error = "";
     try {
       onStatus(await ipc.signOut());
       onClose();
+    } catch (e) {
+      error = errorMessage(e);
+      onStatus(await ipc.status());
     } finally {
       busy = false;
     }
@@ -173,6 +179,7 @@
 
   <div class="body">
     {#if error}<div class="error">{error}</div>{/if}
+    <Accounts unlocked={status.unlocked} {onUnlock} incoming={accountInvite} {onInviteHandled} />
 
     <section>
       <h3>Sync</h3>
