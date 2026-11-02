@@ -1,0 +1,10 @@
+{
+  "build": {
+    "beforeBuildCommand": null
+  },
+  "bundle": {
+    "externalBin": [
+      "../../target/release-sidecars/mortise-proxy"
+    ]
+  }
+}

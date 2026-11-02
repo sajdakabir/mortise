@@ -1,24 +1,30 @@
 name: Release
 
-# Cut a release by pushing a tag:
-#
-#   git tag v0.1.0 && git push origin v0.1.0
-#
-# Everything below runs on a clean macOS runner, so a release cannot quietly
-# depend on something that only exists on one developer's Mac.
 on:
   push:
     tags: ["v*"]
-  # Builds and uploads the bundle as a workflow artifact without publishing a
-  # release, for checking the pipeline works before committing to a tag.
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified installer as a GitHub preview release
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAURI_CLI_VERSION: "2.12.4"
+
 jobs:
   macos:
     runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -28,8 +34,25 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
-      - name: Rust toolchain
-        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Version and tag
+        id: version
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          version = json.load(open('crates/mortise-app/tauri.conf.json'))['version']
+          assert re.fullmatch(r'\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?', version), 'Invalid release version'
+          tag = 'v' + version
+          if os.environ['GITHUB_REF'].startswith('refs/tags/'):
+              assert os.environ['GITHUB_REF_NAME'] == tag, 'Tag and app version differ'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'version={version}\ntag={tag}\n')
+          PY
+
+      - name: Rust toolchain and macOS targets
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - uses: actions/cache@v4
         with:
@@ -38,99 +61,123 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-release-universal-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-universal-
 
-      # The tag is what people will quote when they report a bug, so it has to
-      # name the version the binary actually reports. A v0.2.0 tag shipping a
-      # 0.1.0 app is the kind of mistake nobody notices until it matters.
-      - name: Tag matches the app version
-        if: startsWith(github.ref, 'refs/tags/')
+      # generate_context! embeds ui/dist, so build it before compiling tests.
+      - name: Frontend checks and build
         run: |
-          app=$(python3 -c "import json;print(json.load(open('crates/mortise-app/tauri.conf.json'))['version'])")
-          tag=${GITHUB_REF_NAME#v}
-          if [ "$app" != "$tag" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match tauri.conf.json version $app"
-            exit 1
-          fi
-          echo "version $app"
+          npm --prefix ui ci
+          npm --prefix ui run check
+          npm --prefix ui run build
 
-      - run: npm --prefix ui ci
+      - name: Rust checks
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
 
-      # A password manager that ships a release its own tests never ran against
-      # is not worth the convenience of a faster pipeline.
-      - run: cargo test --workspace --locked
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: npm --prefix ui run check
+      - name: Build the universal browser helper
+        run: |
+          cargo build --release --locked -p mortise-proxy --target aarch64-apple-darwin
+          cargo build --release --locked -p mortise-proxy --target x86_64-apple-darwin
+          mkdir -p target/release-sidecars
+          # tauri-build resolves externalBin for each Rust target before the
+          # bundler selects the universal helper for the final app.
+          cp target/aarch64-apple-darwin/release/mortise-proxy \
+            target/release-sidecars/mortise-proxy-aarch64-apple-darwin
+          cp target/x86_64-apple-darwin/release/mortise-proxy \
+            target/release-sidecars/mortise-proxy-x86_64-apple-darwin
+          lipo -create \
+            target/aarch64-apple-darwin/release/mortise-proxy \
+            target/x86_64-apple-darwin/release/mortise-proxy \
+            -output target/release-sidecars/mortise-proxy-universal-apple-darwin
+          chmod 755 target/release-sidecars/mortise-proxy-universal-apple-darwin
 
-      - name: Install the Tauri CLI
-        run: cargo install tauri-cli --locked --version "^2.0"
-
-      # Signing is wired but inert until the secrets exist. Tauri reads these
-      # from the environment; absent, it produces an unsigned bundle rather
-      # than failing, which is the honest state of this project today.
-      - name: Build
+      - name: Build universal app and DMG
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          MORTISE_ACCOUNTS_URL: ${{ vars.MORTISE_ACCOUNTS_URL }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: cargo tauri build
-
-      - name: Say whether this build was signed
-        id: signed
         run: |
-          app="target/release/bundle/macos/Mortise.app"
-          if codesign --verify --deep --strict "$app" 2>/dev/null; then
-            echo "signed=yes" >> "$GITHUB_OUTPUT"
-            codesign -dv "$app" 2>&1 | head -5
-          else
-            echo "signed=no" >> "$GITHUB_OUTPUT"
-            echo "unsigned build"
-          fi
+          # GitHub expands absent secrets to empty strings. Tauri treats a
+          # present APPLE_CERTIFICATE as a certificate to import, even if empty.
+          for signing_var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!signing_var:-}" ]; then
+              unset "$signing_var"
+            fi
+          done
+          npx --yes @tauri-apps/cli@${TAURI_CLI_VERSION} build --ci \
+            --target universal-apple-darwin --config .github/tauri.release.json
+
+      - name: Package the browser extension
+        run: bash extension/tools/package.sh
+
+      - name: Verify installer and prepare checksums
+        id: stage
+        run: bash scripts/stage-release.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mortise-macos
-          path: |
-            target/release/bundle/dmg/*.dmg
-            target/release/bundle/macos/*.app
+          name: mortise-${{ steps.version.outputs.version }}-macos
+          path: ${{ steps.stage.outputs.directory }}/
+          if-no-files-found: error
+          compression-level: 0
 
-      - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish GitHub preview release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNED: ${{ steps.signed.outputs.signed }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_DIR: ${{ steps.stage.outputs.directory }}
         run: |
           notes=$(mktemp)
-          if [ "$SIGNED" = "no" ]; then
-            cat >> "$notes" <<'EOF'
-          ## This build is not signed
+          cat > "$notes" <<'EOF'
+          Mortise's first installable preview for **Apple silicon and Intel Macs** running macOS 11 or later.
 
-          macOS will refuse to open it on first launch. That is Gatekeeper doing
-          its job, not a fault in the download — but it does mean you are taking
-          this binary on trust, which is a poor thing to ask of a password
-          manager. Building from source is the better option until there is a
-          signed build.
+          ### Install
+          1. Download the universal `.dmg` below.
+          2. Open it and drag Mortise to Applications.
+          3. Open Mortise from Applications. Follow `INSTALL.md` if Gatekeeper blocks this preview.
 
-          To open it anyway: right-click the app, choose Open, then confirm.
+          If macOS blocks the app after you verify the download, open Terminal and run:
 
-          EOF
-          fi
-          cat >> "$notes" <<'EOF'
-          ## Verify what you downloaded
-
-          Checksums are attached as `SHA256SUMS`. Compare before opening:
-
+          ```sh
+          xattr -dr com.apple.quarantine "/Applications/Mortise.app"
           ```
-          shasum -a 256 -c SHA256SUMS
-          ```
+
+          Then open Mortise from Applications. This removes the download quarantine flag from Mortise only; it does not sign or notarize the app.
+
+          This preview is **ad-hoc signed, not Apple Developer ID signed or notarized**. macOS will warn on first launch; Touch ID is unavailable. Use test credentials while the app is in preview. `BUILD.txt` identifies the source and build.
+
+          Passwords, browser autofill/capture, imports, local projects and `.env` management are included. Team sharing remains experimental and needs a relay; managed accounts are not included in this preview.
+
+          The optional browser extension is attached separately as `mortise-extension-0.1.0.zip`. Installation and pairing steps are in `INSTALL.md`.
+
+          ### Verify your download
+          Download the files into one folder, then run `shasum -a 256 -c SHA256SUMS`. Checksums detect damaged files; they do not replace Developer ID signing. No automatic updater is included yet.
           EOF
-          cd target/release/bundle
-          shasum -a 256 dmg/*.dmg > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file "$notes" \
-            dmg/*.dmg SHA256SUMS
+          # Upload while draft so visitors never see a partially uploaded release.
+          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" \
+            --title "Mortise $RELEASE_VERSION" --draft --prerelease \
+            --notes-file "$notes" "$RELEASE_DIR"/*
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease
+
+      # Preserve expensive compilation when packaging fails. The regular
+      # cache action saves only successful jobs; the restore prefix above
+      # also finds this fallback on a subsequent attempt.
+      - name: Preserve compilation after a failed release
+        if: failure()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-release-universal-${{ hashFiles('Cargo.lock') }}-partial-${{ github.run_id }}
