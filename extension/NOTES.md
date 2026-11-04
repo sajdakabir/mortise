@@ -1,27 +1,26 @@
 # Why this extension is shaped the way it is
 
-## No always-on content script
+## Capture and filling
 
-Most password managers inject a content script into every page to watch for
-login forms. That buys inline autofill at the cost of running code on every
-page you visit, with access to every page's DOM.
+`capture.js` runs on permitted HTTP(S) pages, including frames. It detects
+login forms, offers inline filling, and reads submitted credential fields.
+This requires broad host permissions; `activeTab` alone cannot provide capture.
+The desktop app saves new captures while unlocked and shows a toast. The
+extension does not hold the vault and does not send passwords to a cloud API.
+Filling requires a user action and targets the exact browser document.
 
-This one injects nothing until you pick a credential. The flow is: click the
-toolbar icon (or ⌘⇧L), see what matches this site, click one, and only then is
-a script injected into that one tab to perform the fill.
+## Browser targets
 
-The cost is a click. What it buys:
+Chrome and Dia use the MV3 service worker in `manifest.json`. Firefox uses the
+same source with the module event-page configuration in `manifest.firefox.json`.
+The Firefox package requires 153+ for document IDs and omits the Chromium-only
+lifecycle check only when the browser identifies itself as Firefox. It still
+checks the current frame's document ID, URL and error state and injects only
+by document ID; it never falls back to frame IDs.
 
-- **`activeTab` instead of host permissions.** The extension cannot read any
-  page until you invoke it on that page, and the install prompt says so. An
-  extension with `<all_urls>` can read everything, forever.
-- **No background credential harvesting.** There is no code running on page
-  load that could be tricked into filling a hidden form in an invisible iframe,
-  which is a real technique against managers that fill automatically.
-- **Far less to audit.** The injected function is a dozen lines and runs once.
-
-Inline affordances can come later if the click proves annoying, but they should
-be an addition people opt into rather than the default.
+Firefox native messaging uses `allowed_extensions` and the stable add-on ID
+`mortise@mortise.app`. Chrome/Dia use `allowed_origins`. Setup stays in the app;
+no extension can pair without explicit approval there.
 
 ## The origin comes from the browser, never the page
 
@@ -31,8 +30,9 @@ This is the single most important line in the extension:
 const origin = new URL(tab.url).origin;   // from chrome.tabs, not the page
 ```
 
-The page cannot influence `tab.url`. If the content script reported its own
-origin instead, a hostile page could claim to be `github.com` and the vault
+That example covers the popup. For content scripts, use the browser-supplied
+sender frame origin/URL, not the enclosing tab URL. If a content script reported
+its own origin, a hostile page could claim to be `github.com` and the vault
 would believe it. Everything in `mortise-vault::origin` is pointless if the
 origin is attacker-controlled by the time it arrives.
 
@@ -78,9 +78,9 @@ hostnames (`*.test` all resolve to 127.0.0.1), so `login.test` embedding
 a username-then-password flow, a cross-origin iframe, a late-rendering
 single-page app, a form in shadow DOM and a change-password form.
 
-Tests for behaviour that does not work yet are `test.fixme` with a comment
-saying what is wrong and what should happen — multi-step username, the popup
-filling an iframe, shadow DOM, change-password capture. Fixing one means
+Tests for behavior that does not work yet retain `test.fixme` comments — popup
+filling of cross-origin iframes and shadow DOM. Multi-step retained usernames
+and marked change-password capture now have enabled regression cases. Fixing one means
 deleting its `.fixme`. Failures keep a trace: `npx playwright show-trace
 test-results/<test>/trace.zip`.
 
@@ -94,6 +94,7 @@ Two things that look odd and are deliberate:
   the extension's service worker can come up paused, without its `chrome`
   bindings, and every evaluate against it hangs.
 
-There is no PR workflow in `.github/workflows` yet, so nothing runs these
-automatically; run them before sending a change to anything in this directory.
-`tools/package.sh` packages from an allowlist, so none of this ships.
+Run `npm run test:unit` for the Node suites, including Firefox-shaped API
+responses and package checks. These checks do not install browsers or claim
+interactive coverage. The existing app CI is unchanged. See [manual checks](../docs/browser-testing.md) for Chrome, Dia and
+Firefox. `tools/package.sh` packages from an allowlist, so test files never ship.

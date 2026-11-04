@@ -15,6 +15,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$REPO_ROOT/extension"
 OUT_DIR="$REPO_ROOT/target/extension"
+BROWSER="${1:-chromium}"
+[[ "$BROWSER" == "--firefox" ]] && BROWSER="firefox"
+[[ "$BROWSER" == "chromium" || "$BROWSER" == "firefox" ]] || { echo "Usage: $0 [--firefox]" >&2; exit 1; }
 
 # Everything the browser loads, and nothing else. NOTES.md, package.json and
 # tools/ are for people working on this repo and have no business in a package
@@ -108,11 +111,24 @@ echo
 
 ZIP="$OUT_DIR/mortise-extension-$VERSION.zip"
 mkdir -p "$OUT_DIR"
+PACKAGE_SRC="$SRC"
+if [[ "$BROWSER" == "firefox" ]]; then
+  PACKAGE_SRC="$OUT_DIR/firefox"
+  mkdir -p "$PACKAGE_SRC/icons"
+  for f in "${FILES[@]}"; do cp "$SRC/$f" "$PACKAGE_SRC/$f"; done
+  python3 -I - "$SRC" "$PACKAGE_SRC" <<'PYMANIFEST'
+import json, pathlib, sys
+src, dest = map(pathlib.Path, sys.argv[1:])
+manifest = json.loads((src / "manifest.json").read_text())
+manifest.pop("minimum_chrome_version", None)
+manifest.update(json.loads((src / "manifest.firefox.json").read_text()))
+(dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+PYMANIFEST
+  ZIP="$OUT_DIR/mortise-extension-firefox-$VERSION.zip"
+fi
 rm -f "$ZIP"
-
-# -X drops the resource forks and timestamps that macOS otherwise buries in the
-# archive, so the same source produces the same bytes.
-( cd "$SRC" && zip -q -X "$ZIP" "${FILES[@]}" )
+# Use the same explicit allowlist for both targets; staging leftovers never ship.
+( cd "$PACKAGE_SRC" && zip -q -X "$ZIP" "${FILES[@]}" )
 
 echo "Packaged  $ZIP"
 echo "Version   $VERSION"
