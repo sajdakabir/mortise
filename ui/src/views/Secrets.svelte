@@ -640,7 +640,7 @@
   .environment-select { position: relative; max-width: 220px; }
   .environment-select select {
     appearance: none; width: auto; min-width: 132px; max-width: 220px;
-    padding: 7px 32px 7px 12px; font-size: 12.5px; cursor: pointer;
+    padding: 7px 32px 7px 12px; font-size: 13px; cursor: pointer;
     text-overflow: ellipsis; background: var(--bg-raised);
   }
   .environment-select svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-dim); }
@@ -653,7 +653,7 @@
     box-shadow: var(--shadow-3);
   }
   .file-menu button {
-    display: block; width: 100%; text-align: left; font-size: 12.5px;
+    display: block; width: 100%; text-align: left; font-size: 13px;
     padding: 8px 10px; background: transparent; border-color: transparent;
   }
   .file-menu button:hover:not(:disabled), .file-menu button:focus-visible { background: var(--bg-hover); }
@@ -670,7 +670,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
     align-items: center; gap: var(--s3);
-    padding: 7px var(--s2); border-bottom: 1px solid var(--border); font-size: 12.5px;
+    padding: 7px var(--s2); border-bottom: 1px solid var(--border); font-size: 13px;
   }
   .keys .k { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .keys .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -683,7 +683,7 @@
   .keys li:hover .icon-button, .icon-button:focus-visible,
   .icon-button.confirmed { color: var(--text); }
   .addrow input {
-    font: 400 12.5px/1 var(--mono);
+    font: 400 13px/1.6 var(--mono);
     padding: 4px 6px;
   }
 
