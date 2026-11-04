@@ -55,8 +55,15 @@ and a registered `http://127.0.0.1:39817/callback` redirect.
 
 The browser page uses email codes, then asks the user to approve the desktop
 sign-in. The server independently verifies issuer, audience, nonce, expiry,
-signature and verified email. Later devices still require approval from a
-trusted device. Team membership does not itself release encrypted vault keys.
+signature and verified email. Providers may return email/profile claims only
+from their UserInfo endpoint. In that case the desktop sends the short-lived
+provider access token with the device-signed login completion request. The
+service checks `at_hash` when present, fetches UserInfo without following
+redirects, and requires its subject to equal the verified ID token's subject.
+Only a verified email is accepted. Both provider tokens are discarded after
+sign-in; neither is written to Postgres, the Keychain, logs or the webview.
+Providers with verified email already in the ID token remain compatible.
+Later devices still require approval from a trusted device. Team membership does not itself release encrypted vault keys.
 
 ## Local testing
 

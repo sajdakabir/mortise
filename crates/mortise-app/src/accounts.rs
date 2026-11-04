@@ -190,7 +190,8 @@ pub(crate) async fn account_sign_in(app: tauri::AppHandle, device_name: String) 
                 "",
                 &LoginFinish {
                     id: challenge.id,
-                    id_token: token.to_string(),
+                    id_token: token.id_token.to_string(),
+                    access_token: Some(token.access_token.to_string()),
                 },
             )
             .map_err(error)

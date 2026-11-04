@@ -118,6 +118,7 @@ fn login_device(
     let body = serde_json::to_vec(&LoginFinish {
         id: challenge.id.clone(),
         id_token: "TEST_ID_TOKEN_NEVER_PERSIST".into(),
+        access_token: Some("TEST_ACCESS_TOKEN_NEVER_PERSIST".into()),
     })
     .unwrap();
     let proof = Proof::sign(device, "POST", "/v1/auth/finish", "", &body).unwrap();
@@ -422,6 +423,7 @@ fn secrets_are_not_persisted_and_unknown_vault_fields_are_rejected() {
         &a.session.token,
         &invite.token,
         "TEST_ID_TOKEN_NEVER_PERSIST",
+        "TEST_ACCESS_TOKEN_NEVER_PERSIST",
     ] {
         assert!(!text.contains(secret));
     }

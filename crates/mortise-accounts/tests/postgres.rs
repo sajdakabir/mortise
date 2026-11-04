@@ -27,6 +27,7 @@ fn login(store: &Store, subject: &str, device: &Device) -> Session {
     let body = serde_json::to_vec(&LoginFinish {
         id: challenge.id.clone(),
         id_token: "synthetic-not-a-real-token".into(),
+        access_token: None,
     })
     .unwrap();
     store

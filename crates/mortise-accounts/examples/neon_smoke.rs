@@ -39,7 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "",
         &LoginFinish {
             id: challenge.id,
-            id_token: id_token.to_string(),
+            id_token: id_token.id_token.to_string(),
+            access_token: Some(id_token.access_token.to_string()),
         },
     )?)?;
     let client = Client::new(&base, session.token)?;

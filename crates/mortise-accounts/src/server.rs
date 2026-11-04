@@ -106,7 +106,13 @@ fn dispatch(
         let input: LoginFinish = parse(body)?;
         let nonce = s.store.login_nonce(&input.id, &proof, body, now)?;
         let metadata = crate::oidc::discover(&s.auth)?;
-        let identity = crate::oidc::verify(&s.auth, metadata, &input.id_token, &nonce)?;
+        let identity = crate::oidc::verify(
+            &s.auth,
+            metadata,
+            &input.id_token,
+            &nonce,
+            input.access_token.as_deref(),
+        )?;
         return json(s.store.finish_login(
             &input.id,
             &identity,

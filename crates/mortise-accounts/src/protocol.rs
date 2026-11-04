@@ -142,11 +142,14 @@ pub struct LoginChallenge {
     pub nonce: String,
     pub expires_at: i64,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 pub struct LoginFinish {
     pub id: String,
     pub id_token: String,
+    /// Used only for provider UserInfo during this login; never persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct Session {
