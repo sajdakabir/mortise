@@ -43,6 +43,9 @@ fn legacy_dir() -> Option<PathBuf> {
 /// it would for a new user, which is recoverable. Refusing to launch over a
 /// failed migration would not be.
 pub fn migrate_vault(data_dir: &Path, vault_file: &str) {
+    if crate::KEYCHAIN_SERVICE != "com.mortise.desktop" {
+        return;
+    }
     let Some(old_dir) = legacy_dir() else { return };
     copy_vault(&old_dir, data_dir, vault_file);
 }
@@ -95,6 +98,9 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 /// [`browser::associations::warm`](crate::browser::associations::warm), and
 /// before it, so a migrated pairing is in place by the time the cache fills.
 pub fn migrate_keychain() {
+    if crate::KEYCHAIN_SERVICE != "com.mortise.desktop" {
+        return;
+    }
     for account in LEGACY_KEYCHAIN_ITEMS {
         if mortise_macos::exists(crate::KEYCHAIN_SERVICE, account).unwrap_or(false) {
             continue;

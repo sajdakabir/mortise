@@ -119,3 +119,28 @@ rate limiting/edge protection and production email delivery configured per
 The landing page can remain on Vercel. Its
 [Hobby plan](https://vercel.com/docs/plans/hobby) is restricted to personal,
 non-commercial use; do not rely on it as the free commercial API host.
+
+## Fresh local onboarding without deleting credentials
+
+Debug builds can use an isolated app identifier. This separates the vault,
+Keychain entries, account session and browser pairings, and skips the legacy
+TruePassword import. Release builds always use the normal identifier.
+
+Stop the existing Mortise app and dev server, then use a new identifier:
+
+```sh
+export MORTISE_DEV_APP_ID=com.mortise.onboarding-test
+cargo build -p mortise-proxy --locked
+MORTISE_ACCOUNTS_URL=https://br-morning-haze-azdlvfr6-accounts.compute.c-3.ap-southeast-1.aws.neon.tech \
+  cargo tauri dev --config '{"identifier":"com.mortise.onboarding-test"}'
+```
+
+The environment variable and Tauri identifier must match or startup is refused.
+Build the proxy with the same variable so browser connections reach this profile.
+A new identifier gives another empty local profile. This does **not** delete a
+hosted account or clear the browser's provider session. Use a separate test email
+for a brand-new hosted signup, or explicitly reset that account separately.
+
+To return to the original profile, stop this test app, unset
+`MORTISE_DEV_APP_ID`, rebuild `mortise-proxy`, and run `cargo tauri dev` without
+the identifier override. Your original local data remains in place.
