@@ -356,8 +356,7 @@
   aside {
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
-    /* Sunken rather than raised: the list is the ground the detail pane sits
-       in front of, and lifting both flattened the two together. */
+    /* Shared sidebar surface with the Secrets workspace. */
     background: var(--bg-sunken);
     min-width: 0;
   }

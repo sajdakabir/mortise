@@ -598,6 +598,7 @@
      workspace too. */
   .rail {
     border-right: 1px solid var(--border);
+    background: var(--bg-sunken);
     display: flex; flex-direction: column; min-height: 0;
     padding: 0 var(--s2) 0;
   }
