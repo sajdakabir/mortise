@@ -6,7 +6,9 @@
   "description": "Browser extension. No build step: loaded unpacked, no runtime dependencies, no bundler.",
   "scripts": {
     "test": "playwright test",
-    "test:setup": "playwright install chromium"
+    "test:setup": "playwright install chromium",
+    "test:unit": "node --test test/unit/*.test.js && MORTISE_TEST_ENGINE=firefox node --test test/unit/fill-target.test.js",
+    "package": "bash tools/package.sh && bash tools/package.sh --firefox"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1"
