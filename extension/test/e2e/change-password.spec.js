@@ -20,12 +20,8 @@ test("fill puts the saved password in the current-password field only", async ({
   await expect(page.locator("#confirm")).toHaveValue("");
 });
 
-// FIXME: capture takes the first filled password field, which here is the
-// *old* password, and finds no username because the only one is hidden. So
-// changing a password offers to save the password being retired — or, as the
-// vault already holds it, offers nothing — and the new one is lost. It should
-// capture the new password (matching confirm), for the hidden username.
-test.fixme("changing a password captures the new password, not the old one", async ({
+// A password change must save the replacement, not the retired password.
+test("changing a password captures the new password, not the old one", async ({
   context,
   site,
   stub,
@@ -44,4 +40,16 @@ test.fixme("changing a password captures the new password, not the old one", asy
     username: "octocat",
     password: "brand new password",
   });
+});
+
+test("mismatched new passwords do not capture the current password", async ({ context, site, stub }) => {
+  const page = await context.newPage();
+  await page.goto(site.url("login.test", "/change-password.html"));
+  await page.locator("#current").fill("old password");
+  await page.locator("#new").fill("new password");
+  await page.locator("#confirm").fill("different password");
+  await page.locator("#submit").click();
+  await page.waitForURL("**/signed-in");
+  await page.waitForTimeout(500);
+  expect(await stub.requests("capture")).toEqual([]);
 });

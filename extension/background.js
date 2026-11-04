@@ -414,8 +414,9 @@ function fillForm(username, password) {
     return rect.width > 0 && rect.height > 0 && el.type !== "hidden" && !el.disabled;
   };
 
-  const passwordField = [...document.querySelectorAll('input[type="password"]')].find(visible);
-  if (!passwordField) return { filled: false };
+  const passwordField = [...document.querySelectorAll('input[type="password"]')].find(
+    (el) => visible(el) && !el.autocomplete.split(/\s+/).includes("new-password"),
+  );
 
   const setValue = (el, value) => {
     // React tracks the previous value on the DOM node and skips the change
@@ -428,6 +429,16 @@ function fillForm(username, password) {
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
   };
+
+  if (!passwordField) {
+    // Explicitly identified username steps can be filled without exposing the
+    // password to an unrelated text field (or overwriting a new-password field).
+    const field = [...document.querySelectorAll('input[autocomplete~="username"]')].find(visible);
+    if (!username || !field) return { filled: false };
+    setValue(field, username);
+    field.focus();
+    return { filled: true };
+  }
 
   if (username) {
     const form = passwordField.form ?? document;
