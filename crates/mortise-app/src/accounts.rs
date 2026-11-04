@@ -195,7 +195,14 @@ pub(crate) async fn account_sign_in(app: tauri::AppHandle, device_name: String) 
             )
             .map_err(error)
         })?;
-        let session: Session = client.send(finish).map_err(error)?;
+        let session: Session = client.send(finish).map_err(|cause| {
+            if matches!(cause, mortise_accounts::Error::Unauthorized) {
+                eprintln!("mortise: account service rejected sign-in completion");
+                CmdError::bad_request("Browser sign-in finished, but the account service rejected it. Please start a new sign-in.")
+            } else {
+                error(cause)
+            }
+        })?;
         let stored = Zeroizing::new(
             serde_json::to_vec(&StoredSession {
                 token: session.token.clone(),

@@ -201,7 +201,10 @@ pub fn browser_login(
                 let request = String::from_utf8_lossy(&bytes);
                 let result = callback_code(&request, state.secret());
                 let (status, message) = if result.is_ok() {
-                    ("200 OK", "You can return to Mortise.")
+                    (
+                        "200 OK",
+                        "Browser response received. Return to Mortise to check whether sign-in completed.",
+                    )
                 } else {
                     (
                         "400 Bad Request",
@@ -230,14 +233,47 @@ pub fn browser_login(
     if let Some(resource) = &config.resource {
         exchange = exchange.add_extra_param("resource", resource);
     }
-    let response = exchange
-        .request(&crate::oidc::http)
-        .map_err(|_| Error::Unauthorized)?;
-    let token = response.id_token().ok_or(Error::Unauthorized)?;
+    let response = exchange.request(&crate::oidc::http).map_err(|error| {
+        // Never format token errors: their body can contain credentials.
+        use openidconnect::RequestTokenError;
+        let message = match error {
+            RequestTokenError::ServerResponse(_) => {
+                "The sign-in provider rejected the code exchange. Start a new sign-in from Mortise."
+            }
+            RequestTokenError::Request(_) => {
+                "Could not reach the sign-in provider to finish signing in. Please retry."
+            }
+            RequestTokenError::Parse(_, _) => {
+                "Mortise could not read the sign-in provider's token response."
+            }
+            _ => "The sign-in provider returned an unexpected token response.",
+        };
+        eprintln!("mortise: {message}");
+        Error::Invalid(message)
+    })?;
+    let token = response.id_token().ok_or(Error::Invalid(
+        "The sign-in provider did not return an identity token.",
+    ))?;
     // Validate locally as well; the server independently checks its login nonce.
     token
         .claims(&client.id_token_verifier(), &Nonce::new(nonce.into()))
-        .map_err(|_| Error::Unauthorized)?;
+        .map_err(|error| {
+            use openidconnect::ClaimsVerificationError as E;
+            let message = match error {
+                E::Expired(_) => "The sign-in token expired. Start a new sign-in from Mortise.",
+                E::InvalidAudience(_) => {
+                    "The sign-in token was issued for a different application."
+                }
+                E::InvalidIssuer(_) => "The sign-in token came from an unexpected provider.",
+                E::InvalidNonce(_) => "The sign-in token does not match this sign-in attempt.",
+                E::SignatureVerification(_) => {
+                    "Mortise could not verify the sign-in token's signature."
+                }
+                _ => "Mortise could not validate the sign-in token.",
+            };
+            eprintln!("mortise: {message}");
+            Error::Invalid(message)
+        })?;
     Ok(Zeroizing::new(token.to_string()))
 }
 
