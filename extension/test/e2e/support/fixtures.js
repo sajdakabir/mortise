@@ -131,7 +131,9 @@ export const test = base.extend({
     const context = await chromium.launchPersistentContext(profile, {
       // The full Chromium build, not the headless shell, which cannot load
       // extensions.
-      channel: "chromium",
+      channel: process.env.MORTISE_BROWSER_PATH ? undefined : "chromium",
+      executablePath: process.env.MORTISE_BROWSER_PATH || undefined,
+      headless: process.env.MORTISE_HEADED !== "1",
       args: [
         `--disable-extensions-except=${EXTENSION}`,
         `--load-extension=${EXTENSION}`,

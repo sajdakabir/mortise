@@ -62,7 +62,10 @@ Implementation order for passwords:
 5. Add optional Quick Access and native Safari autofill afterwards. These
    improve coverage but do not replace automatic capture in the priority browsers.
 
-This records scope and acceptance criteria, not completed Firefox support.
+Implementation update: a Firefox package, native-host connector and browser
+setup UI are now available for testing. Actual Chrome/Dia/Firefox acceptance
+checks remain pending; follow [the browser testing guide](browser-testing.md).
+The table above records the starting point for this work.
 
 ## Can one desktop installation replace the browser extension?
 

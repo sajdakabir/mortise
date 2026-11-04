@@ -13,3 +13,9 @@ crates/mortise-app/gen/
 
 # Local account-service metadata (never commit sessions or invite records).
 /accounts.sqlite*
+
+# Browser test artifacts and local dependency symlinks.
+extension/test-results/
+extension/playwright-report/
+extension/node_modules
+ui/node_modules

@@ -56,10 +56,12 @@ passwords, `.env` contents or private vault keys. Team membership does not yet
 grant encrypted project access. See [account setup and current limits](docs/accounts.md)
 to configure an OIDC provider and connect a desktop build.
 
-**The extension runs on no page until you ask.** Most managers request access to
-every site you visit, forever. This one asks the browser for the page only when
-you invoke it, and the origin it matches against comes from the browser rather
-than from the page, so a lookalike site cannot claim to be your bank.
+**Browser capture runs on permitted web pages; filling requires your action.**
+The extension uses site access to detect login forms and submitted passwords.
+It forwards credentials to the local desktop app for saving and deduplication.
+For filling, the origin comes from the browser and the target is pinned to one
+document, so a navigation during lookup cannot redirect a credential.
+Chrome/Dia and Firefox preview setup is covered in the [browser testing guide](docs/browser-testing.md).
 
 ## What this does not protect you from
 
