@@ -9,6 +9,7 @@
 import { computeProof } from "./proof.js";
 
 const HOST = "com.mortise.proxy";
+const IS_FIREFOX = typeof chrome.runtime.getBrowserInfo === "function";
 
 /** One request, one connection. Mirrors how the proxy behaves on its side. */
 function sendNative(message) {
@@ -176,8 +177,8 @@ const handlers = {
    * attributing its message to the embedding page was that same mistake by
    * another route.
    *
-   * The app decides whether to prompt and the user decides whether to save.
-   * Nothing is written to the vault by this path alone.
+   * The desktop app owns saving and deduplication. The extension forwards
+   * the capture locally; it never writes the vault itself.
    */
   async capture({ username, password }, sender) {
     if (!password) return { type: "ok" };
@@ -263,7 +264,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   // `sender` is the browser's account of who sent this, which is why the
   // capture handler takes it rather than trusting the message's contents.
-  handler(message, sender).then(sendResponse);
+  handler(message, sender).then(sendResponse).catch(() => {
+    sendResponse({ type: "error", code: "request_failed", message: "Mortise could not complete this request. Try again." });
+  });
   return true; // keep the channel open for the async reply
 });
 
@@ -372,13 +375,16 @@ async function fillTarget(sender) {
  * Asked by frame rather than by document so the answer is about what the
  * frame shows *now*. `documentLifecycle` additionally rules out a document
  * kept in the back/forward cache or one that is prerendering: neither is
- * something the user is looking at.
+ * something the user is looking at. Firefox 153+ supplies documentId but no
+ * lifecycle field: require a successful current-frame lookup there. Both
+ * engines still inject only by documentId; never fall back to frameIds.
  */
 async function stillAt(target) {
   const frame = await frameInfo({ tabId: target.tabId, frameId: target.frameId });
   return (
     frame?.documentId === target.documentId &&
-    frame.documentLifecycle === "active" &&
+    (frame.documentLifecycle === "active" ||
+      (IS_FIREFOX && frame.documentLifecycle === undefined && frame.errorOccurred === false)) &&
     urlOrigin(frame.url) === target.origin
   );
 }
@@ -394,6 +400,8 @@ async function frameInfo(details) {
 
 function browserName() {
   const ua = navigator.userAgent;
+  if (IS_FIREFOX) return "Firefox";
+  if (ua.includes("Dia/")) return "Dia";
   if (ua.includes("Edg/")) return "Microsoft Edge";
   if (ua.includes("Brave")) return "Brave";
   if (ua.includes("Chrome/")) return "Google Chrome";
@@ -414,8 +422,9 @@ function fillForm(username, password) {
     return rect.width > 0 && rect.height > 0 && el.type !== "hidden" && !el.disabled;
   };
 
-  const passwordField = [...document.querySelectorAll('input[type="password"]')].find(visible);
-  if (!passwordField) return { filled: false };
+  const passwordField = [...document.querySelectorAll('input[type="password"]')].find(
+    (el) => visible(el) && !el.autocomplete.split(/\s+/).includes("new-password"),
+  );
 
   const setValue = (el, value) => {
     // React tracks the previous value on the DOM node and skips the change
@@ -428,6 +437,16 @@ function fillForm(username, password) {
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
   };
+
+  if (!passwordField) {
+    // Explicitly identified username steps can be filled without exposing the
+    // password to an unrelated text field (or overwriting a new-password field).
+    const field = [...document.querySelectorAll('input[autocomplete~="username"]')].find(visible);
+    if (!username || !field) return { filled: false };
+    setValue(field, username);
+    field.focus();
+    return { filled: true };
+  }
 
   if (username) {
     const form = passwordField.form ?? document;

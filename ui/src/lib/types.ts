@@ -111,7 +111,7 @@ export interface ImportReport {
 
 /** Whether browsers know where to find the native helper. */
 export interface NativeHostStatus {
-  /** Chromium-family browsers installed on this Mac. */
+  /** Chromium-family browsers and Firefox installed on this Mac. */
   browsers: string[];
   /** Those the helper is currently registered with. */
   registered: string[];

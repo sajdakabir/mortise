@@ -20,6 +20,8 @@ use serde::Serialize;
 
 /// Must match the `name` the extension passes to `connectNative`.
 const HOST_NAME: &str = "com.mortise.proxy";
+/// Stable Firefox add-on identity. Must match manifest.firefox.json.
+const FIREFOX_ID: &str = "mortise@mortise.app";
 
 /// Every Chromium-family browser reads from its own directory, so the manifest
 /// has to be written once per browser rather than to one shared location.
@@ -61,9 +63,12 @@ impl std::fmt::Display for Error {
         match self {
             Self::BadExtensionId => write!(
                 f,
-                "That is not a Chrome extension ID — they are 32 letters, a to p."
+                "Use the Firefox connector or enter a Chromium extension ID (32 letters, a to p)."
             ),
-            Self::NoBrowsers => write!(f, "No Chrome, Brave, Edge or Chromium found on this Mac."),
+            Self::NoBrowsers => write!(
+                f,
+                "Open the selected browser once, then try connecting again."
+            ),
             Self::ProxyMissing(p) => write!(f, "The helper is missing from {}.", p.display()),
             Self::Io(e) => write!(f, "Could not write the browser manifest: {e}"),
         }
@@ -85,7 +90,10 @@ struct HostManifest<'a> {
     kind: &'a str,
     /// The access control. Only this extension may spawn the proxy — leaving it
     /// broad would let any installed extension reach the vault.
-    allowed_origins: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_origins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_extensions: Option<Vec<String>>,
 }
 
 /// What the UI needs to show the browser-connection step.
@@ -118,6 +126,15 @@ fn manifest_path(relative: &str) -> Option<PathBuf> {
     })
 }
 
+// Firefox profiles live in Firefox/, but native hosts are read from Mozilla/.
+fn firefox_manifest_path() -> Option<PathBuf> {
+    let base = support_dir()?;
+    base.join("Firefox").is_dir().then(|| {
+        base.join("Mozilla/NativeMessagingHosts")
+            .join(format!("{HOST_NAME}.json"))
+    })
+}
+
 /// The proxy ships beside the app binary — `target/debug` in development,
 /// `Mortise.app/Contents/MacOS` once bundled. Deriving it from the running
 /// executable means the same code is right in both, and that a rebuilt proxy
@@ -143,17 +160,24 @@ fn valid_extension_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_lowercase() && b <= b'p')
 }
 
-/// Register the host for every installed Chromium-family browser.
+/// Register the selected Firefox add-on, or every installed Chromium browser.
 ///
 /// Returns the browsers it was written for.
 pub fn install(extension_id: &str) -> Result<Vec<String>, Error> {
     let id = extension_id.trim();
-    if !valid_extension_id(id) {
+    if id != FIREFOX_ID && !valid_extension_id(id) {
         return Err(Error::BadExtensionId);
     }
 
     let proxy = proxy_path()?;
     let json = manifest_json(&proxy, id)?;
+
+    if id == FIREFOX_ID {
+        let path = firefox_manifest_path().ok_or(Error::NoBrowsers)?;
+        fs::create_dir_all(path.parent().expect("manifest has a parent"))?;
+        fs::write(path, json)?;
+        return Ok(vec!["Firefox".to_string()]);
+    }
 
     let mut written = Vec::new();
     for (name, relative) in BROWSERS {
@@ -184,13 +208,23 @@ fn manifest_json(proxy: &std::path::Path, extension_id: &str) -> Result<Vec<u8>,
         description: "Mortise native messaging bridge",
         path: proxy.to_string_lossy().into_owned(),
         kind: "stdio",
-        allowed_origins: vec![format!("chrome-extension://{extension_id}/")],
+        allowed_origins: (extension_id != FIREFOX_ID)
+            .then(|| vec![format!("chrome-extension://{extension_id}/")]),
+        allowed_extensions: (extension_id == FIREFOX_ID).then(|| vec![FIREFOX_ID.to_string()]),
     };
     serde_json::to_vec_pretty(&manifest).map_err(std::io::Error::other)
 }
 
 /// Remove the host manifest everywhere. Autofill stops working.
 pub fn uninstall() -> Result<(), Error> {
+    if let Some(base) = support_dir() {
+        let path = base
+            .join("Mozilla/NativeMessagingHosts")
+            .join(format!("{HOST_NAME}.json"));
+        if path.is_file() {
+            fs::remove_file(path)?;
+        }
+    }
     for (_, relative) in BROWSERS {
         if let Some(path) = manifest_path(relative)
             && path.is_file()
@@ -233,6 +267,16 @@ pub fn status() -> HostStatus {
         }
     }
 
+    if let Some(path) = firefox_manifest_path() {
+        browsers.push("Firefox".to_string());
+        if let Ok(bytes) = fs::read(path)
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && value["allowed_extensions"] == serde_json::json!([FIREFOX_ID])
+        {
+            registered.push("Firefox".to_string());
+        }
+    }
+
     HostStatus {
         browsers,
         registered,
@@ -244,6 +288,29 @@ pub fn status() -> HostStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn firefox_authorises_only_our_addon_without_chrome_origins() {
+        let json = manifest_json(std::path::Path::new("/tmp/mortise-proxy"), FIREFOX_ID).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(value["allowed_extensions"], serde_json::json!([FIREFOX_ID]));
+        assert!(value.get("allowed_origins").is_none());
+        let extension: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../extension/manifest.firefox.json"))
+                .unwrap();
+        assert_eq!(
+            extension["browser_specific_settings"]["gecko"]["id"],
+            FIREFOX_ID
+        );
+    }
+
+    #[test]
+    fn chromium_manifest_does_not_authorise_firefox_addons() {
+        let json =
+            manifest_json(std::path::Path::new("/tmp/mortise-proxy"), &"a".repeat(32)).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert!(value.get("allowed_extensions").is_none());
+    }
 
     #[test]
     fn accepts_a_real_looking_extension_id() {

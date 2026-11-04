@@ -123,6 +123,12 @@ impl Proof {
 pub struct AuthConfig {
     pub issuer: String,
     pub client_id: String,
+    /// Providers with exact redirect matching use a registered loopback port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_port: Option<u16>,
+    /// OAuth resource indicator, when required by the provider (e.g. Neon).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -136,11 +142,14 @@ pub struct LoginChallenge {
     pub nonce: String,
     pub expires_at: i64,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 pub struct LoginFinish {
     pub id: String,
     pub id_token: String,
+    /// Used only for provider UserInfo during this login; never persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct Session {

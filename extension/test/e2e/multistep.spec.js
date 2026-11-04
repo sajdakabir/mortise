@@ -40,11 +40,8 @@ test("the password step's submit is captured", async ({ context, site, stub }) =
   });
 });
 
-// FIXME: fill only looks for a password field, so on the username-only first
-// step neither the popup nor an inline button can do anything — the popup
-// answers "No password field found". It should fill the username and leave
-// the password for the next step.
-test.fixme("the popup fills the username on the username-only first step", async ({
+// Explicit autocomplete=username lets the popup fill the first step safely.
+test("the popup fills the username on the username-only first step", async ({
   context,
   extension,
   site,
@@ -60,11 +57,8 @@ test.fixme("the popup fills the username on the username-only first step", async
   await expect(page.locator("#username")).toHaveValue("octocat@example.com");
 });
 
-// FIXME: by the password step the username field is gone (only a hidden input
-// carries it), so the capture goes out with no username and the app cannot
-// tell which account it is for. It should remember the username from the
-// first step.
-test.fixme("the capture carries the username typed on the first step", async ({
+// The hidden username retained by this form must survive capture.
+test("the capture carries the username typed on the first step", async ({
   context,
   site,
   stub,

@@ -133,7 +133,8 @@ pub(crate) async fn account_status(app: tauri::AppHandle) -> CmdResult<AccountSt
 
 #[tauri::command]
 pub(crate) async fn account_sign_in(app: tauri::AppHandle, device_name: String) -> CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let return_to_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let base = required_base()?;
         let state = app.state::<AccountState>();
         let generation = {
@@ -190,12 +191,20 @@ pub(crate) async fn account_sign_in(app: tauri::AppHandle, device_name: String) 
                 "",
                 &LoginFinish {
                     id: challenge.id,
-                    id_token: token.to_string(),
+                    id_token: token.id_token.to_string(),
+                    access_token: Some(token.access_token.to_string()),
                 },
             )
             .map_err(error)
         })?;
-        let session: Session = client.send(finish).map_err(error)?;
+        let session: Session = client.send(finish).map_err(|cause| {
+            if matches!(cause, mortise_accounts::Error::Unauthorized) {
+                eprintln!("mortise: account service rejected sign-in completion");
+                CmdError::bad_request("Browser sign-in finished, but the account service rejected it. Please start a new sign-in.")
+            } else {
+                error(cause)
+            }
+        })?;
         let stored = Zeroizing::new(
             serde_json::to_vec(&StoredSession {
                 token: session.token.clone(),
@@ -223,7 +232,15 @@ pub(crate) async fn account_sign_in(app: tauri::AppHandle, device_name: String) 
         Ok(())
     })
     .await
-    .map_err(|_| CmdError::bad_request("Sign-in was interrupted."))?
+    .map_err(|_| CmdError::bad_request("Sign-in was interrupted."))?;
+    // Bring the actual outcome back into view after the browser handoff.
+    // Window operations are best-effort and must not invalidate a saved session.
+    if let Some(window) = return_to_app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    result
 }
 
 #[tauri::command]

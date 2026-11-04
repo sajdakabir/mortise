@@ -12,9 +12,9 @@
  *     cookies, not storage.
  *   - It sends nothing unless a password field actually had a value at the
  *     moment of submission.
- *   - It never saves anything. The app decides whether to ask, and a human
- *     clicks. The most this script can achieve is a prompt.
- *   - It reports no origin. The service worker takes that from `sender.tab`,
+ *   - The desktop app saves captures while unlocked and shows a toast. This
+ *     script cannot write to the vault itself.
+ *   - It reports no origin. The background takes that from the sender frame,
  *     because a page can say anything and the origin is what every lookalike
  *     check depends on.
  */
@@ -67,6 +67,12 @@ function usable(el) {
  */
 function usernameFor(passwordField) {
   const scope = passwordField.form ?? document;
+  // Identifier-first and change-password forms often retain the username in
+  // an explicitly named hidden field. Read only that credential field.
+  const identified = scope.querySelector(
+    'input[autocomplete~="username"], input[type="hidden"][name="username"], input[type="hidden"][name="email"]',
+  );
+  if (identified?.value?.trim()) return identified.value.trim();
   const candidates = [...scope.querySelectorAll("input")].filter(
     (el) =>
       usable(el) &&
@@ -86,9 +92,14 @@ function usernameFor(passwordField) {
 
 /** Read the credential out of a scope, or null if there is nothing to save. */
 function credentialIn(scope) {
-  const passwordField = [...scope.querySelectorAll('input[type="password"]')].find(
-    (el) => usable(el) && el.value,
-  );
+  const fields = [...scope.querySelectorAll('input[type="password"]')].filter(usable);
+  const newFields = fields.filter((el) => el.autocomplete.split(/\s+/).includes("new-password"));
+  // Never save the old password from a change-password form. Both new fields
+  // must agree, and empty/invalid confirmations must not trigger a capture.
+  if (newFields.length && (
+    !newFields[0].value || newFields.some((el) => el.value !== newFields[0].value)
+  )) return null;
+  const passwordField = newFields[0] ?? fields.find((el) => el.value);
   if (!passwordField) return null;
   return {
     username: usernameFor(passwordField),
@@ -131,7 +142,7 @@ function offer(credential, why) {
 
   log(why, "- offering a credential", credential.username ? "with" : "without", "a username");
   try {
-    chrome.runtime.sendMessage({ command: "capture", ...credential });
+    void chrome.runtime.sendMessage({ command: "capture", ...credential }).catch(() => {});
   } catch {
     // The service worker can be asleep or the extension mid-reload. A missed
     // capture is a prompt the user does not get; it is never a broken page,
