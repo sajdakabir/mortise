@@ -12,8 +12,8 @@ or shared-project navigation gaps. See [accounts.md](accounts.md) for setup.
 ## What we are building
 
 - A lightweight Tauri/Rust app with encrypted vault files on the user's Mac.
-- Passwords: import, generation, browser capture and autofill, then native
-  macOS autofill that does not require a browser extension.
+- Passwords: import, generation, browser capture and autofill, prioritizing
+  Dia, Chrome and Firefox. Native macOS autofill is a later enhancement.
 - Developer secrets: projects, environments, `.env` import/export, and sharing
   with teammates using their own accounts and keys.
 - An optional relay that stores encrypted content and encrypted key deliveries,
@@ -24,6 +24,45 @@ or shared-project navigation gaps. See [accounts.md](accounts.md) for setup.
 - Agent Guard later: local matching against vault secrets, interception and
   provider-specific revocation. Exact matching is useful, but other password
   managers could implement it too; it is not an exclusive technical moat.
+
+## Browser priorities — decision, 2026-11-04
+
+Prioritize Dia, Chrome and Firefox for the password workflow. Do not start
+with a Safari-only native provider or assume it replaces browser capture.
+This order reflects the user's target audience, not a browser market-share
+claim. The desktop vault remains the authority; browser integration provides
+capture and filling without sending credentials to an account service.
+
+Repository status at this decision:
+
+| Browser | Existing implementation | Work before claiming dependable support |
+| --- | --- | --- |
+| Chrome | Chromium MV3 extension and native-host registration | Verify installation, pairing, capture, updates and filling in the actual browser |
+| Dia | Same extension, with its own native-host registration path | Run the same acceptance checks in Dia; Chromium ancestry alone is not verification |
+| Firefox | No Firefox manifest/background target or native-host registration | Implement compatible packaging, background handling, registration and onboarding, then verify in Firefox |
+| Safari | Native provider research only | Defer implementation until the priority browsers meet the checks below |
+
+Implementation order for passwords:
+
+1. Reproduce the existing save/fill workflow in Chrome and Dia using disposable
+   test credentials. Fix failures found there while retaining document-bound
+   origin checks.
+2. Add a Firefox target using the same capture, fill and pairing logic where
+   compatible. Test its actual background lifecycle and native messaging; a
+   manifest-only change is not sufficient evidence of support.
+3. Simplify onboarding: select an installed browser, show its installation
+   instructions, pair, and verify the connection. Published extension IDs and
+   store listings are prerequisites for removing manual development setup;
+   do not invent download links or silently install browser extensions.
+4. Verify all three browsers: first-login capture, no duplicate on repeat
+   login, password changes, multi-step forms, revisit suggestions and filling,
+   multiple matching accounts, lock/unlock, app/browser restarts and missing
+   connection feedback. Navigation, cross-origin frames and focus changes must
+   never send credentials to a different document.
+5. Add optional Quick Access and native Safari autofill afterwards. These
+   improve coverage but do not replace automatic capture in the priority browsers.
+
+This records scope and acceptance criteria, not completed Firefox support.
 
 ## Can one desktop installation replace the browser extension?
 
@@ -129,17 +168,19 @@ All database tests used temporary files; the user's vault was not opened.
 
 ## Build order and completion criteria
 
-1. Land CI and document-bound autofill, run the real browser harness, then fix
-   new-password capture, multi-step login and shadow-DOM cases. Keep credentials
-   attached to the exact approved browser document throughout a fill.
+1. Complete browser capture and filling for Dia, Chrome and Firefox using the
+   browser priorities and acceptance criteria above. Run the browser harness,
+   then fix new-password capture, multi-step login and shadow-DOM cases. Keep
+   credentials attached to the exact approved browser document throughout a fill.
 2. Finish the shared-project registry and vault routing. Two independent
    accounts must see the project, edit permitted environments, import/copy
    `.env`, lock/reopen and sync without mixing personal or other-project data.
 3. Fix invite trust, role authorization and durable grant/revocation/promotion.
    Test offline devices, invalid relays, crashes and retries before enabling
    sharing for real secrets. Provide member/role/removal UI and clear sync errors.
-4. Build the bundled native password provider and verify signed installation,
-   target matching, unlock, explicit save and permission onboarding on supported
-   Macs. Retain browser capture; add optional Quick Access later.
+4. After the priority browsers work, build the bundled native password provider.
+   Verify signed installation, target matching, unlock, explicit save and
+   permission onboarding on supported Macs. Retain browser capture; add
+   optional Quick Access later.
 5. Produce a tested installer. Only then move to Agent Guard capture,
    interception and provider-specific revocation.

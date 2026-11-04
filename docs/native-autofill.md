@@ -4,10 +4,15 @@ Status: research, 2026-10-29. Nothing here is built. Every claim about Apple or
 browser behaviour links to its source; claims that could not be verified are
 marked **(unverified)** and should be treated as things to test, not facts.
 
+**Priority update, 2026-11-04:** Dia, Chrome and Firefox come first. Complete
+and simplify browser capture/filling before implementing the native provider.
+The native build sequence below is deferred research, not the current product
+roadmap. See [browser priorities and acceptance criteria](product-readiness.md#browser-priorities--decision-2026-11-04).
+
 The question: *other than the browser extension, can we build something that
 does autofill and auto-capture, so we are not dependent on the extension?*
 
-## Recommendation
+## Native approach to revisit after browser support
 
 **Partly yes for fill, mostly no for capture. Build an AutoFill credential
 provider extension, run it as a thin client of the running app, and keep the
@@ -43,7 +48,7 @@ The short version:
   which is a step back from A5. Make it opt-in, and ship it only on the
   Developer ID build.
 
-### Build order and effort
+### Deferred native build order and effort
 
 Estimates assume one engineer comfortable with Swift and the Rust code here.
 They are rough and calendar time, not ideal days.
@@ -666,10 +671,10 @@ on iOS, or on macOS later if the thin model disappoints.
 
 ## Open questions for the owner
 
-1. **What does "not dependent on the extension" mean to you?** If the goal is
-   Chrome without an extension, there is no supported way to do that for
-   passwords, and the plan should say so publicly. If it is "Safari and native
-   apps work too", step 1 delivers it.
+1. **Priority resolved, 2026-11-04:** prioritize Dia, Chrome and Firefox. Keep
+   browser integration for capture/filling and simplify its setup; Safari and
+   native apps are later enhancements. Do not promise that a native provider
+   offers automatic password capture across browsers.
 2. **Will you set up the Apple Developer account,** under which legal entity, and
    who holds the Developer ID key? Nothing here moves until then (§Hard
    requirements, and A7).

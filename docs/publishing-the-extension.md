@@ -109,7 +109,12 @@ sign something is wrong.
 
 ## Firefox and Safari
 
-Out of scope for now. Firefox needs a `browser_specific_settings` block and
-signs through AMO; Safari needs the extension wrapped in a native app bundle
-and distributed through the App Store, which is a different build entirely and
-would be the first thing in this repo to require App Store review.
+**Priority updated 2026-11-04:** Firefox is in scope alongside Chrome and Dia.
+The existing package and desktop native-host registration target Chromium;
+Firefox needs compatible packaging/background handling, native messaging and
+onboarding before publication. Do not distribute the current Chromium zip as
+if it were a verified Firefox build.
+
+Safari's native provider remains a later enhancement. It does not replace
+capture in the priority browsers. Follow the [browser implementation order
+and acceptance criteria](product-readiness.md#browser-priorities--decision-2026-11-04).
