@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ipc } from "../lib/ipc";
   import Accounts from "../lib/Accounts.svelte";
+  import BrowserConnector from "../lib/BrowserConnector.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import {
     errorMessage, isCmdError,
@@ -15,6 +16,7 @@
   let busy = $state(false);
 
   let browsers = $state<PairedBrowser[]>([]);
+  let showBrowserSetup = $state(false);
   let sync = $state<SyncStatus | null>(null);
   let relayInput = $state("");
   let syncMessage = $state("");
@@ -222,12 +224,14 @@
             {/if}
           </p>
         </div>
-        {#if browsers.length > 0}
-          <button disabled={busy} onclick={() => unpair(browsers[0].id)}>
-            Unpair {browsers.length > 1 ? browsers[0].name : ""}
-          </button>
-        {/if}
+        <button onclick={() => (showBrowserSetup = !showBrowserSetup)} aria-expanded={showBrowserSetup}>
+          {showBrowserSetup ? "Hide setup" : "Connect a browser"}
+        </button>
       </div>
+      {#if showBrowserSetup}<BrowserConnector />{/if}
+      {#each browsers as browser (browser.id)}
+        <button disabled={busy} onclick={() => unpair(browser.id)}>Unpair {browser.name}</button>
+      {/each}
     </section>
 
     <section>
