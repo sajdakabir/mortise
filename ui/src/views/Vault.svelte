@@ -356,8 +356,7 @@
   aside {
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
-    /* Sunken rather than raised: the list is the ground the detail pane sits
-       in front of, and lifting both flattened the two together. */
+    /* Shared sidebar surface with the Secrets workspace. */
     background: var(--bg-sunken);
     min-width: 0;
   }
@@ -370,7 +369,7 @@
   .topbar { padding: 38px var(--s2) var(--s2); flex-shrink: 0; }
   .searchwrap { width: 100%; position: relative; }
   .search {
-    font-size: 12.5px;
+    font-size: 13px;
     padding: 6px 28px;
     border-radius: var(--radius);
     background: var(--bg-input);
@@ -420,7 +419,7 @@
   .switcher { position: relative; margin-bottom: var(--s2); }
   .trigger {
     display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
-    width: 100%; padding: 6px 10px; font-size: 12.5px;
+    width: 100%; padding: 6px 10px; font-size: 14px;
     background: transparent; border: 1px solid var(--border); color: var(--text);
     border-radius: var(--radius);
   }
@@ -440,7 +439,7 @@
   .menulabel { display: block; padding: 6px 9px 4px; }
   .menuitem {
     display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: var(--s2);
-    width: 100%; text-align: left; padding: 6px 9px; font-size: 12.5px;
+    width: 100%; text-align: left; padding: 6px 9px; font-size: 14px;
     background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--text-dim);
   }
   .menuitem:hover { background: var(--bg-hover); color: var(--text); }
@@ -469,8 +468,8 @@
   .text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .t,
   .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-  .t { font-size: 13px; font-weight: 500; letter-spacing: -0.005em; }
-  .s { font-size: 11px; }
+  .t { font-size: 14px; font-weight: 500; }
+  .s { font-size: 12px; }
 
   .empty { padding: var(--s5) var(--s3); font-size: 12px; }
   .nothing {

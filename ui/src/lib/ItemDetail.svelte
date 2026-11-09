@@ -249,11 +249,14 @@
     min-height: 44px;
   }
   .field-row + .field-row { border-top: 1px solid var(--border); }
-  .k { font-size: 11.5px; color: var(--text-dim); }
-  .v { overflow-wrap: anywhere; font-size: 13px; }
+  .k { font-size: 12px; color: var(--text-dim); }
+  .v { overflow-wrap: anywhere; font-size: 14px; }
   /* Dots want to be loose and even; a real secret wants to be readable. */
   .secret.none { color: var(--text-faint); font-family: var(--font); }
-  .secret.masked { letter-spacing: 0.12em; color: var(--text-dim); }
+  .secret.masked {
+    letter-spacing: 0.12em; color: var(--text-dim);
+    min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .tiny { font-size: 11px; padding: 3px 8px; }
 
   .urls { display: flex; flex-direction: column; gap: 2px; }
@@ -284,5 +287,5 @@
     box-shadow: var(--shadow-2);
   }
 
-  .footnote { font-size: 11px; line-height: 1.6; margin: var(--s4) 0 0; max-width: 62ch; }
+  .footnote { font-size: 12px; line-height: 1.7; margin: var(--s4) 0 0; max-width: 62ch; }
 </style>
