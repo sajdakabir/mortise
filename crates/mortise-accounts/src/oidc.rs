@@ -6,8 +6,8 @@ use crate::{
 };
 #[cfg(feature = "server")]
 use openidconnect::{
-    ClientId, Nonce,
-    core::{CoreClient, CoreIdToken},
+    AccessToken, AccessTokenHash, ClientId, Nonce,
+    core::{CoreClient, CoreIdToken, CoreUserInfoClaims},
 };
 use openidconnect::{IssuerUrl, core::CoreProviderMetadata};
 #[cfg(feature = "server")]
@@ -78,6 +78,7 @@ pub fn verify(
     metadata: CoreProviderMetadata,
     token: &str,
     nonce: &str,
+    access_token: Option<&str>,
 ) -> Result<crate::store::Identity> {
     if token.len() > 16_384 {
         return Err(Error::Unauthorized);
@@ -85,25 +86,76 @@ pub fn verify(
     let client =
         CoreClient::from_provider_metadata(metadata, ClientId::new(config.client_id.clone()), None);
     let id = CoreIdToken::from_str(token).map_err(|_| Error::Unauthorized)?;
+    let verifier = client.id_token_verifier();
     let claims = id
-        .claims(&client.id_token_verifier(), &Nonce::new(nonce.to_owned()))
+        .claims(&verifier, &Nonce::new(nonce.to_owned()))
         .map_err(|_| Error::Unauthorized)?;
-    if claims.email_verified() != Some(true)
-        || claims.issue_time().timestamp() > crate::protocol::now() + 60
+    if claims.issue_time().timestamp() > crate::protocol::now() + 60
+        || claims.email_verified() == Some(false)
     {
         return Err(Error::Unauthorized);
     }
-    let email = claims
-        .email()
-        .ok_or(Error::Unauthorized)?
-        .as_str()
-        .to_string();
-    let name = claims
-        .name()
-        .and_then(|n| n.get(None))
-        .map(|n| n.as_str())
-        .unwrap_or("Mortise user")
-        .to_string();
+    let access_token = access_token
+        .map(|token| {
+            if token.is_empty() || token.len() > 16_384 {
+                return Err(Error::Unauthorized);
+            }
+            Ok(AccessToken::new(token.to_owned()))
+        })
+        .transpose()?;
+    // Bind the access token to the signed ID token when the provider supplies
+    // at_hash. Do this before sending it to UserInfo; never accept client claims.
+    if let (Some(expected), Some(access)) = (claims.access_token_hash(), &access_token) {
+        let actual = AccessTokenHash::from_token(
+            access,
+            id.signing_alg().map_err(|_| Error::Unauthorized)?,
+            id.signing_key(&verifier).map_err(|_| Error::Unauthorized)?,
+        )
+        .map_err(|_| Error::Unauthorized)?;
+        if actual != *expected {
+            return Err(Error::Unauthorized);
+        }
+    }
+    let (email, name) = if let (Some(email), Some(true)) = (claims.email(), claims.email_verified())
+    {
+        (
+            email.as_str().to_owned(),
+            claims
+                .name()
+                .and_then(|n| n.get(None))
+                .map(|n| n.as_str().to_owned()),
+        )
+    } else {
+        // OIDC code-flow providers may deliver profile/email only via UserInfo.
+        // Query the discovered provider ourselves and require its subject to
+        // match the already verified ID token. Never persist this bearer token.
+        let endpoint = client.user_info_url().ok_or(Error::Unauthorized)?;
+        service_url(endpoint.as_str())?;
+        let info: CoreUserInfoClaims = client
+            .user_info(
+                access_token.ok_or(Error::Unauthorized)?,
+                Some(claims.subject().clone()),
+            )
+            .map_err(|_| Error::Unauthorized)?
+            .request(&http)
+            .map_err(|_| Error::Unauthorized)?;
+        if info.email_verified() != Some(true) {
+            return Err(Error::Unauthorized);
+        }
+        let email = info.email().ok_or(Error::Unauthorized)?;
+        if claims.email().is_some_and(|expected| expected != email) {
+            return Err(Error::Unauthorized);
+        }
+        (
+            email.as_str().to_owned(),
+            info.name()
+                .and_then(|n| n.get(None))
+                .map(|n| n.as_str().to_owned()),
+        )
+    };
+    let name = name
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| "Mortise user".into());
     Ok(crate::store::Identity {
         issuer: config.issuer.clone(),
         subject: claims.subject().as_str().to_string(),

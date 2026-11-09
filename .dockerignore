@@ -1,0 +1,11 @@
+**
+!Cargo.toml
+!Cargo.lock
+!crates/
+!crates/**/
+!crates/**/Cargo.toml
+!crates/**/build.rs
+!crates/**/src/**
+!crates/**/migrations/**
+!deploy/
+!deploy/accounts.Dockerfile

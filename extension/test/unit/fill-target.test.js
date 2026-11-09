@@ -27,6 +27,7 @@ globalThis.setTimeout = (fn, ms, ...args) => {
 };
 
 let world;
+const firefox = process.env.MORTISE_TEST_ENGINE === "firefox";
 
 function freshWorld() {
   return {
@@ -61,6 +62,7 @@ const live = (doc) => doc.lifecycle !== "gone";
 globalThis.chrome = {
   runtime: {
     lastError: undefined,
+    ...(firefox ? { getBrowserInfo: async () => ({ name: "Firefox", version: "153" }) } : {}),
     listeners: [],
     onMessage: { addListener: (fn) => chrome.runtime.listeners.push(fn) },
     sendNativeMessage(_host, message, callback) {
@@ -98,11 +100,11 @@ globalThis.chrome = {
           : world.documents.findLast(
               (d) => d.tabId === tabId && d.frameId === frameId && live(d),
             );
-      if (!doc || (tabId != null && doc.tabId !== tabId)) return null;
+      if (!doc || (tabId != null && doc.tabId !== tabId) || (firefox && doc.lifecycle !== "active")) return null;
       return {
         documentId: doc.documentId,
-        documentLifecycle: doc.lifecycle,
-        errorOccurred: false,
+        ...(firefox ? {} : { documentLifecycle: doc.lifecycle }),
+        errorOccurred: world.frameError ?? false,
         frameType: doc.frameId === 0 ? "outermost_frame" : "sub_frame",
         parentFrameId: doc.frameId === 0 ? -1 : 0,
         url: doc.url,
@@ -323,3 +325,22 @@ test("popup: refuses pages that are not http(s)", async () => {
   assert.equal(reply.code, "bad_origin");
   assert.deepEqual(credentialRequests(), []);
 });
+
+
+test("refuses when the current frame cannot be verified", async () => {
+  const login = navigate(1, 0, "https://login.example/");
+  world.native = vaultReplies(() => { world.tabs.delete(1); world.documents = []; });
+  const reply = await send({ command: "fill", itemId: "aa" }, pageSender(login));
+  assert.equal(reply.code, "page_changed");
+  assert.deepEqual(world.injections, []);
+});
+
+if (firefox) {
+  test("Firefox refuses errored frame lookups even when documentId matches", async () => {
+    const login = navigate(1, 0, "https://login.example/");
+    world.native = vaultReplies(() => { world.frameError = true; });
+    const reply = await send({ command: "fill", itemId: "aa" }, pageSender(login));
+    assert.equal(reply.code, "page_changed");
+    assert.deepEqual(world.injections, []);
+  });
+}

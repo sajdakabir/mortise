@@ -20,6 +20,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  accounts-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check:accounts
+      - run: npm run build:accounts-web
+      - run: node --check deploy/accounts-function.mjs
+
   rust:
     # macOS because the app is macOS-only, and mortise-macos only runs its
     # keychain tests there. Everything else would pass on Linux and prove less.

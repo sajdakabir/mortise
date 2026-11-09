@@ -4,6 +4,7 @@
 
 # frontend
 node_modules/
+/node_modules
 ui/dist/
 ui/test-results/
 ui/playwright-report/
@@ -13,3 +14,19 @@ crates/mortise-app/gen/
 
 # Local account-service metadata (never commit sessions or invite records).
 /accounts.sqlite*
+
+# Local service credentials and Neon workspace links.
+.env
+.env.*
+!.env.example
+.neon
+/dist/
+
+# Agent tooling installed locally with `neon skills`.
+/.claude/skills/neon*/
+/skills-lock.json
+# Browser test artifacts and local dependency symlinks.
+extension/test-results/
+extension/playwright-report/
+extension/node_modules
+ui/node_modules

@@ -27,9 +27,14 @@ use std::path::PathBuf;
 /// Under the app's own data directory, which is already private to the user.
 pub fn socket_path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
+    #[cfg(debug_assertions)]
+    let app_id = option_env!("MORTISE_DEV_APP_ID").unwrap_or("com.mortise.desktop");
+    #[cfg(not(debug_assertions))]
+    let app_id = "com.mortise.desktop";
     Some(
         PathBuf::from(home)
-            .join("Library/Application Support/com.mortise.desktop")
+            .join("Library/Application Support")
+            .join(app_id)
             .join("browser.sock"),
     )
 }

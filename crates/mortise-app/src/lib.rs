@@ -29,7 +29,15 @@ const VAULT_FILE: &str = "mortise.vault";
 /// Deliberately the same string as the bundle identifier, which is also
 /// what `app_data_dir()` is derived from, so the app has exactly one name
 /// on this machine rather than two that can drift apart.
+#[cfg(not(debug_assertions))]
 pub const KEYCHAIN_SERVICE: &str = "com.mortise.desktop";
+
+/// Debug-only namespace for isolated onboarding tests. Must match Tauri's ID.
+#[cfg(debug_assertions)]
+pub const KEYCHAIN_SERVICE: &str = match option_env!("MORTISE_DEV_APP_ID") {
+    Some(id) => id,
+    None => "com.mortise.desktop",
+};
 
 /// Build and run the app.
 pub fn run() {
@@ -39,6 +47,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Refuse a mismatched test profile rather than opening one vault
+            // with another profile's remembered keys or browser pairings.
+            if app.config().identifier != KEYCHAIN_SERVICE {
+                return Err("App identifier and Keychain namespace must match".into());
+            }
             let dir = app.path().app_data_dir()?;
             // Before the vault is opened: the rename moved it out from under
             // us, and opening first would create an empty one at the new path.
