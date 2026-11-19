@@ -9,11 +9,13 @@
 
 mod accounts;
 pub mod browser;
+pub mod cli;
 pub mod commands;
 pub mod dto;
 pub mod error;
 pub mod invitations;
 pub mod keys;
+mod local_socket;
 pub mod rebrand;
 pub mod state;
 
@@ -39,11 +41,23 @@ pub const KEYCHAIN_SERVICE: &str = match option_env!("MORTISE_DEV_APP_ID") {
     None => "com.mortise.desktop",
 };
 
+/// Bring the main window forward, for something that needs the user now:
+/// an invite link that was opened, or a command waiting for unlock or
+/// approval.
+pub(crate) fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 /// Build and run the app.
 pub fn run() {
     tauri::Builder::default()
         .manage(invitations::IncomingInvite::default())
         .manage(accounts::AccountState::default())
+        .manage(cli::access::CliAccess::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -93,6 +107,11 @@ pub fn run() {
             match browser::server::start(app.handle()) {
                 Ok(path) => eprintln!("mortise: browser socket at {}", path.display()),
                 Err(e) => eprintln!("mortise: browser autofill unavailable: {e}"),
+            }
+            // Same reasoning: the command line is optional.
+            match cli::server::start(app.handle()) {
+                Ok(path) => eprintln!("mortise: command-line socket at {}", path.display()),
+                Err(e) => eprintln!("mortise: command line unavailable: {e}"),
             }
 
             Ok(())
@@ -149,6 +168,10 @@ pub fn run() {
             commands::complete_project_join,
             commands::take_project_invite,
             commands::touch,
+            commands::pending_cli_request,
+            commands::answer_cli_request,
+            commands::list_cli_grants,
+            commands::revoke_cli_grant,
         ])
         .build(tauri::generate_context!())
         .expect("failed to start Mortise")
@@ -163,11 +186,7 @@ pub fn run() {
                     {
                         // Signal only; the link is drained through the narrow IPC command.
                         let _ = app.emit_to("main", "project-invite-opened", ());
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(app);
                         break;
                     }
                 }

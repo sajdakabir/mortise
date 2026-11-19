@@ -2676,6 +2676,7 @@ dependencies = [
  "base64 0.22.1",
  "hmac 0.13.0",
  "mortise-accounts",
+ "mortise-cli",
  "mortise-crypto",
  "mortise-macos",
  "mortise-proxy",
@@ -2689,7 +2690,21 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
+ "tempfile",
  "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
+name = "mortise-cli"
+version = "0.1.0"
+dependencies = [
+ "mortise-proxy",
+ "mortise-vault",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 0.8.2",
  "zeroize",
 ]
 
@@ -2721,6 +2736,7 @@ version = "0.1.0"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
+ "libc",
  "security-framework-sys",
  "thiserror 2.0.21",
  "zeroize",

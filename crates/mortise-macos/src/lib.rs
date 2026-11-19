@@ -1,4 +1,4 @@
-//! macOS keychain integration.
+//! macOS keychain integration, and identifying local socket peers.
 //!
 //! **This is the only crate in the project that uses `unsafe`.** Everything
 //! else is `forbid(unsafe_code)`, and the point of isolating the FFI here is
@@ -28,10 +28,48 @@ mod error;
 #[cfg(target_os = "macos")]
 mod keychain;
 
+#[cfg(target_os = "macos")]
+mod process;
+
 pub use error::{Error, Result};
 
 #[cfg(target_os = "macos")]
 pub use keychain::{Protection, delete, exists, load, store};
+
+#[cfg(target_os = "macos")]
+pub use process::{peer_pid, process_info};
+
+/// A process as the kernel reports it. Nothing here comes from the process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessInfo {
+    /// Process id.
+    pub pid: i32,
+    /// Parent's pid, if it has a living parent other than launchd.
+    pub parent_pid: Option<i32>,
+    /// Path of the running executable.
+    pub executable: Option<std::path::PathBuf>,
+    /// Current working directory.
+    pub cwd: Option<std::path::PathBuf>,
+}
+
+/// `pid` and up to `depth` of its ancestors, nearest first.
+///
+/// Shown to the user so "`mortise` ← `zsh` ← `claude`" reveals whether a
+/// person or an agent asked. Stops early at launchd or a process that has
+/// already exited.
+pub fn process_chain(pid: i32, depth: usize) -> Vec<ProcessInfo> {
+    let mut chain = Vec::new();
+    let mut next = Some(pid);
+    while let Some(pid) = next {
+        if chain.len() > depth {
+            break;
+        }
+        let Some(info) = process_info(pid) else { break };
+        next = info.parent_pid.filter(|p| *p > 1);
+        chain.push(info);
+    }
+    chain
+}
 
 /// Stubs for non-macOS builds, so the rest of the workspace still compiles.
 ///
@@ -71,3 +109,15 @@ mod stub {
 
 #[cfg(not(target_os = "macos"))]
 pub use stub::{Protection, delete, exists, load, store};
+
+/// Unsupported off macOS: no peer can be identified, so callers refuse.
+#[cfg(not(target_os = "macos"))]
+pub fn peer_pid(_: std::os::fd::RawFd) -> Option<i32> {
+    None
+}
+
+/// Unsupported off macOS.
+#[cfg(not(target_os = "macos"))]
+pub fn process_info(_: i32) -> Option<ProcessInfo> {
+    None
+}
