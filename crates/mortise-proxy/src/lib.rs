@@ -22,10 +22,25 @@ pub mod framing;
 
 use std::path::PathBuf;
 
-/// Where the app listens.
+/// Socket the browser proxy talks to.
+pub const BROWSER_SOCKET: &str = "browser.sock";
+
+/// Socket the `mortise` command-line tool talks to.
 ///
-/// Under the app's own data directory, which is already private to the user.
+/// Separate from the browser's on purpose: the two have different callers,
+/// different authorization (a paired key versus a per-request human
+/// approval) and different message sets, and keeping them apart means a bug
+/// in one protocol cannot be reached through the other.
+pub const CLI_SOCKET: &str = "cli.sock";
+
+/// Where the app listens for the browser.
 pub fn socket_path() -> Option<PathBuf> {
+    app_socket_path(BROWSER_SOCKET)
+}
+
+/// A socket named `name` in the app's data directory, which is already
+/// private to the user.
+pub fn app_socket_path(name: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     #[cfg(debug_assertions)]
     let app_id = option_env!("MORTISE_DEV_APP_ID").unwrap_or("com.mortise.desktop");
@@ -35,7 +50,7 @@ pub fn socket_path() -> Option<PathBuf> {
         PathBuf::from(home)
             .join("Library/Application Support")
             .join(app_id)
-            .join("browser.sock"),
+            .join(name),
     )
 }
 

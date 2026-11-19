@@ -25,7 +25,8 @@ Mortise holds three things:
 
 - **Passwords**, in a vault that is a file on your Mac.
 - **Developer secrets** — `.env` values and API keys, shared with a team without
-  a server ever holding a key that opens them.
+  a server ever holding a key that opens them, and injected into commands with
+  `mortise run` instead of living in `.env` files.
 - **Agent Guard**, which recognises one of your own secrets on its way into a
   chat box and intervenes before it is published. *(In design.)*
 
@@ -130,6 +131,17 @@ Brave, Edge, Arc, Dia, Vivaldi or Opera, then pair it from the extension popup �
 the app will ask you to approve the browser in its own window. That approval is
 what stops anything else on this Mac from reading your vault.
 
+### The command line
+
+```bash
+cargo install --path crates/mortise-cli
+mortise run --project api --env dev -- npm run dev
+```
+
+Starts the command with that environment's secrets in its environment, after
+you approve it in the app. Templates, `.mortise.toml` and the approval model
+are in [docs/cli.md](docs/cli.md).
+
 ### Some sample data
 
 `sample-data.csv` has 21 rows — logins, API keys and env secrets — for filling
@@ -141,9 +153,10 @@ an empty vault with something worth looking at. Settings → Import.
 |---|---|
 | `mortise-crypto` | The cryptographic core. No Tauri, no UI, no network. |
 | `mortise-vault` | Local encrypted store. SQLite, no network. |
-| `mortise-macos` | Keychain integration. The only crate here that uses `unsafe`. |
+| `mortise-macos` | Keychain integration and socket-peer identification. The only crate here that uses `unsafe`. |
 | `mortise-app` | The Tauri desktop app and its IPC surface. |
 | `mortise-proxy` | Native messaging bridge to the browser extension. |
+| `mortise-cli` | The `mortise` command. Asks the app for secrets and runs a program with them. |
 | `mortise-sync` | Client side of sync. Moves signed ciphertext to and from a relay. |
 | `mortise-relay` | The relay. Stores signed ciphertext it cannot read. |
 

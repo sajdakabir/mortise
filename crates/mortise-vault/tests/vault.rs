@@ -702,3 +702,143 @@ fn a_malformed_project_id_is_refused_not_fatal() {
         assert!(f.vault.delete_project(bad).is_err(), "{bad:?}");
     }
 }
+
+fn env_secret(project: &str, environment: &str, key: &str, value: &str) -> (ItemMeta, ItemPayload) {
+    (
+        ItemMeta {
+            title: key.into(),
+            project: Some(project.into()),
+            environment: Some(environment.into()),
+            ..Default::default()
+        },
+        ItemPayload::EnvSecret {
+            value: value.into(),
+        },
+    )
+}
+
+/// One definition of "what is in an environment", shared by export and the
+/// command line: exact project and environment, env secrets only, sorted.
+#[test]
+fn an_environment_holds_exactly_its_own_secrets_sorted() {
+    let mut f = Fixture::new();
+    for (p, e, k, v) in [
+        ("api", "dev", "ZED", "z"),
+        ("api", "dev", "ALPHA", "a"),
+        ("api", "prod", "ALPHA", "prod-a"),
+        ("web", "dev", "ALPHA", "web-a"),
+    ] {
+        let (meta, payload) = env_secret(p, e, k, v);
+        f.vault.create_item(&meta, &payload).unwrap();
+    }
+    // A login filed under the same project is not an environment variable.
+    let (mut meta, payload) = login("api login");
+    meta.project = Some("api".into());
+    meta.environment = Some("dev".into());
+    f.vault.create_item(&meta, &payload).unwrap();
+
+    let vars = f.vault.environment_vars("api", "dev").unwrap();
+    let pairs: Vec<(&str, &str)> = vars
+        .iter()
+        .map(|v| (v.key.as_str(), v.value.as_str()))
+        .collect();
+    assert_eq!(pairs, [("ALPHA", "a"), ("ZED", "z")]);
+    assert!(
+        f.vault
+            .environment_vars("api", "staging")
+            .unwrap()
+            .is_empty()
+    );
+
+    // Names work while locked; values do not.
+    f.relock();
+    assert_eq!(f.vault.environment_items("api", "dev").unwrap().len(), 2);
+    assert!(f.vault.environment_vars("api", "dev").is_err());
+}
+
+#[test]
+fn a_project_is_found_by_name_case_insensitively() {
+    let mut f = Fixture::new();
+    f.vault.create_project("Acme-API", "").unwrap();
+    assert_eq!(
+        f.vault.project_named(" acme-api ").unwrap().unwrap().name,
+        "Acme-API"
+    );
+    assert!(f.vault.project_named("acme").unwrap().is_none());
+}
+
+// --- access log ---
+
+fn access(
+    project: &str,
+    outcome: mortise_vault::access_log::Outcome,
+) -> mortise_vault::access_log::AccessEvent {
+    mortise_vault::access_log::AccessEvent {
+        at_ms: 0,
+        project: project.into(),
+        environment: "dev".into(),
+        keys: Some(vec!["STRIPE_SECRET_KEY".into()]),
+        command: "npm run deploy-payroll".into(),
+        directory: "/Users/me/code/acme-payroll".into(),
+        process_chain: vec![
+            "/usr/local/bin/mortise".into(),
+            "zsh".into(),
+            "claude".into(),
+        ],
+        outcome,
+        detail: None,
+    }
+}
+
+/// The log says which project, command and agent: content, so sealed.
+#[test]
+fn the_access_log_is_sealed_newest_first_and_survives_a_reopen() {
+    use mortise_vault::access_log::Outcome;
+    let f = Fixture::new();
+    f.vault
+        .record_access(&access("acme-payroll", Outcome::AllowedOnce))
+        .unwrap();
+    f.vault
+        .record_access(&access("acme-payroll", Outcome::Denied))
+        .unwrap();
+    f.vault.checkpoint().unwrap();
+
+    let disk = String::from_utf8_lossy(&all_bytes_on_disk(&f.path)).into_owned();
+    for leak in [
+        "acme-payroll",
+        "STRIPE_SECRET_KEY",
+        "deploy-payroll",
+        "claude",
+    ] {
+        assert!(!disk.contains(leak), "{leak} is readable in the file");
+    }
+
+    let path = f.path.clone();
+    let account_key = f.account_key.clone();
+    drop(f.vault);
+    let mut reopened = Vault::open(&path).unwrap();
+    reopened.unlock(PASSWORD, &account_key).unwrap();
+    reopened.lock();
+    // Readable while locked, like search.
+    let log = reopened.access_log(10).unwrap();
+    assert_eq!(
+        log.iter().map(|e| e.outcome).collect::<Vec<_>>(),
+        [Outcome::Denied, Outcome::AllowedOnce]
+    );
+    assert!(log[0].at_ms > 0);
+}
+
+#[test]
+fn the_access_log_keeps_only_the_newest_entries() {
+    use mortise_vault::access_log::{MAX_ENTRIES, Outcome};
+    let f = Fixture::new();
+    for i in 0..=MAX_ENTRIES {
+        f.vault
+            .record_access(&access(&format!("p{i}"), Outcome::ServedByGrant))
+            .unwrap();
+    }
+    let log = f.vault.access_log(MAX_ENTRIES + 10).unwrap();
+    assert_eq!(log.len() as u32, MAX_ENTRIES);
+    assert_eq!(log[0].project, format!("p{MAX_ENTRIES}"), "newest kept");
+    assert!(log.iter().all(|e| e.project != "p0"), "oldest dropped");
+}

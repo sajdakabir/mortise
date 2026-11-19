@@ -37,6 +37,8 @@ and all of which must be stated in user-facing docs:
 │  └──────────────────────────────┘                      │
 │            ↕ unix socket (paired, sealed)              │
 │  mortise-proxy                   ← semi-trusted       │
+│  mortise CLI ↔ cli.sock (per-request approval)         │
+│                                  ← UNTRUSTED caller   │
 │            ↕ native messaging                          │
 │  ┌── browser ───────────────────┐                      │
 │  │  background worker            │ ← semi-trusted      │
@@ -155,6 +157,35 @@ our unix socket.
 **Defence:** clipboard auto-clear with a short timer; socket requires a paired
 association key so an arbitrary local process cannot impersonate the extension;
 keychain items scoped with access control.
+
+### A10 — Local process asking the command-line socket for secrets
+**Capability:** any process running as the user can connect to `cli.sock`
+(it is `0600`, which keeps out other users only) and ask for an environment.
+That includes an agent the user started, and malware running as the user.
+**Must not achieve:** any value without a human approving that request, or a
+grant the human made for that project, environment and directory.
+**Defence:** the socket has no bearer secret to steal — a key file would be
+readable by the same processes it is meant to stop. Instead every request is
+tied to the connecting process by the kernel (`LOCAL_PEERPID`), and the
+prompt shows that process's executable, its ancestors and its working
+directory as the kernel reports them; the caller's own description of its
+command is shown as a claim. Approvals are per request or per directory tree
+for at most eight hours, held in memory only, listed and revocable in
+Settings. The pending queue is capped so a process cannot bury the user in
+prompts. Unknown projects are refused without listing the real ones.
+Agent sessions narrow this further: a session is bound to one process by pid
+and start time, and covers only requests whose kernel-reported ancestry
+contains that process, so neither a process elsewhere in the directory nor a
+later holder of a reused pid inherits it. Every decision is written to a
+sealed, local-only access log for review.
+**Residual:** a *directory* grant covers every process run from its
+directory; a process can `chdir` into one before asking. Anything an agent
+session's agent runs is covered, including code the agent was tricked into
+running. A user
+who clicks Allow without reading has let that process in. Values handed to a
+child process are readable by that process and anything it spawns. Pid reuse
+between connect and lookup could misattribute a request; it requires the
+caller to exit and a new process to take its pid within that window.
 
 ### Residual risks of team sharing
 

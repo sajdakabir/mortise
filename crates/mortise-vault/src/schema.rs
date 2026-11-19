@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 const SCHEMA_V1: &str = r#"
 -- One row. Everything needed to attempt an unlock.
@@ -202,6 +202,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_V9)?;
     conn.execute_batch(SCHEMA_V10)?;
     conn.execute_batch(SCHEMA_V11)?;
+    conn.execute_batch(SCHEMA_V12)?;
     Ok(())
 }
 
@@ -378,6 +379,21 @@ const SCHEMA_V11: &str = r#"
 ALTER TABLE vault ADD COLUMN access_removed INTEGER NOT NULL DEFAULT 0;
 "#;
 
+/// Added in v12: who read which environment through the command line.
+///
+/// Local only — never in the change log, never synced. Each row is sealed
+/// under the META key like the search cache, so the file shows that accesses
+/// happened and when, not which projects or commands.
+const SCHEMA_V12: &str = r#"
+CREATE TABLE access_log (
+    entry_id BLOB PRIMARY KEY,
+    at_ms    INTEGER NOT NULL,
+    sealed   BLOB NOT NULL
+) STRICT;
+
+CREATE INDEX access_log_at ON access_log (at_ms);
+"#;
+
 /// The file's schema version, from whichever table holds it.
 ///
 /// v5 moved it out of `vault_meta` and into `account`. Both have to be
@@ -436,6 +452,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
     if found < 11 {
         tx.execute_batch(SCHEMA_V11)?;
+    }
+    if found < 12 {
+        tx.execute_batch(SCHEMA_V12)?;
     }
     // After v5 the version lives on `account`; vault_meta no longer exists.
     tx.execute(

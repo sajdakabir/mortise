@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { ipc } from "../lib/ipc";
+  import { ipc, onCliQueueChanged } from "../lib/ipc";
   import Accounts from "../lib/Accounts.svelte";
   import BrowserConnector from "../lib/BrowserConnector.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import {
     errorMessage, isCmdError,
-    type ImportReport, type PairedBrowser, type SyncStatus, type VaultStatus,
+    type CliAccessEvent, type CliGrant, type CliOutcome, type ImportReport, type PairedBrowser, type SyncStatus, type VaultStatus,
   } from "../lib/types";
 
   let { status, onStatus, onClose, onUnlock, accountInvite = null, onInviteHandled }:
@@ -34,6 +34,51 @@
 
   async function refreshBrowsers() {
     browsers = await ipc.listBrowsers();
+  }
+
+  let cliGrants = $state<CliGrant[]>([]);
+
+  let cliLog = $state<CliAccessEvent[]>([]);
+  let showCliLog = $state(false);
+
+  /// Grants and the log change together: every answer adds a log line, and
+  /// "for 8 hours" or a session adds a grant.
+  async function refreshCliGrants() {
+    cliGrants = await ipc.listCliGrants();
+    // The log needs the vault's metadata key, which exists only after the
+    // first unlock; before that there is simply nothing to show.
+    cliLog = await ipc.cliAccessLog(50).catch(() => []);
+  }
+
+  const OUTCOME: Record<CliOutcome, string> = {
+    allowed_once: "Allowed once",
+    allowed_for_directory: "Allowed for 8 hours",
+    served_by_grant: "Directory grant",
+    session_started: "Session started",
+    served_by_session: "Agent session",
+    denied: "Denied",
+    timed_out: "Timed out",
+    refused: "Refused",
+  };
+
+  function when(ms: number): string {
+    return new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+
+  async function revokeCliGrant(id: string) {
+    busy = true;
+    try {
+      await ipc.revokeCliGrant(id);
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+      await refreshCliGrants();
+    }
+  }
+
+  function until(ms: number): string {
+    return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   }
 
   async function refreshSync() {
@@ -91,6 +136,15 @@
   $effect(() => {
     refreshBrowsers();
     refreshSync();
+  });
+
+  // An "Allow for 8 hours" answered in the prompt adds a grant; keep the list
+  // current while this pane is open.
+  $effect(() => {
+    let stop: (() => void) | undefined;
+    onCliQueueChanged(refreshCliGrants).then((fn) => { stop = fn; }).catch(() => {});
+    refreshCliGrants();
+    return () => stop?.();
   });
 
   /// The picker hands back a path, never the file's bytes. Rust opens and
@@ -235,6 +289,57 @@
     </section>
 
     <section>
+      <div class="label">
+        <h3>Command line</h3>
+        <p class="faint">
+          <code>mortise run -- npm run dev</code> starts a command with a project's
+          secrets in its environment, so they never sit in a <code>.env</code> file.
+          Each new directory asks here first. <code>mortise agent -- claude</code>
+          gives one agent its own session instead.
+        </p>
+      </div>
+      {#if cliGrants.length === 0}
+        <p class="note faint">No commands are allowed right now.</p>
+      {:else}
+        <ul class="grants">
+          {#each cliGrants as grant (grant.id)}
+            <li class="spread">
+              <span class="label">
+                <strong>{grant.project} / {grant.environment}</strong>
+                {#if grant.kind === "agent"}
+                  <span class="faint">agent <code>{grant.agent}</code> until it exits or {until(grant.expires_at_ms)}</span>
+                {:else}
+                  <span class="faint">from <code>{grant.directory}</code> until {until(grant.expires_at_ms)}</span>
+                {/if}
+              </span>
+              <button disabled={busy} onclick={() => revokeCliGrant(grant.id)}>Revoke</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if cliLog.length > 0}
+        <button class="log-toggle" onclick={() => (showCliLog = !showCliLog)} aria-expanded={showCliLog}>
+          {showCliLog ? "Hide recent access" : `Recent access (${cliLog.length})`}
+        </button>
+        {#if showCliLog}
+          <ul class="log" aria-label="Recent command-line access">
+            {#each cliLog as e (e.at_ms + e.command + e.outcome)}
+              <li>
+                <span class="when faint">{when(e.at_ms)}</span>
+                <span class="what">
+                  <strong>{e.project} / {e.environment}</strong>
+                  <span class="badge" class:bad={["denied", "refused", "timed_out"].includes(e.outcome)}>{OUTCOME[e.outcome]}</span>
+                  <span class="faint"><code>{e.process_chain.join(" ← ")}</code> · {e.command || "—"}</span>
+                  {#if e.detail}<span class="faint">{e.detail}</span>{/if}
+                </span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/if}
+    </section>
+
+    <section>
       <div class="spread">
         <div class="label">
           <h3>Unlock with Touch ID</h3>
@@ -349,6 +454,15 @@
   .label p { margin: 0; font-size: 12px; line-height: 1.55; max-width: 44ch; }
   button { flex-shrink: 0; }
   .row { display: flex; gap: 8px; }
+  .grants { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+  .grants li { align-items: center; font-size: 12px; }
+  .grants .label { display: grid; gap: 2px; }
+  .log-toggle { margin-top: 12px; }
+  .log { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; font-size: 12px; }
+  .log li { display: grid; grid-template-columns: 9em 1fr; gap: 10px; }
+  .log .what { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+  .badge { justify-self: start; font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); }
+  .badge.bad { color: var(--danger); }
   .relay { display: flex; gap: 8px; margin-top: 10px; }
   .relay input { flex: 1; }
   .synced { margin-top: 10px; align-items: center; }
