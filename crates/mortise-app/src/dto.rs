@@ -12,6 +12,20 @@ use mortise_crypto::item::ItemId;
 use mortise_vault::{ItemKind, ItemMeta, ItemSummary};
 use serde::{Deserialize, Serialize};
 
+/// Make a string from an untrusted local client safe to put in a UI label.
+///
+/// Control characters are dropped and the length is capped, so a hostile
+/// value cannot add lines that read like the app's own text ("…\n\nApproved
+/// by Apple") or push the real text off screen. Trimmed; may be empty.
+pub fn sanitize_display(raw: &str, max_chars: usize) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control())
+        .take(max_chars)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// Render an item id for the webview.
 pub fn id_to_hex(id: ItemId) -> String {
     id.as_bytes().iter().map(|b| format!("{b:02x}")).collect()
@@ -64,11 +78,33 @@ pub struct ItemRow {
     pub tags: Vec<String>,
     /// Last modified, milliseconds since the Unix epoch.
     pub updated_at_ms: u64,
+    /// Rotation policy in days, if any.
+    pub rotate_every_days: Option<u32>,
+    /// When the secret last changed. For items from before rotation
+    /// tracking this is the last write, the best time known.
+    pub rotated_at_ms: Option<u64>,
+    /// When rotation is due, if there is a policy.
+    pub rotation_due_at_ms: Option<u64>,
+    /// Due date has passed.
+    pub overdue: bool,
+    /// Until when the previous value can be restored, if one is kept.
+    pub previous_until_ms: Option<u64>,
 }
 
 impl From<ItemSummary> for ItemRow {
     fn from(s: ItemSummary) -> Self {
+        let now = mortise_vault::vault::now_ms();
+        let rotation_due_at_ms = s.meta.rotation_due_at_ms(s.updated_at_ms);
+        let has_secret = !matches!(
+            s.kind,
+            ItemKind::SecureNote | ItemKind::Card | ItemKind::Passkey
+        );
         Self {
+            rotate_every_days: s.meta.rotate_every_days,
+            rotated_at_ms: has_secret.then(|| s.meta.rotated_at_ms.unwrap_or(s.updated_at_ms)),
+            rotation_due_at_ms,
+            overdue: rotation_due_at_ms.is_some_and(|due| due <= now),
+            previous_until_ms: s.meta.previous_until_ms.filter(|until| *until > now),
             id: id_to_hex(s.id),
             kind: kind_name(s.kind),
             title: s.meta.title,
@@ -156,6 +192,9 @@ pub struct MetaInput {
     /// Environment within that project.
     #[serde(default)]
     pub environment: Option<String>,
+    /// Rotation policy in days, or none.
+    #[serde(default)]
+    pub rotate_every_days: Option<u32>,
 }
 
 impl From<MetaInput> for ItemMeta {
@@ -176,6 +215,11 @@ impl From<MetaInput> for ItemMeta {
                 .into_iter()
                 .filter(|t| !t.trim().is_empty())
                 .collect(),
+            // Zero would mean "always overdue"; treat it as no policy.
+            rotate_every_days: m.rotate_every_days.filter(|d| *d > 0),
+            // Maintained by the vault; anything sent here is replaced.
+            rotated_at_ms: None,
+            previous_until_ms: None,
         }
     }
 }

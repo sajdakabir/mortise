@@ -36,7 +36,7 @@
   let projects = $state<ProjectSummary[]>([]);
   let project = $state<string | null>(null);
   let environment = $state<string | null>(null);
-  let rows = $state<{ id: string; title: string }[]>([]);
+  let rows = $state<{ id: string; title: string; overdue: boolean }[]>([]);
   /// Values revealed in this session, by item id. Cleared whenever the
   /// environment changes: a value left on screen after you have navigated
   /// away is a value on screen for longer than anyone asked for.
@@ -153,7 +153,7 @@
         (rows = all
           .filter((r) => r.kind === "env")
           .filter((r) => r.project === p && r.environment === e)
-          .map((r) => ({ id: r.id, title: r.title }))
+          .map((r) => ({ id: r.id, title: r.title, overdue: r.overdue }))
           .sort((a, b) => a.title.localeCompare(b.title))),
       )
       .catch((err) => (error = errorMessage(err)));
@@ -450,7 +450,7 @@
         <ul class="keys mono">
           {#each rows as row (row.id)}
             <li>
-              <span class="k">{row.title}</span>
+              <span class="k" title={row.overdue ? "Overdue for rotation" : undefined}>{row.title}{#if row.overdue}<span class="due" aria-label="overdue for rotation"> ●</span>{/if}</span>
               <!-- Keyed on presence rather than truthiness: a .env may hold
                    KEY= with nothing after it, and a revealed empty value has
                    to look different from one that is still hidden. -->
@@ -673,6 +673,7 @@
     padding: 7px var(--s2); border-bottom: 1px solid var(--border); font-size: 13px;
   }
   .keys .k { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .keys .due { color: var(--danger); }
   .keys .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .acts { display: flex; align-items: center; gap: var(--s1); }
   .icon-button {

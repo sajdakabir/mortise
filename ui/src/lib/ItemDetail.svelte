@@ -1,10 +1,17 @@
 <script lang="ts">
   import { ipc } from "./ipc";
   import Avatar from "./Avatar.svelte";
-  import { errorMessage, KIND_LABEL, type ItemPayload, type ItemRow } from "./types";
+  import {
+    errorMessage, keepsPrevious, KIND_LABEL, metaFromRow, rotationSummary,
+    type ItemPayload, type ItemRow,
+  } from "./types";
 
-  let { item, onEdit, onDeleted }:
-    { item: ItemRow; onEdit: () => void; onDeleted: () => void } = $props();
+  let { item, onEdit, onDeleted, onChanged }:
+    { item: ItemRow; onEdit: () => void; onDeleted: () => void; onChanged: () => void } = $props();
+
+  let rotating = $state(false);
+  let newSecret = $state("");
+  let rotationBusy = $state(false);
 
   let payload = $state<ItemPayload | null>(null);
   let shown = $state(false);
@@ -21,7 +28,53 @@
     shown = false;
     error = "";
     confirmingDelete = false;
+    rotating = false;
+    newSecret = "";
   });
+
+  /// Replace the secret with a new value. The vault records the rotation and
+  /// keeps the old value restorable; this only sends the new one.
+  async function rotate() {
+    if (!newSecret || rotationBusy) return;
+    rotationBusy = true;
+    error = "";
+    try {
+      const current = await ipc.reveal(item.id);
+      const next: ItemPayload =
+        current.kind === "Login" ? { ...current, password: newSecret }
+        : current.kind === "ApiKey" ? { ...current, key: newSecret }
+        : current.kind === "EnvSecret" ? { ...current, value: newSecret }
+        : current;
+      await ipc.saveItem(item.id, metaFromRow(item), next);
+      rotating = false;
+      newSecret = "";
+      payload = null;
+      shown = false;
+      onChanged();
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      rotationBusy = false;
+    }
+  }
+
+  async function restore() {
+    if (rotationBusy) return;
+    rotationBusy = true;
+    error = "";
+    try {
+      await ipc.restorePrevious(item.id);
+      payload = null;
+      shown = false;
+      onChanged();
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      rotationBusy = false;
+    }
+  }
+
+  const rotation = $derived(rotationSummary(item));
 
   async function reveal() {
     try {
@@ -188,6 +241,44 @@
         <span class="k">Updated</span>
         <span class="v faint" title={exact}>{when}</span>
       </div>
+
+      {#if hasSecret}
+        <div class="field-row rotation">
+          <span class="k">Rotation</span>
+          <span class="v">
+            {#if rotation}
+              <span class:overdue={item.overdue}>{rotation}</span>
+              <span class="faint"> · every {item.rotate_every_days} days</span>
+            {:else}
+              <span class="faint">No reminder set</span>
+            {/if}
+          </span>
+          {#if !rotating}
+            <button class="ghost tiny" onclick={() => (rotating = true)}>Rotate…</button>
+          {/if}
+        </div>
+        {#if rotating}
+          <form class="rotate-form" onsubmit={(e) => { e.preventDefault(); rotate(); }}>
+            <label for="new-secret" class="faint">New {secretLabel.toLowerCase()}</label>
+            <input id="new-secret" class="mono" type="password" bind:value={newSecret}
+              autocomplete="off" spellcheck="false" />
+            <div class="row">
+              <button type="button" class="ghost tiny" onclick={() => { rotating = false; newSecret = ""; }}>Cancel</button>
+              <button type="submit" class="primary tiny" disabled={!newSecret || rotationBusy}>Save new {secretLabel.toLowerCase()}</button>
+            </div>
+            {#if keepsPrevious(item.kind)}
+              <p class="faint hint">The current one stays restorable for 7 days.</p>
+            {/if}
+          </form>
+        {/if}
+        {#if item.previous_until_ms}
+          <div class="field-row">
+            <span class="k">Previous</span>
+            <span class="v faint">Restorable until {new Date(item.previous_until_ms).toLocaleDateString()}</span>
+            <button class="ghost tiny" disabled={rotationBusy} onclick={restore}>Restore previous</button>
+          </div>
+        {/if}
+      {/if}
     </div>
 
     <p class="faint footnote">
@@ -203,6 +294,10 @@
 
 <style>
   .detail { height: 100%; display: flex; flex-direction: column; position: relative; }
+  .overdue { color: var(--danger); font-weight: 500; }
+  .rotate-form { display: grid; gap: 6px; padding: 10px 0 4px; }
+  .rotate-form .row { display: flex; gap: 8px; justify-content: flex-end; }
+  .hint { font-size: 11px; margin: 0; }
 
   .head {
     display: flex;

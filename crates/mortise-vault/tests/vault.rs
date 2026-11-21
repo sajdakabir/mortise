@@ -55,6 +55,7 @@ fn login(title: &str) -> (ItemMeta, ItemPayload) {
             tags: vec!["devtools-zqx".into()],
             project: None,
             environment: None,
+            ..Default::default()
         },
         ItemPayload::Login {
             password: "s3cr3t-p4ssw0rd-value".into(),
@@ -62,6 +63,16 @@ fn login(title: &str) -> (ItemMeta, ItemPayload) {
             notes: None,
         },
     )
+}
+
+/// Metadata as a caller set it: without the rotation fields the vault
+/// maintains itself, so round-trip checks compare like with like.
+fn as_written(meta: ItemMeta) -> ItemMeta {
+    ItemMeta {
+        rotated_at_ms: None,
+        previous_until_ms: None,
+        ..meta
+    }
 }
 
 /// Every byte written to disk, across the db and its WAL/shm sidecars.
@@ -99,7 +110,7 @@ fn reopening_from_disk_starts_locked_and_unlocks() {
     assert!(!f.vault.is_unlocked());
     f.unlock();
     assert!(f.vault.is_unlocked());
-    assert_eq!(f.vault.item_meta(id).unwrap(), meta);
+    assert_eq!(as_written(f.vault.item_meta(id).unwrap()), meta);
 }
 
 #[test]
@@ -169,7 +180,7 @@ fn an_item_round_trips() {
     let (meta, payload) = login("GitHub");
     let id = f.vault.create_item(&meta, &payload).unwrap();
 
-    assert_eq!(f.vault.item_meta(id).unwrap(), meta);
+    assert_eq!(as_written(f.vault.item_meta(id).unwrap()), meta);
     assert_eq!(f.vault.reveal(id).unwrap(), payload);
 }
 
@@ -189,7 +200,7 @@ fn updating_bumps_the_version_and_keeps_the_creation_time() {
     };
     f.vault.update_item(id, &meta2, &payload2).unwrap();
 
-    assert_eq!(f.vault.item_meta(id).unwrap(), meta2);
+    assert_eq!(as_written(f.vault.item_meta(id).unwrap()), meta2);
     assert_eq!(f.vault.reveal(id).unwrap(), payload2);
     assert!(f.vault.list().unwrap()[0].updated_at_ms >= created);
     assert_eq!(f.vault.item_count().unwrap(), 1);
@@ -247,9 +258,11 @@ fn every_payload_kind_round_trips() {
         ItemPayload::ApiKey {
             key: "sk-ant-api03-not-a-real-key".into(),
             notes: None,
+            previous: None,
         },
         ItemPayload::EnvSecret {
             value: "postgres://localhost/db".into(),
+            previous: None,
         },
         // Spec §10's reserved slot, exercised so the shape is actually fixed.
         ItemPayload::Passkey {
@@ -653,6 +666,7 @@ fn a_project_holding_secrets_will_not_be_deleted() {
             &meta,
             &ItemPayload::EnvSecret {
                 value: "postgres://x".into(),
+                previous: None,
             },
         )
         .unwrap();
@@ -701,4 +715,316 @@ fn a_malformed_project_id_is_refused_not_fatal() {
         assert!(f.vault.add_environment(bad, "dev").is_err(), "{bad:?}");
         assert!(f.vault.delete_project(bad).is_err(), "{bad:?}");
     }
+}
+
+fn env_secret(project: &str, environment: &str, key: &str, value: &str) -> (ItemMeta, ItemPayload) {
+    (
+        ItemMeta {
+            title: key.into(),
+            project: Some(project.into()),
+            environment: Some(environment.into()),
+            ..Default::default()
+        },
+        ItemPayload::EnvSecret {
+            value: value.into(),
+            previous: None,
+        },
+    )
+}
+
+/// One definition of "what is in an environment", shared by export and the
+/// command line: exact project and environment, env secrets only, sorted.
+#[test]
+fn an_environment_holds_exactly_its_own_secrets_sorted() {
+    let mut f = Fixture::new();
+    for (p, e, k, v) in [
+        ("api", "dev", "ZED", "z"),
+        ("api", "dev", "ALPHA", "a"),
+        ("api", "prod", "ALPHA", "prod-a"),
+        ("web", "dev", "ALPHA", "web-a"),
+    ] {
+        let (meta, payload) = env_secret(p, e, k, v);
+        f.vault.create_item(&meta, &payload).unwrap();
+    }
+    // A login filed under the same project is not an environment variable.
+    let (mut meta, payload) = login("api login");
+    meta.project = Some("api".into());
+    meta.environment = Some("dev".into());
+    f.vault.create_item(&meta, &payload).unwrap();
+
+    let vars = f.vault.environment_vars("api", "dev").unwrap();
+    let pairs: Vec<(&str, &str)> = vars
+        .iter()
+        .map(|v| (v.key.as_str(), v.value.as_str()))
+        .collect();
+    assert_eq!(pairs, [("ALPHA", "a"), ("ZED", "z")]);
+    assert!(
+        f.vault
+            .environment_vars("api", "staging")
+            .unwrap()
+            .is_empty()
+    );
+
+    // Names work while locked; values do not.
+    f.relock();
+    assert_eq!(f.vault.environment_items("api", "dev").unwrap().len(), 2);
+    assert!(f.vault.environment_vars("api", "dev").is_err());
+}
+
+#[test]
+fn a_project_is_found_by_name_case_insensitively() {
+    let mut f = Fixture::new();
+    f.vault.create_project("Acme-API", "").unwrap();
+    assert_eq!(
+        f.vault.project_named(" acme-api ").unwrap().unwrap().name,
+        "Acme-API"
+    );
+    assert!(f.vault.project_named("acme").unwrap().is_none());
+}
+
+// --- access log ---
+
+fn access(
+    project: &str,
+    outcome: mortise_vault::access_log::Outcome,
+) -> mortise_vault::access_log::AccessEvent {
+    mortise_vault::access_log::AccessEvent {
+        at_ms: 0,
+        project: project.into(),
+        environment: "dev".into(),
+        keys: Some(vec!["STRIPE_SECRET_KEY".into()]),
+        command: "npm run deploy-payroll".into(),
+        directory: "/Users/me/code/acme-payroll".into(),
+        process_chain: vec![
+            "/usr/local/bin/mortise".into(),
+            "zsh".into(),
+            "claude".into(),
+        ],
+        outcome,
+        detail: None,
+    }
+}
+
+/// The log says which project, command and agent: content, so sealed.
+#[test]
+fn the_access_log_is_sealed_newest_first_and_survives_a_reopen() {
+    use mortise_vault::access_log::Outcome;
+    let f = Fixture::new();
+    f.vault
+        .record_access(&access("acme-payroll", Outcome::AllowedOnce))
+        .unwrap();
+    f.vault
+        .record_access(&access("acme-payroll", Outcome::Denied))
+        .unwrap();
+    f.vault.checkpoint().unwrap();
+
+    let disk = String::from_utf8_lossy(&all_bytes_on_disk(&f.path)).into_owned();
+    for leak in [
+        "acme-payroll",
+        "STRIPE_SECRET_KEY",
+        "deploy-payroll",
+        "claude",
+    ] {
+        assert!(!disk.contains(leak), "{leak} is readable in the file");
+    }
+
+    let path = f.path.clone();
+    let account_key = f.account_key.clone();
+    drop(f.vault);
+    let mut reopened = Vault::open(&path).unwrap();
+    reopened.unlock(PASSWORD, &account_key).unwrap();
+    reopened.lock();
+    // Readable while locked, like search.
+    let log = reopened.access_log(10).unwrap();
+    assert_eq!(
+        log.iter().map(|e| e.outcome).collect::<Vec<_>>(),
+        [Outcome::Denied, Outcome::AllowedOnce]
+    );
+    assert!(log[0].at_ms > 0);
+}
+
+#[test]
+fn the_access_log_keeps_only_the_newest_entries() {
+    use mortise_vault::access_log::{MAX_ENTRIES, Outcome};
+    let f = Fixture::new();
+    for i in 0..=MAX_ENTRIES {
+        f.vault
+            .record_access(&access(&format!("p{i}"), Outcome::ServedByGrant))
+            .unwrap();
+    }
+    let log = f.vault.access_log(MAX_ENTRIES + 10).unwrap();
+    assert_eq!(log.len() as u32, MAX_ENTRIES);
+    assert_eq!(log[0].project, format!("p{MAX_ENTRIES}"), "newest kept");
+    assert!(log.iter().all(|e| e.project != "p0"), "oldest dropped");
+}
+
+// --- rotation ---
+
+fn api_key(key: &str) -> ItemPayload {
+    ItemPayload::ApiKey {
+        key: key.into(),
+        notes: None,
+        previous: None,
+    }
+}
+
+fn key_meta() -> ItemMeta {
+    ItemMeta {
+        title: "Stripe".into(),
+        rotate_every_days: Some(90),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn only_a_changed_value_counts_as_a_rotation_and_the_old_value_is_restorable() {
+    let mut f = Fixture::new();
+    let id = f
+        .vault
+        .create_item(&key_meta(), &api_key("sk_old"))
+        .unwrap();
+    let created = f.vault.item_meta(id).unwrap().rotated_at_ms.unwrap();
+
+    // Renaming is not rotating.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let renamed = ItemMeta {
+        title: "Stripe live".into(),
+        ..key_meta()
+    };
+    f.vault
+        .update_item(id, &renamed, &api_key("sk_old"))
+        .unwrap();
+    assert_eq!(f.vault.item_meta(id).unwrap().rotated_at_ms, Some(created));
+    assert_eq!(f.vault.reveal(id).unwrap().previous(), None);
+
+    // A new value is. The caller's payload carries no previous value, as the
+    // webview's never does; the vault keeps it anyway.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    f.vault
+        .update_item(id, &renamed, &api_key("sk_new"))
+        .unwrap();
+    let meta = f.vault.item_meta(id).unwrap();
+    assert!(meta.rotated_at_ms.unwrap() > created);
+    let payload = f.vault.reveal(id).unwrap();
+    assert_eq!(payload.primary_secret(), Some("sk_new"));
+    assert_eq!(payload.previous().unwrap().value, "sk_old");
+    assert_eq!(
+        meta.previous_until_ms,
+        Some(payload.previous().unwrap().until_ms)
+    );
+
+    // A later metadata-only save from the webview (no previous in its
+    // payload) must not drop the restore window.
+    f.vault
+        .update_item(id, &key_meta(), &api_key("sk_new"))
+        .unwrap();
+    assert_eq!(
+        f.vault.reveal(id).unwrap().previous().unwrap().value,
+        "sk_old"
+    );
+
+    // What leaves for the webview has no previous value in it.
+    assert_eq!(
+        f.vault.reveal(id).unwrap().without_previous().previous(),
+        None
+    );
+}
+
+#[test]
+fn restoring_swaps_values_and_keeps_the_restored_values_age() {
+    let mut f = Fixture::new();
+    let id = f
+        .vault
+        .create_item(&key_meta(), &api_key("sk_old"))
+        .unwrap();
+    let old_rotated = f.vault.item_meta(id).unwrap().rotated_at_ms;
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    f.vault
+        .update_item(id, &key_meta(), &api_key("sk_new"))
+        .unwrap();
+
+    f.vault.restore_previous(id).unwrap();
+    let payload = f.vault.reveal(id).unwrap();
+    assert_eq!(payload.primary_secret(), Some("sk_old"));
+    assert_eq!(
+        payload.previous().unwrap().value,
+        "sk_new",
+        "restoring is itself undoable"
+    );
+    assert_eq!(
+        f.vault.item_meta(id).unwrap().rotated_at_ms,
+        old_rotated,
+        "an old key does not look fresh"
+    );
+
+    // Undo the undo.
+    f.vault.restore_previous(id).unwrap();
+    assert_eq!(f.vault.reveal(id).unwrap().primary_secret(), Some("sk_new"));
+}
+
+#[test]
+fn expired_previous_values_are_wiped_from_the_file() {
+    let mut f = Fixture::new();
+    let id = f
+        .vault
+        .create_item(&key_meta(), &api_key("sk_live_first_value_xyz"))
+        .unwrap();
+    f.vault
+        .update_item(id, &key_meta(), &api_key("sk_live_second_value"))
+        .unwrap();
+    let until = f.vault.item_meta(id).unwrap().previous_until_ms.unwrap();
+
+    assert_eq!(
+        f.vault.purge_expired_previous_at(until - 1).unwrap(),
+        0,
+        "not yet"
+    );
+    assert_eq!(f.vault.purge_expired_previous_at(until).unwrap(), 1);
+    assert_eq!(f.vault.reveal(id).unwrap().previous(), None);
+    assert_eq!(f.vault.item_meta(id).unwrap().previous_until_ms, None);
+    assert!(
+        f.vault.restore_previous(id).is_err(),
+        "nothing left to restore"
+    );
+    assert_eq!(
+        f.vault.reveal(id).unwrap().primary_secret(),
+        Some("sk_live_second_value")
+    );
+}
+
+#[test]
+fn an_env_reimport_with_a_new_value_is_a_rotation() {
+    let mut f = Fixture::new();
+    let id = f
+        .vault
+        .upsert_project_env_secret("dev", "TOKEN", "t1")
+        .unwrap();
+    f.vault
+        .upsert_project_env_secret("dev", "TOKEN", "t1")
+        .unwrap();
+    assert_eq!(
+        f.vault.reveal(id).unwrap().previous(),
+        None,
+        "same value, no rotation"
+    );
+    f.vault
+        .upsert_project_env_secret("dev", "TOKEN", "t2")
+        .unwrap();
+    assert_eq!(f.vault.reveal(id).unwrap().previous().unwrap().value, "t1");
+}
+
+#[test]
+fn logins_track_rotation_without_keeping_old_passwords() {
+    let mut f = Fixture::new();
+    let (meta, payload) = login("GitHub");
+    let id = f.vault.create_item(&meta, &payload).unwrap();
+    let changed = ItemPayload::Login {
+        password: "new-password".into(),
+        totp_seed: None,
+        notes: None,
+    };
+    f.vault.update_item(id, &meta, &changed).unwrap();
+    assert!(f.vault.item_meta(id).unwrap().rotated_at_ms.is_some());
+    assert_eq!(f.vault.reveal(id).unwrap().previous(), None);
+    assert!(f.vault.restore_previous(id).is_err());
 }

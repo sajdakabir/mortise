@@ -86,6 +86,50 @@ pub struct ItemMeta {
     /// Free-form tags.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Rotate every this many days. `None` means no policy.
+    ///
+    /// Set by the user. Lives in the synced metadata so a team shares one
+    /// policy per secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate_every_days: Option<u32>,
+    /// When the secret value last changed, in Unix milliseconds.
+    ///
+    /// **Maintained by the vault**, not callers: whatever a caller passes is
+    /// replaced on write (see [`crate::rotation`]). Absent on items written
+    /// before rotation tracking existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotated_at_ms: Option<u64>,
+    /// Until when a previous value can be restored, in Unix milliseconds.
+    ///
+    /// Maintained by the vault. Mirrors the payload's previous value so a
+    /// list can show "restorable" without decrypting anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_until_ms: Option<u64>,
+}
+
+impl ItemMeta {
+    /// When this item is next due for rotation, if it has a policy.
+    ///
+    /// `fallback_rotated_at_ms` stands in for items written before rotation
+    /// tracking existed; callers pass the best time they know.
+    pub fn rotation_due_at_ms(&self, fallback_rotated_at_ms: u64) -> Option<u64> {
+        let days = u64::from(self.rotate_every_days?);
+        let since = self.rotated_at_ms.unwrap_or(fallback_rotated_at_ms);
+        Some(since.saturating_add(days.saturating_mul(86_400_000)))
+    }
+}
+
+/// The value a secret had before its last rotation, kept briefly so a bad
+/// rotation can be undone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize)]
+pub struct PreviousValue {
+    /// The old secret.
+    pub value: String,
+    /// When the old value had been set, so restoring it restores its age.
+    #[serde(default)]
+    pub rotated_at_ms: Option<u64>,
+    /// When this stops being restorable and is wiped.
+    pub until_ms: u64,
 }
 
 /// The secret half of an item.
@@ -126,6 +170,10 @@ pub enum ItemPayload {
         key: String,
         /// Private notes.
         notes: Option<String>,
+        /// The key before the last rotation, while still restorable.
+        /// Maintained by the vault; never sent to the webview.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous: Option<PreviousValue>,
     },
     /// A WebAuthn passkey.
     ///
@@ -146,6 +194,10 @@ pub enum ItemPayload {
     EnvSecret {
         /// The value. May reference another secret as `${NAME}` (M8).
         value: String,
+        /// The value before the last rotation, while still restorable.
+        /// Maintained by the vault; never sent to the webview.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous: Option<PreviousValue>,
     },
 }
 
@@ -162,6 +214,59 @@ impl ItemPayload {
         }
     }
 
+    /// The secret whose change counts as a rotation, for kinds that have one.
+    pub fn primary_secret(&self) -> Option<&str> {
+        match self {
+            Self::Login { password, .. } => Some(password),
+            Self::ApiKey { key, .. } => Some(key),
+            Self::EnvSecret { value, .. } => Some(value),
+            Self::SecureNote { .. } | Self::Card { .. } | Self::Passkey { .. } => None,
+        }
+    }
+
+    /// The restorable previous value, for kinds that keep one.
+    pub fn previous(&self) -> Option<&PreviousValue> {
+        match self {
+            Self::ApiKey { previous, .. } | Self::EnvSecret { previous, .. } => previous.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Whether this kind keeps a previous value at all.
+    pub fn keeps_previous(&self) -> bool {
+        matches!(self, Self::ApiKey { .. } | Self::EnvSecret { .. })
+    }
+
+    /// Replace the previous value. A no-op for kinds that do not keep one.
+    pub fn set_previous(&mut self, value: Option<PreviousValue>) {
+        if let Self::ApiKey { previous, .. } | Self::EnvSecret { previous, .. } = self {
+            if let Some(old) = previous.as_mut() {
+                old.zeroize();
+            }
+            *previous = value;
+        }
+    }
+
+    /// Replace the primary secret. A no-op for kinds without one.
+    pub fn set_primary_secret(&mut self, secret: String) {
+        let slot = match self {
+            Self::Login { password, .. } => password,
+            Self::ApiKey { key, .. } => key,
+            Self::EnvSecret { value, .. } => value,
+            _ => return,
+        };
+        slot.zeroize();
+        *slot = secret;
+    }
+
+    /// A copy with the previous value removed, for anything leaving the
+    /// Rust process. Restoring happens here, so the webview never needs it.
+    pub fn without_previous(&self) -> Self {
+        let mut copy = self.clone();
+        copy.set_previous(None);
+        copy
+    }
+
     /// Values Agent Guard should index for this item (spec §8).
     ///
     /// Only genuinely secret strings. Usernames and titles are excluded: they
@@ -170,7 +275,7 @@ impl ItemPayload {
         match self {
             Self::Login { password, .. } => vec![password.as_str()],
             Self::ApiKey { key, .. } => vec![key.as_str()],
-            Self::EnvSecret { value } => vec![value.as_str()],
+            Self::EnvSecret { value, .. } => vec![value.as_str()],
             Self::Card { number, cvv, .. } => vec![number.as_str(), cvv.as_str()],
             // Note bodies are prose; indexing them whole would never match a
             // token anyway. Passkey private keys never appear as text.

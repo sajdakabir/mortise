@@ -1,14 +1,11 @@
 //! The Unix socket the proxy connects to.
 //!
-//! One thread accepts connections; each connection is handled to completion on
-//! its own thread. Connections are short-lived — the proxy opens one per
-//! message — so there is no pool to manage and a wedged client cannot outlive
-//! its request.
+//! Binding and threading live in [`crate::local_socket`]; this is the
+//! browser protocol on top of it.
 
 use std::io;
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 
 use mortise_proxy::framing::{read_frame, write_frame};
 use mortise_vault::{ItemPayload, Origin};
@@ -19,50 +16,10 @@ use super::protocol::{LoginCandidate, Request, Response};
 use crate::dto::{id_from_hex, id_to_hex};
 use crate::state::AppState;
 
-/// Socket filename inside the app data directory.
-pub const SOCKET_NAME: &str = "browser.sock";
-
 /// Start listening. Returns once the listener is bound; serving continues on
 /// background threads.
 pub fn start(app: &AppHandle) -> io::Result<PathBuf> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| io::Error::other(e.to_string()))?;
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(SOCKET_NAME);
-
-    // A leftover socket from a crash would make bind fail with EADDRINUSE.
-    // Removing it is safe: if another instance really is listening, the
-    // single-instance guard should have stopped us before this point.
-    let _ = std::fs::remove_file(&path);
-
-    let listener = UnixListener::bind(&path)?;
-    restrict_permissions(&path)?;
-
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
-            let handle = handle.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = serve(&handle, stream) {
-                    eprintln!("mortise: browser connection ended: {e}");
-                }
-            });
-        }
-    });
-
-    Ok(path)
-}
-
-/// Owner read/write only.
-///
-/// The socket sits in the app's data directory, which is already private, but
-/// saying so explicitly costs nothing and does not depend on the directory's
-/// permissions staying that way.
-fn restrict_permissions(path: &Path) -> io::Result<()> {
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+    crate::local_socket::listen(app, mortise_proxy::BROWSER_SOCKET, serve)
 }
 
 fn serve(app: &AppHandle, mut stream: UnixStream) -> io::Result<()> {
@@ -304,18 +261,10 @@ fn credential(app: &AppHandle, item_id: &str, origin: &str) -> Response {
 
 /// Clean up a client-supplied name before it is shown in a prompt.
 ///
-/// The name comes from the extension, so it is untrusted. It ends up in a UI
-/// label; stripping control characters and capping the length stops a hostile
-/// value from spoofing surrounding interface text.
+/// The name comes from the extension, so it is untrusted; see
+/// [`crate::dto::sanitize_display`].
 pub fn sanitize_client_name(raw: &str) -> String {
-    let cleaned: String = raw
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(40)
-        .collect::<String>()
-        .trim()
-        .to_string();
-
+    let cleaned = crate::dto::sanitize_display(raw, 40);
     if cleaned.is_empty() {
         "A browser".to_string()
     } else {

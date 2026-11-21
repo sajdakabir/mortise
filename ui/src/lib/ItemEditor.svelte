@@ -2,7 +2,7 @@
   import { ipc } from "./ipc";
   import Generator from "./Generator.svelte";
   import {
-    emptyPayload, errorMessage, KIND_LABEL,
+    emptyPayload, errorMessage, hasRotatingSecret, KIND_LABEL, metaFromRow, ROTATION_CHOICES,
     type ItemKind, type ItemPayload, type ItemRow,
   } from "./types";
 
@@ -20,6 +20,7 @@
     urls: (existing?.urls ?? []).join("\n"),
     folder: existing?.folder ?? "",
     tags: (existing?.tags ?? []).join(", "),
+    rotateEvery: existing?.rotate_every_days ?? null,
     isEdit: existing !== null,
   };
 
@@ -29,6 +30,7 @@
   let urls = $state(seed.urls);
   let folder = $state(seed.folder);
   let tags = $state(seed.tags);
+  let rotateEvery = $state<number | null>(seed.rotateEvery);
   let payload = $state<ItemPayload>(emptyPayload(seed.kind));
 
   let loading = $state(seed.isEdit);
@@ -69,6 +71,7 @@
       urls !== seed.urls ||
       folder !== seed.folder ||
       tags !== seed.tags ||
+      rotateEvery !== seed.rotateEvery ||
       hasContent(payload),
   );
 
@@ -117,13 +120,17 @@
     busy = true;
     error = "";
     try {
-      const id = await ipc.saveItem(existing?.id ?? null, {
+      const fields = {
         title: title.trim(),
         urls: urls.split("\n").map((u) => u.trim()).filter(Boolean),
         username: username.trim() || null,
         folder: folder.trim() || null,
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
-      }, payload);
+        rotate_every_days: hasRotatingSecret(kind) ? rotateEvery : null,
+      };
+      // Editing keeps what this form does not show (project, environment).
+      const meta = existing ? metaFromRow(existing, fields) : fields;
+      const id = await ipc.saveItem(existing?.id ?? null, meta, payload);
       onSaved(id);
     } catch (e) {
       error = errorMessage(e);
@@ -250,6 +257,18 @@
         <div class="field">
           <label for="holder">Name on card</label>
           <input id="holder" bind:value={payload.holder} />
+        </div>
+      {/if}
+
+      {#if hasRotatingSecret(kind)}
+        <div class="field">
+          <label for="rotate">Rotate every</label>
+          <select id="rotate" value={rotateEvery ?? ""}
+            onchange={(e) => { const v = e.currentTarget.value; rotateEvery = v ? Number(v) : null; }}>
+            {#each ROTATION_CHOICES as choice (choice ?? "none")}
+              <option value={choice ?? ""}>{choice == null ? "No reminder" : `${choice} days`}</option>
+            {/each}
+          </select>
         </div>
       {/if}
 

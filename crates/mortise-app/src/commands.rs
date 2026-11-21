@@ -245,7 +245,20 @@ pub fn reveal(state: State<'_, AppState>, id: String) -> CmdResult<ItemPayload> 
     let item_id = id_from_hex(&id).ok_or_else(|| CmdError::bad_request("Malformed item id."))?;
     state.with_vault(|vault| {
         let v = vault.ok_or_else(|| state.no_vault_error())?;
-        Ok(v.reveal(item_id)?)
+        // The previous value stays in Rust: restoring happens here, so the
+        // webview has no use for a second live secret.
+        Ok(v.reveal(item_id)?.without_previous())
+    })
+}
+
+/// Swap an item back to its previous value, within the restore window.
+#[tauri::command]
+pub fn restore_previous(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state.touch();
+    let item_id = id_from_hex(&id).ok_or_else(|| CmdError::bad_request("Malformed item id."))?;
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+        Ok(v.restore_previous(item_id)?)
     })
 }
 
@@ -431,16 +444,11 @@ pub fn import_env(
         let v = vault.ok_or_else(|| state.no_vault_error())?;
 
         // Existing secrets in this exact environment, by name.
-        let mut here: std::collections::HashMap<String, mortise_crypto::item::ItemId> =
-            std::collections::HashMap::new();
-        for row in v.search("")? {
-            if row.kind == mortise_vault::ItemKind::EnvSecret
-                && row.meta.project.as_deref() == Some(project.as_str())
-                && row.meta.environment.as_deref() == Some(environment.as_str())
-            {
-                here.insert(row.meta.title.clone(), row.id);
-            }
-        }
+        let here: std::collections::HashMap<String, mortise_crypto::item::ItemId> = v
+            .environment_items(&project, &environment)?
+            .into_iter()
+            .map(|row| (row.meta.title, row.id))
+            .collect();
 
         let mut report = EnvImportReport {
             added: 0,
@@ -459,11 +467,9 @@ pub fn import_env(
                 folder: Some(format!("{project}/{environment}")),
                 project: Some(project.clone()),
                 environment: Some(environment.clone()),
-                tags: Vec::new(),
-            };
+                tags: Vec::new(), ..Default::default() };
             let payload = mortise_vault::ItemPayload::EnvSecret {
-                value: var.value.clone(),
-            };
+                value: var.value.clone(), previous: None };
 
             match here.get(&var.key) {
                 Some(&id) => {
@@ -471,7 +477,7 @@ pub fn import_env(
                     // the sync traffic, to what actually changed.
                     let same = matches!(
                         v.reveal(id)?,
-                        mortise_vault::ItemPayload::EnvSecret { ref value } if *value == var.value
+                        mortise_vault::ItemPayload::EnvSecret { ref value, .. } if *value == var.value
                     );
                     if same {
                         report.unchanged += 1;
@@ -534,31 +540,7 @@ pub fn copy_env(
     let text = state.with_vault(|vault| -> CmdResult<Zeroizing<String>> {
         let v = vault.ok_or_else(|| state.no_vault_error())?;
 
-        let mut rows: Vec<_> = v
-            .search("")?
-            .into_iter()
-            .filter(|row| {
-                row.kind == mortise_vault::ItemKind::EnvSecret
-                    && row.meta.project.as_deref() == Some(project.as_str())
-                    && row.meta.environment.as_deref() == Some(environment.as_str())
-            })
-            .collect();
-        // Alphabetical, so the file diffs against the last export rather than
-        // against the order things happened to be created in.
-        rows.sort_by(|a, b| a.meta.title.cmp(&b.meta.title));
-
-        let mut vars = Vec::new();
-        for row in rows {
-            // Bound then matched by reference: ItemPayload is ZeroizeOnDrop,
-            // so a field cannot be moved out of a temporary.
-            let payload = v.reveal(row.id)?;
-            if let mortise_vault::ItemPayload::EnvSecret { value } = &payload {
-                vars.push(envfile::EnvVar {
-                    key: row.meta.title,
-                    value: value.clone(),
-                });
-            }
-        }
+        let vars = v.environment_vars(&project, &environment)?;
         if vars.is_empty() {
             return Err(CmdError::bad_request("No secrets in that environment."));
         }
@@ -777,7 +759,7 @@ fn field_of(payload: &ItemPayload, field: &str) -> Option<Zeroizing<String>> {
         (ItemPayload::Login { notes, .. }, "notes") => notes.clone()?,
         (ItemPayload::SecureNote { body }, "body") => body.clone(),
         (ItemPayload::ApiKey { key, .. }, "key") => key.clone(),
-        (ItemPayload::EnvSecret { value }, "value") => value.clone(),
+        (ItemPayload::EnvSecret { value, .. }, "value") => value.clone(),
         (ItemPayload::Card { number, .. }, "number") => number.clone(),
         (ItemPayload::Card { cvv, .. }, "cvv") => cvv.clone(),
         _ => return None,
@@ -850,6 +832,7 @@ pub fn save_capture(state: State<'_, AppState>, title: Option<String>) -> CmdRes
         tags: Vec::new(),
         project: None,
         environment: None,
+        ..Default::default()
     };
     let payload = mortise_vault::ItemPayload::Login {
         password: capture.password.to_string(),
@@ -1174,7 +1157,7 @@ pub async fn create_project_invite(
                 .collect();
             for row in &rows {
                 let payload = account.reveal(row.id)?;
-                if let mortise_vault::ItemPayload::EnvSecret { value } = &payload {
+                if let mortise_vault::ItemPayload::EnvSecret { value, .. } = &payload {
                     shared.upsert_project_env_secret(
                         row.meta.environment.as_deref().unwrap_or("dev"),
                         &row.meta.title,
@@ -1545,4 +1528,73 @@ fn sync_error(e: mortise_sync::Error) -> CmdError {
             CmdError::bad_request("Sync failed.")
         }
     }
+}
+
+/// The oldest command-line request waiting for approval, if any.
+#[tauri::command]
+pub fn pending_cli_request(
+    access: State<'_, crate::cli::access::CliAccess>,
+) -> Option<crate::cli::access::RequestSummary> {
+    access.next_pending()
+}
+
+/// Answer a command-line request.
+///
+/// Like browser pairing, only a click in this window can approve: the
+/// request itself comes from a local process the app does not trust.
+#[tauri::command]
+pub fn answer_cli_request(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    access: State<'_, crate::cli::access::CliAccess>,
+    id: String,
+    answer: crate::cli::access::Answer,
+) -> CmdResult<()> {
+    use tauri::Emitter;
+
+    state.touch();
+    if access.answer(&id, answer) {
+        let _ = app.emit("cli-access-answered", ());
+        Ok(())
+    } else {
+        Err(CmdError::bad_request(
+            "That request is no longer waiting. Run the command again.",
+        ))
+    }
+}
+
+/// Live command-line grants.
+#[tauri::command]
+pub fn list_cli_grants(
+    access: State<'_, crate::cli::access::CliAccess>,
+) -> Vec<crate::cli::access::GrantSummary> {
+    access.grants(crate::cli::access::process_alive)
+}
+
+/// End a command-line grant now.
+#[tauri::command]
+pub fn revoke_cli_grant(
+    access: State<'_, crate::cli::access::CliAccess>,
+    id: String,
+) -> CmdResult<()> {
+    if access.revoke(&id) {
+        Ok(())
+    } else {
+        Err(CmdError::bad_request("That grant has already ended."))
+    }
+}
+
+/// The most recent command-line accesses, newest first. Never values.
+#[tauri::command]
+pub fn cli_access_log(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> CmdResult<Vec<mortise_vault::access_log::AccessEvent>> {
+    let limit = limit
+        .unwrap_or(100)
+        .min(mortise_vault::access_log::MAX_ENTRIES);
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+        Ok(v.access_log(limit)?)
+    })
 }

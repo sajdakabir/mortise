@@ -243,10 +243,17 @@ pub fn parse<R: Read>(reader: R) -> Result<(Vec<(ItemMeta, ItemPayload)>, ParseR
         // an item whose only content sat in a field the UI hides by default.
         let payload = match (kind.as_deref(), password) {
             (Some("apikey" | "api key" | "api_key" | "token"), Some(secret)) => {
-                ItemPayload::ApiKey { key: secret, notes }
+                ItemPayload::ApiKey {
+                    key: secret,
+                    notes,
+                    previous: None,
+                }
             }
             (Some("env" | "envsecret" | "env secret" | "secret"), Some(secret)) => {
-                ItemPayload::EnvSecret { value: secret }
+                ItemPayload::EnvSecret {
+                    value: secret,
+                    previous: None,
+                }
             }
             (_, Some(password)) => ItemPayload::Login {
                 password,
@@ -275,6 +282,7 @@ pub fn parse<R: Read>(reader: R) -> Result<(Vec<(ItemMeta, ItemPayload)>, ParseR
             project,
             environment,
             tags: Vec::new(),
+            ..Default::default()
         };
 
         items.push((meta, payload));
@@ -315,7 +323,7 @@ mod tests {
             matches!(&items[0].1, ItemPayload::ApiKey { key, .. } if key == "placeholder-key-abc")
         );
         assert!(
-            matches!(&items[1].1, ItemPayload::EnvSecret { value } if value == "postgres://localhost/acme")
+            matches!(&items[1].1, ItemPayload::EnvSecret { value, .. } if value == "postgres://localhost/acme")
         );
     }
 

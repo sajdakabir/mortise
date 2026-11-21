@@ -60,6 +60,14 @@ fn cache_aad(item: ItemId) -> Vec<u8> {
     aad
 }
 
+/// The parts of an existing item row a write needs.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ExistingRow {
+    version: u32,
+    created_at_ms: u64,
+    updated_at_ms: u64,
+}
+
 impl Vault {
     /// Create or replace an environment secret using the deterministic id from
     /// crypto-spec §6.7. Concurrent writes to the same `(environment, KEY)`
@@ -83,14 +91,7 @@ impl Vault {
             environment,
             key,
         )?;
-        let existing: Option<(u32, i64)> = self
-            .conn()
-            .query_row(
-                "SELECT version, created_at_ms FROM item WHERE item_id = ?1 AND deleted = 0",
-                params![id.as_bytes().as_slice()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
+        let existing = self.existing_row(id)?;
         let meta = ItemMeta {
             title: key.to_string(),
             environment: Some(environment.to_string()),
@@ -98,39 +99,108 @@ impl Vault {
         };
         let payload = ItemPayload::EnvSecret {
             value: value.to_string(),
+            previous: None,
         };
-        let (version, created) = existing.map_or((1, None), |(version, created)| {
-            (version.saturating_add(1), Some(created as u64))
-        });
-        self.write_item(id, version, &meta, &payload, created)?;
+        self.write_tracked(id, existing, &meta, &payload)?;
         Ok(id)
     }
 
     /// Store a new item. Returns its generated id.
     pub fn create_item(&mut self, meta: &ItemMeta, payload: &ItemPayload) -> Result<ItemId> {
         let id = ItemId::generate()?;
-        self.write_item(id, 1, meta, payload, None)?;
+        self.write_tracked(id, None, meta, payload)?;
         Ok(id)
     }
 
     /// Replace an item's metadata and payload, bumping its version.
+    ///
+    /// Rotation bookkeeping is the vault's: `rotated_at_ms` and the previous
+    /// value are derived from what changed, whatever the caller passed.
     pub fn update_item(
         &mut self,
         id: ItemId,
         meta: &ItemMeta,
         payload: &ItemPayload,
     ) -> Result<()> {
-        let (version, created): (u32, i64) = self
+        let existing = self.existing_row(id)?.ok_or(Error::ItemNotFound)?;
+        self.write_tracked(id, Some(existing), meta, payload)
+    }
+
+    /// Version, creation and last-update time of a live item.
+    pub(crate) fn existing_row(&self, id: ItemId) -> Result<Option<ExistingRow>> {
+        Ok(self
             .conn()
             .query_row(
-                "SELECT version, created_at_ms FROM item WHERE item_id = ?1 AND deleted = 0",
+                "SELECT version, created_at_ms, updated_at_ms FROM item
+                 WHERE item_id = ?1 AND deleted = 0",
                 params![id.as_bytes().as_slice()],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| {
+                    Ok(ExistingRow {
+                        version: r.get(0)?,
+                        created_at_ms: r.get::<_, i64>(1)? as u64,
+                        updated_at_ms: r.get::<_, i64>(2)? as u64,
+                    })
+                },
             )
-            .optional()?
-            .ok_or(Error::ItemNotFound)?;
+            .optional()?)
+    }
 
-        self.write_item(id, version + 1, meta, payload, Some(created as u64))
+    /// Write with rotation bookkeeping applied (see [`crate::rotation`]).
+    fn write_tracked(
+        &mut self,
+        id: ItemId,
+        existing: Option<ExistingRow>,
+        meta: &ItemMeta,
+        payload: &ItemPayload,
+    ) -> Result<()> {
+        let mut meta = meta.clone();
+        let mut payload = payload.clone();
+        match existing {
+            None => {
+                crate::rotation::apply(None, &mut meta, &mut payload, now_ms());
+                self.write_item(id, 1, &meta, &payload, None)
+            }
+            Some(row) => {
+                let before_meta = self.item_meta(id)?;
+                let before_payload = self.reveal(id)?;
+                crate::rotation::apply(
+                    Some(crate::rotation::Before {
+                        meta: &before_meta,
+                        payload: &before_payload,
+                        updated_at_ms: row.updated_at_ms,
+                    }),
+                    &mut meta,
+                    &mut payload,
+                    now_ms(),
+                );
+                self.write_item(
+                    id,
+                    row.version.saturating_add(1),
+                    &meta,
+                    &payload,
+                    Some(row.created_at_ms),
+                )
+            }
+        }
+    }
+
+    /// Write exactly what is given, bumping the version. For the rotation
+    /// module's own changes (restore, purge), which set the bookkeeping
+    /// fields deliberately.
+    pub(crate) fn rewrite_item(
+        &mut self,
+        id: ItemId,
+        meta: &ItemMeta,
+        payload: &ItemPayload,
+    ) -> Result<()> {
+        let row = self.existing_row(id)?.ok_or(Error::ItemNotFound)?;
+        self.write_item(
+            id,
+            row.version.saturating_add(1),
+            meta,
+            payload,
+            Some(row.created_at_ms),
+        )
     }
 
     fn write_item(

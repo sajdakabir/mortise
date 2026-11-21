@@ -139,6 +139,8 @@ fn a_known_viewer_cannot_edit_items_or_project_metadata_locally() {
     p.b.add_shared_project_environment("dev").unwrap();
     let before = p.b.unpushed_changes(1000).unwrap().len();
     let manifest = p.b.shared_project_manifest().unwrap();
+    // As stored, including the fields the vault maintains itself.
+    let stored_meta = p.b.item_meta(id).unwrap();
 
     let demotion =
         p.a.issue_acl_op(AclOp::ChangeRole {
@@ -158,7 +160,7 @@ fn a_known_viewer_cannot_edit_items_or_project_metadata_locally() {
     assert!(p.b.set_shared_project_info("Changed", "").is_err());
     assert!(p.b.add_shared_project_environment("prod").is_err());
     assert_eq!(p.b.unpushed_changes(1000).unwrap().len(), before);
-    assert_eq!(p.b.item_meta(id).unwrap(), meta);
+    assert_eq!(p.b.item_meta(id).unwrap(), stored_meta);
     assert_eq!(p.b.reveal(id).unwrap(), payload);
     assert_eq!(p.b.shared_project_manifest().unwrap(), manifest);
 
