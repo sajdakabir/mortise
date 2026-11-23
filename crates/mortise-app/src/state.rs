@@ -40,7 +40,13 @@ struct Inner {
     vault: Option<Vault>,
     last_activity: Instant,
     idle_timeout: Duration,
+    /// When expired previous values were last wiped. `None` after a lock,
+    /// so the first tick after an unlock wipes them.
+    last_purge: Option<Instant>,
 }
+
+/// How often expired previous values are wiped while unlocked.
+pub const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// Shared application state.
 pub struct AppState {
@@ -76,6 +82,7 @@ impl AppState {
                 vault: None,
                 last_activity: Instant::now(),
                 idle_timeout: DEFAULT_IDLE_TIMEOUT,
+                last_purge: None,
             }),
             pending_association: Mutex::new(None),
             pending_token: Mutex::new(None),
@@ -221,10 +228,28 @@ impl AppState {
         let idle = inner.last_activity.elapsed();
         let timeout = inner.idle_timeout;
 
+        let purge_due = inner
+            .last_purge
+            .is_none_or(|at| at.elapsed() >= PURGE_INTERVAL);
         match inner.vault.as_mut() {
             Some(v) if v.is_unlocked() && idle >= timeout => {
                 v.lock();
+                inner.last_purge = None;
                 true
+            }
+            Some(v) if v.is_unlocked() && purge_due => {
+                // Wipe previous values past their restore window. Riding on
+                // the auto-lock clock: it already runs every few seconds and
+                // only acts while unlocked, which is when wiping is possible.
+                if let Err(e) = v.purge_expired_previous() {
+                    eprintln!("mortise: could not wipe expired previous values: {e}");
+                }
+                inner.last_purge = Some(Instant::now());
+                false
+            }
+            Some(v) if !v.is_unlocked() => {
+                inner.last_purge = None;
+                false
             }
             _ => false,
         }

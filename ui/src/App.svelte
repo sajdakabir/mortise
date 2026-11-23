@@ -4,6 +4,7 @@
   import Vault from "./views/Vault.svelte";
   import PairingPrompt from "./lib/PairingPrompt.svelte";
   import CaptureToast from "./lib/CaptureToast.svelte";
+  import CliPrompt from "./lib/CliPrompt.svelte";
   import ProjectSharing from "./lib/ProjectSharing.svelte";
   import { ipc, isMock, onVaultLocked, onProjectInvite } from "./lib/ipc";
   import type { VaultStatus } from "./lib/types";
@@ -95,6 +96,7 @@
      moment, including while the vault is locked or a form is open, and the
      answer has to be reachable from wherever the user happens to be. -->
 <PairingPrompt onPaired={refreshStatus} />
+<CliPrompt />
 <CaptureToast onChanged={() => { dataRevision += 1; refreshStatus(); }} />
 <ProjectSharing bind:target={shareTarget} bind:join={joinLink}
   unlocked={status?.unlocked ?? false} hidden={!status?.searchable || unlocking}

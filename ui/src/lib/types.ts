@@ -11,6 +11,15 @@ export interface ItemRow {
   environment: string | null;
   tags: string[];
   updated_at_ms: number;
+  /** Rotation policy in days, or null for none. */
+  rotate_every_days: number | null;
+  /** When the secret last changed (best known for older items). */
+  rotated_at_ms: number | null;
+  /** When rotation is due, if there is a policy. */
+  rotation_due_at_ms: number | null;
+  overdue: boolean;
+  /** Until when the previous value can be restored, if one is kept. */
+  previous_until_ms: number | null;
 }
 
 export interface VaultStatus {
@@ -31,6 +40,59 @@ export interface MetaInput {
   username: string | null;
   folder: string | null;
   tags: string[];
+  project?: string | null;
+  environment?: string | null;
+  rotate_every_days?: number | null;
+}
+
+/** Policies offered in the editor. `null` is "no policy". */
+export const ROTATION_CHOICES: (number | null)[] = [null, 30, 60, 90, 180, 365];
+
+/** Kinds whose secret change counts as a rotation. */
+export function hasRotatingSecret(kind: ItemKind): boolean {
+  return kind === "login" || kind === "apikey" || kind === "env";
+}
+
+/** Kinds that keep a previous value for restore. */
+export function keepsPrevious(kind: ItemKind): boolean {
+  return kind === "apikey" || kind === "env";
+}
+
+/**
+ * The metadata an existing row already has, as a save would send it.
+ *
+ * Every save sends the whole metadata, so anything left out is cleared.
+ * Building it from the row in one place is what keeps a "rotate" or an edit
+ * from quietly dropping a project, environment or rotation policy.
+ */
+export function metaFromRow(row: ItemRow, changes: Partial<MetaInput> = {}): MetaInput {
+  return {
+    title: row.title,
+    urls: row.urls,
+    username: row.username,
+    folder: row.folder,
+    tags: row.tags,
+    project: row.project,
+    environment: row.environment,
+    rotate_every_days: row.rotate_every_days,
+    ...changes,
+  };
+}
+
+const DAY = 86_400_000;
+
+function days(n: number): string {
+  return `${n} day${n === 1 ? "" : "s"}`;
+}
+
+/** "Rotated 12 days ago · due in 78 days", or null without a policy. */
+export function rotationSummary(row: ItemRow, now = Date.now()): string | null {
+  if (row.rotate_every_days == null || row.rotation_due_at_ms == null) return null;
+  const age = row.rotated_at_ms == null ? null : Math.max(0, Math.floor((now - row.rotated_at_ms) / DAY));
+  const rotated = age == null ? "" : age === 0 ? "Rotated today · " : `Rotated ${days(age)} ago · `;
+  const left = Math.ceil((row.rotation_due_at_ms - now) / DAY);
+  const due = row.overdue ? `overdue by ${days(Math.max(1, -left))}` : left === 0 ? "due today" : `due in ${days(left)}`;
+  return `${rotated}${due}`;
 }
 
 /** Mirrors the Rust `ItemPayload` enum, which serializes with a `kind` tag. */
@@ -119,6 +181,54 @@ export interface NativeHostStatus {
   extension_id: string | null;
   /** Whether the helper binary is actually present beside the app. */
   proxy_present: boolean;
+}
+
+/** A `mortise run` waiting for approval. Directory and process chain come
+ *  from the kernel; `command` is the client's own claim. */
+export interface CliRequest {
+  id: string;
+  /** `run`: values now. `session`: an agent about to start. */
+  kind: "run" | "session";
+  project: string;
+  environment: string;
+  /** Specific keys, or null for the whole environment. */
+  keys: string[] | null;
+  command: string;
+  directory: string;
+  /** Requesting process first (full path), then its ancestors by name. */
+  process_chain: string[];
+}
+
+export type CliAnswer = "deny" | "once" | "for_eight_hours";
+
+/** A live command-line grant. */
+export interface CliGrant {
+  id: string;
+  kind: "directory" | "agent";
+  /** For an agent session: the agent and its pid. */
+  agent: string | null;
+  project: string;
+  environment: string;
+  directory: string;
+  expires_at_ms: number;
+}
+
+export type CliOutcome =
+  | "allowed_once" | "allowed_for_directory" | "served_by_grant"
+  | "session_started" | "served_by_session"
+  | "denied" | "timed_out" | "refused";
+
+/** One logged command-line access. Never contains a value. */
+export interface CliAccessEvent {
+  at_ms: number;
+  project: string;
+  environment: string;
+  keys: string[] | null;
+  command: string;
+  directory: string;
+  process_chain: string[];
+  outcome: CliOutcome;
+  detail: string | null;
 }
 
 export interface PairedBrowser {

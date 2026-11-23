@@ -20,6 +20,7 @@ mortise-crypto = { path = "../mortise-crypto" }
 mortise-vault = { path = "../mortise-vault" }
 mortise-macos = { path = "../mortise-macos" }
 mortise-proxy = { path = "../mortise-proxy" }
+mortise-cli = { path = "../mortise-cli" }
 mortise-accounts = { path = "../mortise-accounts", default-features = false, features = ["client"] }
 base64 = "0.22"
 tauri = { version = "2.12.1", features = [] }
@@ -33,3 +34,6 @@ sha2 = "0.11.0"
 subtle = "2.6.1"
 mortise-sync = { version = "0.1.0", path = "../mortise-sync" }
 tauri-plugin-dialog = "2.7.3"
+
+[dev-dependencies]
+tempfile = "3.27.0"

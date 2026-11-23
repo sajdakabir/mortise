@@ -78,6 +78,7 @@
   let listEl = $state<HTMLElement | null>(null);
 
   const selected = $derived(rows.find((r) => r.id === selectedId) ?? null);
+  const overdueCount = $derived(rows.filter((r) => r.overdue).length);
   const index = $derived(rows.findIndex((r) => r.id === selectedId));
 
   async function refresh() {
@@ -278,7 +279,7 @@
     {#if mode === "passwords"}
     <div class="listhead spread">
       <span class="faint count">
-        {rows.length}{query ? " found" : status.item_count === 1 ? " item" : " items"}
+        {rows.length}{query ? " found" : status.item_count === 1 ? " item" : " items"}{#if overdueCount}<span class="due-count">&nbsp;· {overdueCount} to rotate</span>{/if}
       </span>
       <button class="ghost tiny" disabled={!status.unlocked} title="New item  ⌘N"
         onclick={() => { editing = "new"; selectedId = null; }}>+ New</button>
@@ -303,6 +304,7 @@
               <span class="t">{row.title}</span>
               <span class="s faint">{row.username ?? KIND_LABEL[row.kind]}</span>
             </span>
+            {#if row.overdue}<span class="due" title="Overdue for rotation">Rotate</span>{/if}
           </button>
         {/each}
       {/if}
@@ -328,7 +330,8 @@
         <button class="primary unlockbtn" onclick={onUnlock}>Unlock</button>
       </div>
     {:else if selected}
-      <ItemDetail item={selected} onEdit={() => (editing = "existing")} onDeleted={onDeleted} />
+      <ItemDetail item={selected} onEdit={() => (editing = "existing")} onDeleted={onDeleted}
+        onChanged={() => onSaved(selected.id)} />
     {:else}
       <GettingStarted
         {status}
@@ -411,6 +414,11 @@
 
   .listhead { padding: var(--s2) var(--s3) var(--s1); flex-shrink: 0; }
   .count { font-size: 11px; font-variant-numeric: tabular-nums; }
+  .due-count { color: var(--danger); }
+  .due {
+    font-size: 10px; color: var(--danger); border: 1px solid currentColor;
+    border-radius: 999px; padding: 0 6px; flex-shrink: 0; margin-left: auto;
+  }
   .tiny { font-size: 11px; padding: 3px 8px; }
 
   /* The workspace switcher. Sits above search because it changes what search

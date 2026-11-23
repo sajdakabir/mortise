@@ -68,6 +68,7 @@ fn blank_metadata_fields_are_dropped() {
         tags: vec!["dev".into(), " ".into()],
         project: None,
         environment: None,
+        rotate_every_days: Some(0),
     }
     .into();
 
@@ -76,6 +77,10 @@ fn blank_metadata_fields_are_dropped() {
     assert_eq!(meta.username, None);
     assert_eq!(meta.folder, None);
     assert_eq!(meta.tags, vec!["dev".to_string()]);
+    assert_eq!(
+        meta.rotate_every_days, None,
+        "zero days would be always overdue"
+    );
 }
 
 #[test]
@@ -88,12 +93,14 @@ fn populated_metadata_is_preserved() {
         tags: vec!["dev".into(), "ci".into()],
         project: None,
         environment: None,
+        rotate_every_days: Some(90),
     }
     .into();
 
     assert_eq!(meta.username.as_deref(), Some("octocat"));
     assert_eq!(meta.folder.as_deref(), Some("Work"));
     assert_eq!(meta.tags.len(), 2);
+    assert_eq!(meta.rotate_every_days, Some(90));
 }
 
 /// The loopback exemption must look at the host, not anywhere in the string.

@@ -26,7 +26,10 @@ use serde::{Deserialize, Serialize};
 
 use mortise_crypto::aead;
 
+use crate::envfile::EnvVar;
 use crate::error::{Error, Result};
+use crate::items::ItemSummary;
+use crate::model::{ItemKind, ItemPayload};
 use crate::vault::Vault;
 
 /// Environments a new project starts with.
@@ -182,6 +185,58 @@ impl Vault {
         self.conn()
             .execute("DELETE FROM project WHERE project_id = ?1", params![id])?;
         Ok(())
+    }
+
+    /// The project called `name`, compared the way [`Vault::create_project`]
+    /// compares names: trimmed and case-insensitive.
+    pub fn project_named(&self, name: &str) -> Result<Option<Project>> {
+        let name = name.trim();
+        Ok(self
+            .projects()?
+            .into_iter()
+            .find(|p| p.name.eq_ignore_ascii_case(name)))
+    }
+
+    /// Every environment secret filed under exactly `project` / `environment`,
+    /// sorted by key.
+    ///
+    /// Metadata only, so it works while locked. This is the single definition
+    /// of "what is in an environment" — import, export and the command line
+    /// all go through it rather than each repeating the filter.
+    pub fn environment_items(&self, project: &str, environment: &str) -> Result<Vec<ItemSummary>> {
+        let mut rows: Vec<ItemSummary> = self
+            .search("")?
+            .into_iter()
+            .filter(|row| {
+                row.kind == ItemKind::EnvSecret
+                    && row.meta.project.as_deref() == Some(project)
+                    && row.meta.environment.as_deref() == Some(environment)
+            })
+            .collect();
+        // Alphabetical, so an exported file diffs against the last export
+        // rather than against the order things happened to be created in.
+        rows.sort_by(|a, b| a.meta.title.cmp(&b.meta.title));
+        Ok(rows)
+    }
+
+    /// The decrypted variables in `project` / `environment`, sorted by key.
+    ///
+    /// Needs the vault unlocked. An environment with nothing in it is an empty
+    /// list, not an error: whether that is a problem is the caller's call.
+    pub fn environment_vars(&self, project: &str, environment: &str) -> Result<Vec<EnvVar>> {
+        let mut vars = Vec::new();
+        for row in self.environment_items(project, environment)? {
+            // Bound then matched by reference: ItemPayload is ZeroizeOnDrop,
+            // so a field cannot be moved out of a temporary.
+            let payload = self.reveal(row.id)?;
+            if let ItemPayload::EnvSecret { value, .. } = &payload {
+                vars.push(EnvVar {
+                    key: row.meta.title,
+                    value: value.clone(),
+                });
+            }
+        }
+        Ok(vars)
     }
 
     fn read_project(&self, id: &[u8]) -> Result<(Sealed, u64)> {

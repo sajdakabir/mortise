@@ -129,10 +129,8 @@ fn environment_secrets_use_stable_ids_and_replace_the_same_key() {
 
     assert_eq!(first, second);
     assert_eq!(project.item_count().unwrap(), 1);
-    assert_eq!(
-        project.reveal(first).unwrap(),
-        mortise_vault::model::ItemPayload::EnvSecret {
-            value: "two".into()
-        }
-    );
+    let payload = project.reveal(first).unwrap();
+    assert_eq!(payload.primary_secret(), Some("two"));
+    // Replacing a value is a rotation, so the old one stays restorable.
+    assert_eq!(payload.previous().map(|p| p.value.as_str()), Some("one"));
 }

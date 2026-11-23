@@ -12,6 +12,7 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod access;
+pub mod access_log;
 pub mod changelog;
 pub mod enroll;
 pub mod envfile;
@@ -22,6 +23,7 @@ pub mod model;
 pub mod origin;
 pub mod project_share;
 pub mod projects;
+pub mod rotation;
 pub mod schema;
 pub mod vault;
 
