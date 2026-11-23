@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { ipc } from "../lib/ipc";
+  import { ipc, onCliQueueChanged } from "../lib/ipc";
   import Accounts from "../lib/Accounts.svelte";
   import BrowserConnector from "../lib/BrowserConnector.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import {
     errorMessage, isCmdError,
-    type ImportReport, type PairedBrowser, type SyncStatus, type VaultStatus,
+    type CliGrant, type ImportReport, type PairedBrowser, type SyncStatus, type VaultStatus,
   } from "../lib/types";
 
   let { status, onStatus, onClose, onUnlock, accountInvite = null, onInviteHandled }:
@@ -34,6 +34,28 @@
 
   async function refreshBrowsers() {
     browsers = await ipc.listBrowsers();
+  }
+
+  let cliGrants = $state<CliGrant[]>([]);
+
+  async function refreshCliGrants() {
+    cliGrants = await ipc.listCliGrants();
+  }
+
+  async function revokeCliGrant(id: string) {
+    busy = true;
+    try {
+      await ipc.revokeCliGrant(id);
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = false;
+      await refreshCliGrants();
+    }
+  }
+
+  function until(ms: number): string {
+    return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   }
 
   async function refreshSync() {
@@ -91,6 +113,15 @@
   $effect(() => {
     refreshBrowsers();
     refreshSync();
+  });
+
+  // An "Allow for 8 hours" answered in the prompt adds a grant; keep the list
+  // current while this pane is open.
+  $effect(() => {
+    let stop: (() => void) | undefined;
+    onCliQueueChanged(refreshCliGrants).then((fn) => { stop = fn; }).catch(() => {});
+    refreshCliGrants();
+    return () => stop?.();
   });
 
   /// The picker hands back a path, never the file's bytes. Rust opens and
@@ -235,6 +266,32 @@
     </section>
 
     <section>
+      <div class="label">
+        <h3>Command line</h3>
+        <p class="faint">
+          <code>mortise run -- npm run dev</code> starts a command with a project's
+          secrets in its environment, so they never sit in a <code>.env</code> file.
+          Each new directory asks here first.
+        </p>
+      </div>
+      {#if cliGrants.length === 0}
+        <p class="note faint">No commands are allowed right now.</p>
+      {:else}
+        <ul class="grants">
+          {#each cliGrants as grant (grant.id)}
+            <li class="spread">
+              <span class="label">
+                <strong>{grant.project} / {grant.environment}</strong>
+                <span class="faint">from <code>{grant.directory}</code> until {until(grant.expires_at_ms)}</span>
+              </span>
+              <button disabled={busy} onclick={() => revokeCliGrant(grant.id)}>Revoke</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <section>
       <div class="spread">
         <div class="label">
           <h3>Unlock with Touch ID</h3>
@@ -349,6 +406,9 @@
   .label p { margin: 0; font-size: 12px; line-height: 1.55; max-width: 44ch; }
   button { flex-shrink: 0; }
   .row { display: flex; gap: 8px; }
+  .grants { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+  .grants li { align-items: center; font-size: 12px; }
+  .grants .label { display: grid; gap: 2px; }
   .relay { display: flex; gap: 8px; margin-top: 10px; }
   .relay input { flex: 1; }
   .synced { margin-top: 10px; align-items: center; }

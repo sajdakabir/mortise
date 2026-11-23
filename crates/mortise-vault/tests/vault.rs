@@ -702,3 +702,67 @@ fn a_malformed_project_id_is_refused_not_fatal() {
         assert!(f.vault.delete_project(bad).is_err(), "{bad:?}");
     }
 }
+
+fn env_secret(project: &str, environment: &str, key: &str, value: &str) -> (ItemMeta, ItemPayload) {
+    (
+        ItemMeta {
+            title: key.into(),
+            project: Some(project.into()),
+            environment: Some(environment.into()),
+            ..Default::default()
+        },
+        ItemPayload::EnvSecret {
+            value: value.into(),
+        },
+    )
+}
+
+/// One definition of "what is in an environment", shared by export and the
+/// command line: exact project and environment, env secrets only, sorted.
+#[test]
+fn an_environment_holds_exactly_its_own_secrets_sorted() {
+    let mut f = Fixture::new();
+    for (p, e, k, v) in [
+        ("api", "dev", "ZED", "z"),
+        ("api", "dev", "ALPHA", "a"),
+        ("api", "prod", "ALPHA", "prod-a"),
+        ("web", "dev", "ALPHA", "web-a"),
+    ] {
+        let (meta, payload) = env_secret(p, e, k, v);
+        f.vault.create_item(&meta, &payload).unwrap();
+    }
+    // A login filed under the same project is not an environment variable.
+    let (mut meta, payload) = login("api login");
+    meta.project = Some("api".into());
+    meta.environment = Some("dev".into());
+    f.vault.create_item(&meta, &payload).unwrap();
+
+    let vars = f.vault.environment_vars("api", "dev").unwrap();
+    let pairs: Vec<(&str, &str)> = vars
+        .iter()
+        .map(|v| (v.key.as_str(), v.value.as_str()))
+        .collect();
+    assert_eq!(pairs, [("ALPHA", "a"), ("ZED", "z")]);
+    assert!(
+        f.vault
+            .environment_vars("api", "staging")
+            .unwrap()
+            .is_empty()
+    );
+
+    // Names work while locked; values do not.
+    f.relock();
+    assert_eq!(f.vault.environment_items("api", "dev").unwrap().len(), 2);
+    assert!(f.vault.environment_vars("api", "dev").is_err());
+}
+
+#[test]
+fn a_project_is_found_by_name_case_insensitively() {
+    let mut f = Fixture::new();
+    f.vault.create_project("Acme-API", "").unwrap();
+    assert_eq!(
+        f.vault.project_named(" acme-api ").unwrap().unwrap().name,
+        "Acme-API"
+    );
+    assert!(f.vault.project_named("acme").unwrap().is_none());
+}

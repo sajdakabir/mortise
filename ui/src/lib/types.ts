@@ -121,6 +121,31 @@ export interface NativeHostStatus {
   proxy_present: boolean;
 }
 
+/** A `mortise run` waiting for approval. Directory and process chain come
+ *  from the kernel; `command` is the client's own claim. */
+export interface CliRequest {
+  id: string;
+  project: string;
+  environment: string;
+  /** Specific keys, or null for the whole environment. */
+  keys: string[] | null;
+  command: string;
+  directory: string;
+  /** Requesting process first (full path), then its ancestors by name. */
+  process_chain: string[];
+}
+
+export type CliAnswer = "deny" | "once" | "for_eight_hours";
+
+/** A live command-line grant. */
+export interface CliGrant {
+  id: string;
+  project: string;
+  environment: string;
+  directory: string;
+  expires_at_ms: number;
+}
+
 export interface PairedBrowser {
   id: string;
   name: string;
