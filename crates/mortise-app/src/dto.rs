@@ -12,6 +12,20 @@ use mortise_crypto::item::ItemId;
 use mortise_vault::{ItemKind, ItemMeta, ItemSummary};
 use serde::{Deserialize, Serialize};
 
+/// Make a string from an untrusted local client safe to put in a UI label.
+///
+/// Control characters are dropped and the length is capped, so a hostile
+/// value cannot add lines that read like the app's own text ("…\n\nApproved
+/// by Apple") or push the real text off screen. Trimmed; may be empty.
+pub fn sanitize_display(raw: &str, max_chars: usize) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control())
+        .take(max_chars)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// Render an item id for the webview.
 pub fn id_to_hex(id: ItemId) -> String {
     id.as_bytes().iter().map(|b| format!("{b:02x}")).collect()

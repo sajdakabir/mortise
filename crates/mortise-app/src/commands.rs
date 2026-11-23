@@ -431,16 +431,11 @@ pub fn import_env(
         let v = vault.ok_or_else(|| state.no_vault_error())?;
 
         // Existing secrets in this exact environment, by name.
-        let mut here: std::collections::HashMap<String, mortise_crypto::item::ItemId> =
-            std::collections::HashMap::new();
-        for row in v.search("")? {
-            if row.kind == mortise_vault::ItemKind::EnvSecret
-                && row.meta.project.as_deref() == Some(project.as_str())
-                && row.meta.environment.as_deref() == Some(environment.as_str())
-            {
-                here.insert(row.meta.title.clone(), row.id);
-            }
-        }
+        let here: std::collections::HashMap<String, mortise_crypto::item::ItemId> = v
+            .environment_items(&project, &environment)?
+            .into_iter()
+            .map(|row| (row.meta.title, row.id))
+            .collect();
 
         let mut report = EnvImportReport {
             added: 0,
@@ -534,31 +529,7 @@ pub fn copy_env(
     let text = state.with_vault(|vault| -> CmdResult<Zeroizing<String>> {
         let v = vault.ok_or_else(|| state.no_vault_error())?;
 
-        let mut rows: Vec<_> = v
-            .search("")?
-            .into_iter()
-            .filter(|row| {
-                row.kind == mortise_vault::ItemKind::EnvSecret
-                    && row.meta.project.as_deref() == Some(project.as_str())
-                    && row.meta.environment.as_deref() == Some(environment.as_str())
-            })
-            .collect();
-        // Alphabetical, so the file diffs against the last export rather than
-        // against the order things happened to be created in.
-        rows.sort_by(|a, b| a.meta.title.cmp(&b.meta.title));
-
-        let mut vars = Vec::new();
-        for row in rows {
-            // Bound then matched by reference: ItemPayload is ZeroizeOnDrop,
-            // so a field cannot be moved out of a temporary.
-            let payload = v.reveal(row.id)?;
-            if let mortise_vault::ItemPayload::EnvSecret { value } = &payload {
-                vars.push(envfile::EnvVar {
-                    key: row.meta.title,
-                    value: value.clone(),
-                });
-            }
-        }
+        let vars = v.environment_vars(&project, &environment)?;
         if vars.is_empty() {
             return Err(CmdError::bad_request("No secrets in that environment."));
         }
@@ -1545,4 +1516,73 @@ fn sync_error(e: mortise_sync::Error) -> CmdError {
             CmdError::bad_request("Sync failed.")
         }
     }
+}
+
+/// The oldest command-line request waiting for approval, if any.
+#[tauri::command]
+pub fn pending_cli_request(
+    access: State<'_, crate::cli::access::CliAccess>,
+) -> Option<crate::cli::access::RequestSummary> {
+    access.next_pending()
+}
+
+/// Answer a command-line request.
+///
+/// Like browser pairing, only a click in this window can approve: the
+/// request itself comes from a local process the app does not trust.
+#[tauri::command]
+pub fn answer_cli_request(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    access: State<'_, crate::cli::access::CliAccess>,
+    id: String,
+    answer: crate::cli::access::Answer,
+) -> CmdResult<()> {
+    use tauri::Emitter;
+
+    state.touch();
+    if access.answer(&id, answer) {
+        let _ = app.emit("cli-access-answered", ());
+        Ok(())
+    } else {
+        Err(CmdError::bad_request(
+            "That request is no longer waiting. Run the command again.",
+        ))
+    }
+}
+
+/// Live command-line grants.
+#[tauri::command]
+pub fn list_cli_grants(
+    access: State<'_, crate::cli::access::CliAccess>,
+) -> Vec<crate::cli::access::GrantSummary> {
+    access.grants(crate::cli::access::process_alive)
+}
+
+/// End a command-line grant now.
+#[tauri::command]
+pub fn revoke_cli_grant(
+    access: State<'_, crate::cli::access::CliAccess>,
+    id: String,
+) -> CmdResult<()> {
+    if access.revoke(&id) {
+        Ok(())
+    } else {
+        Err(CmdError::bad_request("That grant has already ended."))
+    }
+}
+
+/// The most recent command-line accesses, newest first. Never values.
+#[tauri::command]
+pub fn cli_access_log(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> CmdResult<Vec<mortise_vault::access_log::AccessEvent>> {
+    let limit = limit
+        .unwrap_or(100)
+        .min(mortise_vault::access_log::MAX_ENTRIES);
+    state.with_vault(|vault| {
+        let v = vault.ok_or_else(|| state.no_vault_error())?;
+        Ok(v.access_log(limit)?)
+    })
 }

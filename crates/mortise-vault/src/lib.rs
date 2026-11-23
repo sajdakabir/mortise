@@ -12,6 +12,7 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod access;
+pub mod access_log;
 pub mod changelog;
 pub mod enroll;
 pub mod envfile;

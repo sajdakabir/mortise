@@ -17,6 +17,7 @@ import type {
   EnvImportReport,
   EnvCopyReport,
   AccountStatus, AccountAction,
+  CliAccessEvent, CliAnswer, CliGrant, CliRequest,
 } from "./types";
 
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -96,7 +97,26 @@ export const ipc = {
     call<EnvImportReport>("import_env_file", { project, environment, path }),
   copyEnv: (project: string, environment: string) =>
     call<EnvCopyReport>("copy_env", { project, environment }),
+  pendingCliRequest: () => call<CliRequest | null>("pending_cli_request"),
+  answerCliRequest: (id: string, answer: CliAnswer) =>
+    call<void>("answer_cli_request", { id, answer }),
+  listCliGrants: () => call<CliGrant[]>("list_cli_grants"),
+  revokeCliGrant: (id: string) => call<void>("revoke_cli_grant", { id }),
+  cliAccessLog: (limit?: number) => call<CliAccessEvent[]>("cli_access_log", { limit }),
 };
+
+/** Fires when the command-line queue changes: a request arrived, was
+ *  answered, or stopped waiting. The handler should re-read what it shows. */
+export async function onCliQueueChanged(handler: () => void): Promise<() => void> {
+  if (!IN_TAURI) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const stops = await Promise.all([
+    listen("cli-access-requested", handler),
+    listen("cli-access-answered", handler),
+    listen("cli-access-withdrawn", handler),
+  ]);
+  return () => stops.forEach((stop) => stop());
+}
 
 /** Fires when a browser asks to pair. The payload is the browser's name. */
 export async function onBrowserPairingRequest(
@@ -194,11 +214,36 @@ const MOCK_ROWS: ItemRow[] = [
   row("k", "env", "SESSION_SECRET", { project: "acme-web", environment: "prod" }),
 ];
 
+/** Hooks the mock reads from `window`, for tests. */
+function mockWindow(): Window & {
+  mortiseMockCliRequest?: CliRequest | null;
+  mortiseMockCliAnswers?: { id: unknown; answer: unknown }[];
+} {
+  return window;
+}
+
 const mockState = {
   exists: true, unlocked: true, searchable: true,
   accountKeyRemembered: true, biometricEnabled: false,
   rows: [...MOCK_ROWS],
   browsers: [] as PairedBrowser[],
+  cliGrants: [{
+    id: "g1", kind: "directory", agent: null, project: "acme-api", environment: "dev",
+    directory: "/Users/you/code/acme-api", expires_at_ms: Date.now() + 8 * 3600_000,
+  }, {
+    id: "g2", kind: "agent", agent: "claude (pid 4242)", project: "acme-api", environment: "dev",
+    directory: "/Users/you/code/acme-api", expires_at_ms: Date.now() + 8 * 3600_000,
+  }] as CliGrant[],
+  cliLog: [{
+    at_ms: Date.now() - 60_000, project: "acme-api", environment: "dev", keys: null,
+    command: "npm run dev", directory: "/Users/you/code/acme-api",
+    process_chain: ["/usr/local/bin/mortise", "sh", "claude"], outcome: "served_by_session", detail: null,
+  }, {
+    at_ms: Date.now() - 300_000, project: "payroll", environment: "prod", keys: null,
+    command: "curl …", directory: "/tmp",
+    process_chain: ["/usr/local/bin/mortise", "bash"], outcome: "refused",
+    detail: "There is no project called “payroll” in Mortise.",
+  }] as CliAccessEvent[],
   nativeHost: null as string | null,
   relayUrl: null as string | null,
   projects: [
@@ -278,6 +323,23 @@ async function mock<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       mockState.browsers = mockState.browsers.filter((b) => b.id !== args.id);
       return as(undefined);
     case "reject_browser":
+      return as(undefined);
+    // A test (or a reviewer in the browser console) can stage a request by
+    // setting `window.mortiseMockCliRequest`; answers are recorded beside it.
+    case "pending_cli_request":
+      return as(mockWindow().mortiseMockCliRequest ?? null);
+    case "answer_cli_request": {
+      const w = mockWindow();
+      (w.mortiseMockCliAnswers ??= []).push({ id: args.id, answer: args.answer });
+      w.mortiseMockCliRequest = null;
+      return as(undefined);
+    }
+    case "list_cli_grants":
+      return as(mockState.cliGrants);
+    case "cli_access_log":
+      return as(mockState.cliLog);
+    case "revoke_cli_grant":
+      mockState.cliGrants = mockState.cliGrants.filter((g) => g.id !== args.id);
       return as(undefined);
     case "sync_status":
       return as({ relay_url: mockState.relayUrl, pending: 0, cursor: 0 });
