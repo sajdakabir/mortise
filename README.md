@@ -1,5 +1,7 @@
 # Mortise
 
+*Your secrets, encrypted on your Mac before they go anywhere.*
+
 A local-first password manager for macOS, encrypted on your machine and kept there.
 
 The vault is encrypted on your machine and stays there; sync is optional, and the relay that carries it only ever holds
