@@ -1,7 +1,8 @@
 # Mortise
 
-A local-first password manager for macOS. The vault is encrypted on your machine
-and stays there; sync is optional, and the relay that carries it only ever holds
+A local-first password manager for macOS, encrypted on your machine and kept there.
+
+The vault is encrypted on your machine and stays there; sync is optional, and the relay that carries it only ever holds
 ciphertext it has no key for.
 
 > **mor·tise** /ˈmɔːtɪs/ *n.*
