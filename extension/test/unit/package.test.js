@@ -20,6 +20,9 @@ test("both packages contain only runtime files and share the same permissions", 
     assert.deepEqual(manifest.permissions, base.permissions);
     assert.deepEqual(manifest.host_permissions, base.host_permissions);
     assert.deepEqual(manifest.content_scripts, base.content_scripts);
+    assert.deepEqual(manifest.action, base.action);
+    assert.deepEqual(manifest.commands, base.commands);
+    assert.deepEqual(manifest.icons, base.icons);
     assert.equal(manifest.version, base.version);
     assert.equal(manifest.key, undefined);
     if (target === "firefox") {
